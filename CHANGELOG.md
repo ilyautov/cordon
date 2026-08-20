@@ -4,7 +4,13 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versions follo
 
 ## [Unreleased]
 
-The first version has not been released yet. The core is in progress: the `sanitize` module, provenance, intent certificates, and adapters for Claude Code, Cowork and Gemini CLI.
+Nothing yet.
+
+## [0.1.0] - 2026-08-21
+
+The first public version. Three axes work end to end and are covered by 860 tests: the hidden layer is stripped out of untrusted content, provenance remembers where every value came from, and a call is compared against the effect classes of the certificate issued when the human stated the intent. Two harnesses run the same bundle, Claude Code and Gemini CLI.
+
+What this version does not claim: the wiring has not been exercised on a live harness, and one gap is named outright rather than hidden, in the README and in `cordon doctor` alike. Whether `updatedInput` applies without a permission decision is not confirmed by the harness documentation, so argument quarantine in autonomous mode is unverified while the control axis keeps working. Read ["What this is NOT"](README.md#what-this-is-not) before putting this between an autonomous agent and anything that matters.
 
 Page size can no longer switch the defence off. Tree-based HTML parsing grew quadratically: 1 MB took three seconds, 2 MB took fifteen. The `PostToolUse` timeout on Claude Code is ten seconds, and an expired hook there means a pass: no neutralization, no provenance. Ballast on a page was therefore a way to disable Cordon entirely, and it cost the attacker nothing but traffic. Parsing moved to streaming `htmlparser2`: linear, 8.7 MB in 371 ms. Cleaned text is now cut out of the input by ranges instead of being re-serialized from a tree, so a document with nothing hidden comes back byte for byte identical.
 
@@ -22,6 +28,8 @@ The default for an MCP tool result is `source`: without a declaration, the hidde
 
 A hidden layer found in a file that was read does not vanish silently: it is named to the human in the transcript (`systemMessage`) and written to the notification journal as a `notice` record. There is no escalation — honest markup with a comment is no reason to restrict the next call. Provenance remembers such a file by its original text, so an argument assembled out of the hidden layer is still found and still goes to quarantine.
 
+The numbers the READMEs state out loud are now checked in CI rather than trusted. `scripts/check-claims.mjs` compares the test count, the size of the attack corpus and the size of the loyalty corpus against the repository, in both languages. The rule this project follows is a number instead of an adjective, and a number that has quietly gone stale is worse than the adjective it replaced: the reader has no way to tell which claims on the page are still true. The check caught its first stale number immediately, the test count in both READMEs.
+
 `notify.webhook` no longer exists, and a policy that still carries it is refused rather than loaded. The field was parsed, stored, and counted by `cordon doctor` as a notification channel, while nothing in the project ever sent anything to it: the notifier writes a file or stays silent, and there is no network in the core by design. The effect was the precise silence autonomous mode exists to prevent, an owner believing they would hear about a call blocked overnight and hearing nothing, with the one warning that would have told them switched off by the setting itself. Refusing the load is fail-closed here: an unreadable policy denies calls instead of passing them.
 
 The repository grew the files a stranger looks for before trusting a security tool with anything: [QUICKSTART.md](QUICKSTART.md) for the five-minute path, [PRIVACY_POLICY.md](PRIVACY_POLICY.md) for what ends up on disk and for how long, [SUPPORT.md](SUPPORT.md) for which of four channels a question belongs in, [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md), [AGENTS.md](AGENTS.md) for coding agents working here, and a pull-request template built around the three invariants. The privacy page is the one worth reading even if you skip the rest: the provenance store keeps links, paths, e-mail addresses and identifiers taken out of what was read, and a draft holds the answer text in the clear.
@@ -29,3 +37,5 @@ The repository grew the files a stranger looks for before trusting a security to
 The invisible-character guard now covers prose, not only code. It reads markdown and text under `docs`, `.github` and the repository root as well as the sources, because a reader copies a policy example out of the README into their own file, and an invisible character riding along in that snippet is this project's own attack delivered by its own documentation. Writing this round of documentation broke the rule twice before the check was widened.
 
 State sweeping was added. Session state lives for a day after the last event, accumulated display text for an hour. The sweep runs on the user's message and no more than once an hour, driven by a timestamp marker alongside: the `PreToolUse` hot path never walks the directory and pays nothing for the sweep. Only files Cordon wrote itself are deleted, symbolic links are not followed, and files of the session in progress are left alone. A failed sweep stays silent and breaks nothing.
+
+[0.1.0]: https://github.com/ilyautov/cordon/releases/tag/v0.1.0

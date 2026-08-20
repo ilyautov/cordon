@@ -13,3 +13,6 @@ coverage/
 # first event, and a hook that crashed is read by both harnesses as "let
 # it through": the protection switches itself off quietly.
 !plugin/dist
+
+# The CI test report, written next to the sources by the json reporter.
+vitest-report.json

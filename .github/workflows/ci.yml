@@ -13,7 +13,10 @@ jobs:
         with:
           node-version: 22
       - run: npm ci
-      - run: npm test
+      - name: test
+        run: npx vitest run --reporter=default --reporter=json --outputFile=vitest-report.json
+      - name: the numbers in the READMEs are the real ones
+        run: node scripts/check-claims.mjs vitest-report.json
       - run: npm run typecheck
       - run: npm run build
       - name: no-invisible

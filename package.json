@@ -1,21 +1,42 @@
 {
   "name": "cordon",
   "version": "0.1.0",
+  "description": "A deterministic layer between untrusted content and agent actions: it removes the hidden layer, remembers where data came from, and keeps calls inside the boundaries of the intent.",
+  "keywords": [
+    "prompt-injection",
+    "indirect-prompt-injection",
+    "ai-security",
+    "agent-security",
+    "claude-code",
+    "gemini-cli",
+    "mcp",
+    "provenance",
+    "sanitizer"
+  ],
+  "homepage": "https://github.com/ilyautov/cordon#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ilyautov/cordon.git"
+  },
+  "bugs": {
+    "url": "https://github.com/ilyautov/cordon/issues"
+  },
+  "author": "Ilya Utov (https://github.com/ilyautov)",
+  "license": "MIT",
+  "type": "module",
+  "private": true,
   "main": "dist/index.js",
+  "bin": {
+    "cordon": "./dist/cli.js"
+  },
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "test": "vitest run",
     "build": "tsc -p tsconfig.json && chmod +x dist/cli.js && npm run bundle",
     "typecheck": "tsc -p tsconfig.check.json",
     "bundle": "esbuild src/cli.ts --bundle --platform=node --target=node22 --format=esm --outfile=plugin/dist/cli.js --banner:js=\"import{createRequire as __cordonRequire}from'node:module';const require=__cordonRequire(import.meta.url);\" && echo '{ \"type\": \"module\" }' > plugin/dist/package.json && chmod +x plugin/dist/cli.js"
-  },
-  "license": "MIT",
-  "type": "module",
-  "private": true,
-  "engines": {
-    "node": ">=22"
-  },
-  "bin": {
-    "cordon": "./dist/cli.js"
   },
   "dependencies": {
     "htmlparser2": "^10.0.0",
