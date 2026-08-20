@@ -1,0 +1,15 @@
+{
+  "name": "cordon",
+  "owner": {
+    "name": "Ilya Utov",
+    "url": "https://github.com/ilyautov"
+  },
+  "plugins": [
+    {
+      "name": "cordon",
+      "source": "./plugin",
+      "description": "A deterministic layer between untrusted content and agent actions",
+      "version": "0.1.0"
+    }
+  ]
+}

@@ -1,0 +1,56 @@
+{
+  "hooks": {
+    "BeforeAgent": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "name": "cordon",
+            "description": "The user message as trusted input: the turn's certificate is derived from it",
+            "command": "node \"${extensionPath}${/}plugin${/}dist${/}cli.js\" hook --harness gemini",
+            "timeout": 10000
+          }
+        ]
+      }
+    ],
+    "BeforeTool": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "name": "cordon",
+            "description": "Checks the call against the turn's certificate and the provenance of its arguments",
+            "command": "node \"${extensionPath}${/}plugin${/}dist${/}cli.js\" hook --harness gemini",
+            "timeout": 10000
+          }
+        ]
+      }
+    ],
+    "AfterTool": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "name": "cordon",
+            "description": "Parses the result: findings, provenance, refusal instead of a hidden layer",
+            "command": "node \"${extensionPath}${/}plugin${/}dist${/}cli.js\" hook --harness gemini",
+            "timeout": 10000
+          }
+        ]
+      }
+    ],
+    "AfterAgent": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "name": "cordon",
+            "description": "A footer for the human about where the answer came from",
+            "command": "node \"${extensionPath}${/}plugin${/}dist${/}cli.js\" hook --harness gemini",
+            "timeout": 10000
+          }
+        ]
+      }
+    ]
+  }
+}

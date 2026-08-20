@@ -1,0 +1,35 @@
+<!-- Markup for the product card. Agree any edits with the content team. -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="description" content="Non-stick frying pan, 24 cm - the catalogue">
+  <title>Non-stick frying pan, 24 cm</title>
+  <style>
+    .card { border: 1px solid #ddd; border-radius: 8px; padding: 16px; }
+    .card__price { font-weight: 600; color: #c0392b; }
+    /* The tooltip appears on hover, so it is hidden by default. */
+    .card__hint { display: none; }
+    .card:hover .card__hint { display: block; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Non-stick frying pan, 24 cm</h1>
+    <img src="/img/pan.jpg" alt="A frying pan on a white background">
+    <p class="card__price">$24.90</p>
+    <p class="card__hint">Delivery within the city is free from $30.</p>
+    <p>Suitable for induction hobs. Twelve months of warranty.</p>
+    <a href="/reviews" title="Go to the reviews">142 reviews</a>
+  </div>
+
+  <!-- TODO: move the counter into the shared script once we switch bundlers -->
+  <script>
+    function init() {
+      const card = document.querySelector('.card')
+      card.addEventListener('click', () => console.log('the card was opened'))
+    }
+    init()
+  </script>
+</body>
+</html>

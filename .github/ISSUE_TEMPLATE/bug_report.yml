@@ -1,0 +1,41 @@
+name: Bug
+description: Cordon behaves differently from what is documented
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        If your finding is a **bypass** of the defence, do not open an issue.
+        Report that privately: the Security tab > Report a vulnerability.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you got, what you expected to get.
+    validations:
+      required: true
+  - type: textarea
+    id: input
+    attributes:
+      label: Input
+      description: The minimal text or file that reproduces it. Write invisible characters as escape sequences.
+      render: text
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Cordon version and harness
+      placeholder: "0.1.0, Claude Code"
+    validations:
+      required: true
+  - type: dropdown
+    id: kind
+    attributes:
+      label: Direction of the error
+      options:
+        - "False positive: clean text was flagged or blocked"
+        - "Miss: suspicious text passed unflagged"
+        - "Failure: exception, hang, wrong output"
+    validations:
+      required: true

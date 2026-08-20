@@ -1,0 +1,25 @@
+# Changelog
+
+Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versions follow [SemVer](https://semver.org/).
+
+## [Unreleased]
+
+The first version has not been released yet. The core is in progress: the `sanitize` module, provenance, intent certificates, and adapters for Claude Code, Cowork and Gemini CLI.
+
+Page size can no longer switch the defence off. Tree-based HTML parsing grew quadratically: 1 MB took three seconds, 2 MB took fifteen. The `PostToolUse` timeout on Claude Code is ten seconds, and an expired hook there means a pass: no neutralization, no provenance. Ballast on a page was therefore a way to disable Cordon entirely, and it cost the attacker nothing but traffic. Parsing moved to streaming `htmlparser2`: linear, 8.7 MB in 371 ms. Cleaned text is now cut out of the input by ranges instead of being re-serialized from a tree, so a document with nothing hidden comes back byte for byte identical.
+
+A second harness: Gemini CLI, installed as an extension. The same bundle, the same four events, the same policy. Behaviour is deliberately not identical, and the difference is named in the documentation and in `cordon doctor`: there is nothing on this harness to replace a tool result with, so a poisoned result is rejected whole and the cleaned text travels in the rejection reason.
+
+A third axis was added, the output axis: a footer about the influence of untrusted sources appears under the model's answer. It names the sources the answer matches verbatim and does not presume to judge paraphrase. The footer goes to the human and never enters the model's context. Switched off with `output.footer` in the policy.
+
+The output axis no longer writes session state. Accumulated answer text moved into its own file (`drafts/`), so the footer can no longer overwrite provenance written by a neighbouring hook process between its own read and write.
+
+Tool-result substitution is no longer applied to what the human reads as source. A file that was read and shell output reach the model exactly as they sit on disk: `<style>`, `<script>` and comments no longer disappear from them, and the next `Write` no longer overwrites the user's file with the stripped version. For web pages and MCP tool descriptions neutralization works as before. The rationale is recorded in §4.1 of the spec: only what is hidden from the human, in the way the human looks at that source, is removed.
+
+The view of a source is declared in the policy rather than inferred from a tool name. The `toolsReturn` table states what a tool returns: `source` or `rendered`. It exists because an MCP server that reads files did the same damage as the built-in `Read` did before the fix: the model received the file without `<style>`, `<script>` and comments, and writing it back destroyed its content. Guessing by tool name is not possible — the name is chosen by the MCP server (§9.2).
+
+The default for an MCP tool result is `source`: without a declaration, the hidden layer is not stripped from it. The choice is deliberate and in favour of data integrity: file corruption happens always, silently and irreversibly, whereas a pass requires an attacker, is audible to the human, and still runs into the two remaining axes. The price is named: the marketplace-review scenario now requires the line `toolsReturn: {wb_reviews: rendered}`. `cordon doctor` prints the effective default and every declaration; the message to the human distinguishes knowledge ("the human sees this source as source") from the default ("the view of this source is not declared"). The residual risk is recorded in §8 of the spec.
+
+A hidden layer found in a file that was read does not vanish silently: it is named to the human in the transcript (`systemMessage`) and written to the notification journal as a `notice` record. There is no escalation — honest markup with a comment is no reason to restrict the next call. Provenance remembers such a file by its original text, so an argument assembled out of the hidden layer is still found and still goes to quarantine.
+
+State sweeping was added. Session state lives for a day after the last event, accumulated display text for an hour. The sweep runs on the user's message and no more than once an hour, driven by a timestamp marker alongside: the `PreToolUse` hot path never walks the directory and pays nothing for the sweep. Only files Cordon wrote itself are deleted, symbolic links are not followed, and files of the session in progress are left alone. A failed sweep stays silent and breaks nothing.

@@ -1,0 +1,41 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - run: npm test
+      - run: npm run typecheck
+      - run: npm run build
+      - name: no-invisible
+        run: node scripts/no-invisible.mjs
+
+      - name: self-scan
+        run: |
+          # Cordon must pass its own documentation cleanly: a finding there
+          # means either an invisible character that crept into the text, or
+          # the tool mangling its own docs. Files are iterated one by one:
+          # scan reads a single file per run and refuses extra ones.
+          #
+          # docs/scenarios.md is deliberately excluded. It describes attacks,
+          # which means it contains them, and will always produce findings.
+          # Gating on it means either a permanently red build or weakening the
+          # condition until it means nothing.
+          for f in README.md README.ru.md docs/install.md docs/install-gemini.md SECURITY.md CONTRIBUTING.md; do
+            node dist/cli.js scan "$f" --json > /tmp/self-scan.json
+            node -e "
+              const r = require('/tmp/self-scan.json')
+              const bad = r.findings.filter(x => ['invisible','hidden-html','mixed-script'].includes(x.kind))
+              if (bad.length) { console.error('self-scan failed on $f:', JSON.stringify(bad, null, 2)); process.exit(1) }
+              console.log('self-scan ok: $f')
+            "
+          done

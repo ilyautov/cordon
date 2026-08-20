@@ -1,0 +1,10 @@
+{
+  "name": "cordon",
+  "version": "0.1.0",
+  "description": "Deterministic layer between untrusted content and agent actions",
+  "author": {
+    "name": "Ilya Utov"
+  },
+  "homepage": "https://github.com/ilyautov/cordon",
+  "license": "MIT"
+}

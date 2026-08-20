@@ -1,0 +1,15 @@
+node_modules/
+/dist
+build/
+coverage/
+*.log
+.DS_Store
+.env
+.env.*
+
+# The bundle is committed on purpose, and there is one of it for both
+# harnesses: the Claude Code plugin and the Gemini CLI extension call the
+# very same file. Without it an installed hook brings node down on the
+# first event, and a hook that crashed is read by both harnesses as "let
+# it through": the protection switches itself off quietly.
+!plugin/dist

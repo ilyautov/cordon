@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: A Cordon bypass or another vulnerability
+    url: https://github.com/ilyautov/cordon/security/advisories/new
+    about: Do not open a public issue. A bypass of the defence is reported privately, see SECURITY.md.
