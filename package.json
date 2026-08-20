@@ -39,7 +39,7 @@
     "bundle": "esbuild src/cli.ts --bundle --platform=node --target=node22 --format=esm --outfile=plugin/dist/cli.js --banner:js=\"import{createRequire as __cordonRequire}from'node:module';const require=__cordonRequire(import.meta.url);\" && echo '{ \"type\": \"module\" }' > plugin/dist/package.json && chmod +x plugin/dist/cli.js"
   },
   "dependencies": {
-    "htmlparser2": "^10.0.0",
+    "htmlparser2": "^12.0.0",
     "yaml": "^2.9.0"
   },
   "devDependencies": {
