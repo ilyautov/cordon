@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeAll } from 'vitest'
+import { ensureBuiltCli } from './support/built-cli.js'
 import { execFileSync } from 'node:child_process'
 import { writeFileSync, mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -29,7 +30,7 @@ function run(
 
 describe('cordon scan', () => {
   beforeAll(() => {
-    execFileSync('npm', ['run', 'build'], { stdio: 'inherit' })
+    ensureBuiltCli()
   }, 60_000)
 
   it('reads a file and prints the findings', () => {

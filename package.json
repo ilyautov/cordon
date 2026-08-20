@@ -34,7 +34,8 @@
   },
   "scripts": {
     "test": "vitest run",
-    "build": "tsc -p tsconfig.json && chmod +x dist/cli.js && npm run bundle",
+    "build": "npm run build:lib && npm run bundle",
+    "build:lib": "tsc -p tsconfig.json && chmod +x dist/cli.js",
     "typecheck": "tsc -p tsconfig.check.json",
     "bundle": "esbuild src/cli.ts --bundle --platform=node --target=node22 --format=esm --outfile=plugin/dist/cli.js --banner:js=\"import{createRequire as __cordonRequire}from'node:module';const require=__cordonRequire(import.meta.url);\" && echo '{ \"type\": \"module\" }' > plugin/dist/package.json && chmod +x plugin/dist/cli.js"
   },

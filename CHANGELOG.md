@@ -4,7 +4,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versions follo
 
 ## [Unreleased]
 
-Nothing yet.
+A fresh clone can run `npm test`. Five tests started `dist/cli.js` as a separate process without anything having built it, so they failed on a missing file rather than on what they were written to check. They now build it on demand, like their neighbours already did.
+
+The check that the committed bundle still matches the sources works again. It had been disarmed by a neighbour: one test rebuilt everything in `beforeAll`, bundle included, so by the time the check ran the artifact had just been regenerated and matched itself. The build is now split, and what the tests build on demand is `dist/` alone. Verified by changing a string in the sources without rebuilding and watching the check fail, which it did not do before.
 
 ## [0.1.0] - 2026-08-21
 

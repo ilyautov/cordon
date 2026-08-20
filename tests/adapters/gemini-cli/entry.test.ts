@@ -2,9 +2,13 @@ import { execFileSync } from 'node:child_process'
 import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { beforeAll, describe, expect, it } from 'vitest'
+import { ensureBuiltCli } from '../../support/built-cli.js'
 
 const CLI = join(process.cwd(), 'dist', 'cli.js')
+
+// Without this the file is simply missing on a fresh clone, and five tests
+// fail on a build step rather than on anything they were written to check.
 
 function run(args: string[], input: string, home: string): string {
   return execFileSync('node', [CLI, ...args], {
@@ -28,6 +32,10 @@ const shellCall = JSON.stringify({
 })
 
 describe('the entry point for Gemini', () => {
+  beforeAll(() => {
+    ensureBuiltCli()
+  }, 60_000)
+
   it('it rejects a call outside the certificate', () => {
     expect(JSON.parse(run(['hook', '--harness', 'gemini'], shellCall, home())).decision).toBe('deny')
   })

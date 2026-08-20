@@ -13,6 +13,12 @@ jobs:
         with:
           node-version: 22
       - run: npm ci
+      # Only the library half. The committed bundle must NOT be regenerated
+      # before the tests: one of them checks that the bundle in the repository
+      # still matches the sources, and a rebuild would make that check pass by
+      # construction. Building dist/ here also keeps two parallel test workers
+      # from each starting a build of their own.
+      - run: npm run build:lib
       - name: test
         run: npx vitest run --reporter=default --reporter=json --outputFile=vitest-report.json
       - name: the numbers in the READMEs are the real ones

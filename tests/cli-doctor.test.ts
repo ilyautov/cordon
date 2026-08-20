@@ -2,7 +2,8 @@ import { execFileSync } from 'node:child_process'
 import { chmodSync, existsSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeAll, describe, expect, it } from 'vitest'
+import { ensureBuiltCli } from './support/built-cli.js'
 import { doctor } from '../src/cli.js'
 
 function home(): string {
@@ -125,6 +126,12 @@ describe('cordon doctor: a broken installation', () => {
 })
 
 describe('cordon doctor: printing for the human', () => {
+  // The printed output comes from dist/cli.js started as a separate process,
+  // and on a fresh clone that file has not been built yet.
+  beforeAll(() => {
+    ensureBuiltCli()
+  }, 60_000)
+
   it('says out loud that it does not check the wiring', () => {
     // "self-check: ok" without that caveat reads as "the defence is in
     // place". A hook the harness never calls looks from the outside like a
