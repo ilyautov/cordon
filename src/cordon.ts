@@ -37,7 +37,7 @@ export interface CordonOptions {
 
 /**
  * The core's facade. Exactly three entries, matching the adapter contract of
- * §4: trusted input, observing a tool result, deciding on a call.
+ * three: trusted input, observing a tool result, deciding on a call.
  */
 export class Cordon {
   private readonly policy: Policy
@@ -75,10 +75,10 @@ export class Cordon {
     // on every run. Only the requested narrowing comes from disk, and it is
     // applied afresh.
     //
-    // Every hook event is a separate process (§4.2). Without this step the
+    // Every hook event is a separate process. Without this step the
     // directive `cordon: scope read` would not affect a single following
     // call: the certificate would be issued from the full profile, and the
-    // scope would widen by itself between turns, which §4.3 rule 3 does not
+    // scope would widen by itself between turns, which the narrowing rule does not
     // allow — only a new user message can widen the set.
     //
     // Storing the narrowing rather than the certificate matters: `narrow`
@@ -95,7 +95,7 @@ export class Cordon {
     this.turn += 1
     this.cert = issue(this.policy, this.turn)
     // The previous narrowing is lifted before the new directive is parsed.
-    // This is §4.3 rule 3 in full: only the user widens the set of rights, and
+    // This is the narrowing rule in full: only the user widens the set of rights, and
     // the message they have just written is that widening.
     this.directive = null
     const warnings: string[] = []

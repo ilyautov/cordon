@@ -36,7 +36,7 @@ function strings(value: unknown): string[] {
  * Issues a certificate from the policy profile.
  *
  * Not a line of untrusted content reaches here, and none can: the input is
- * configuration only. This is the very rule of §4.3 that leaves Task Shield
+ * configuration only. This is the very rule that leaves Task Shield
  * vulnerable to an adaptive attack and Cordon not.
  *
  * The lists are copied rather than reused: a certificate referencing the

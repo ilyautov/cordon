@@ -44,8 +44,7 @@ describe('scenario: comparing products from a web search', () => {
     const envelope = cordon.observe(page, vendor)
 
     // Cordon separates data from commands. It cannot judge the truthfulness of
-    // visible text and does not undertake to: see sections 2 and 5.3 of the
-    // specification.
+    // visible text and does not undertake to.
     expect(envelope.text).toContain('the best solution on the market')
     expect(envelope.findings).toEqual([])
   })
@@ -92,8 +91,8 @@ describe('scenario: what stays uncaught in web research', () => {
     // pointless: an agent that has read the page must be able to retell it.
     // Cordon switched off because it got in the way of legitimate work
     // protects zero percent.
-    // The other side of this is named in section 8 of the specification as the
-    // worm vector.
+    // The other side of this is the worm vector, and it is left open
+    // knowingly: an agent may republish an injection it read.
     const decision = cordon.gate({
       tool: 'publish_comparison',
       args: {

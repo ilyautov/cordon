@@ -24,7 +24,7 @@ We reply within 72 hours. If there is no reply in that time, send it again: the 
 
 ## What does not count as a vulnerability
 
-The full list of limitations lives in the spec, in the section on residual risks. In short:
+The full list lives in ["What Cordon does not do"](docs/install.md#what-cordon-does-not-do). In short:
 
 * **Persuasive visible content.** A review that is honestly visible to the human and still sways the agent towards the desired conclusion is outside Cordon's scope. Cordon separates data from commands; it does not judge truthfulness.
 * **Jailbreaking the model itself.** A prompt that lifts the model's restrictions directly from the user is the model vendor's responsibility, not a border layer's.

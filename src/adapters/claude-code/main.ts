@@ -12,7 +12,7 @@ export function cordonHome(): string {
 /**
  * The single point where exceptions are caught in the whole adapter.
  *
- * Synchronous deliberately. By §9.1 a hook that timed out does NOT block the
+ * Synchronous deliberately. A hook that timed out does NOT block the
  * call, that is, hanging equals passing. There must be no asynchrony, no
  * waiting and no network on the hot path.
  *
@@ -48,7 +48,7 @@ export function runHook(stdin: string, home: string = cordonHome()): string {
  *
  * A divergence from the plan: this check was not in it, and without it an
  * unusable home meant a quiet pass rather than a refusal. Session state is
- * the only memory between hook processes (§4.2): without writes provenance is
+ * the only memory between hook processes: without writes provenance is
  * always empty, so the data axis is dead, PostToolUse marks nothing, and
  * PreToolUse passes everything that fits the profile. From the outside that
  * looks like a working defence. An absent home is not a failure, though: a

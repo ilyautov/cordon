@@ -83,8 +83,8 @@ organizational only: the out-of-the-box default grants just `read` and
 **Verbatim transfer of text outward is allowed.** A reply to a review is a
 reversible effect, and a reversible effect answers only to the target: a link,
 a path, an item number. The agent may publish the injection in full in its
-reply, from where the next agent will read it. This is the worm vector,
-described in §8 of the spec. The rule cannot be revoked: without it,
+reply, from where the next agent will read it. This is the worm vector, and it is
+left open knowingly. The rule cannot be revoked: without it,
 summarizing what was read, quoting a document and answering from it all go to
 quarantine, meaning all meaningful work stops. The chain breaks not where the
 text was published but where the next Cordon stands.
@@ -92,7 +92,7 @@ text was published but where the next Cordon stands.
 **A local draft suffers more than a public action.** `Write` is classified as
 `create` and `update`, and `update` is irreversible. Writing a quotation into a
 file is therefore stricter than publishing the same quotation outward. The
-asymmetry is inverted, is acknowledged in §8, and is left as is in v1:
+asymmetry is inverted, is known, and is left as it is in this version:
 degradation runs in the safe direction.
 
 ---

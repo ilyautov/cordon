@@ -74,7 +74,7 @@ function dispatch(event: HookEvent, env: AdapterEnv): HookOutput {
 
   // The presence mode comes from the policy: it decides whether quarantine is
   // shown to the human. There is no heuristic here and there cannot be one,
-  // this is an explicit setting (§6).
+  // this is an explicit setting.
   return renderDecision(cordon.gate(event.call), env.policy.mode)
 }
 

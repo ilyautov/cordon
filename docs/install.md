@@ -97,7 +97,7 @@ The lifetimes are constants in `src/session/sweep.ts` and are deliberately not c
 
 The policy is read from one place: `~/.cordon/policy.yaml`. The `CORDON_HOME` variable moves Cordon's home directory as a whole.
 
-The project's working directory takes no part in this and never will. A poisoned repository bringing its own config with the defence turned off would disable Cordon before it ever fired (spec §7, rule 2).
+The project's working directory takes no part in this and never will. A poisoned repository bringing its own config with the defence turned off would disable Cordon before it ever fired.
 
 Without a policy file the default applies: `autonomous` mode, a profile of two classes, `read` and `summarize`, and no declared tools. Such an agent can read and summarize, and nothing else. The default is meant to be uselessly safe; widening it is a deliberate act.
 
@@ -133,7 +133,7 @@ notify:
   file: /Users/name/.cordon/events.jsonl
 ```
 
-The classes `exec`, `delete` and `financial` are deliberately absent here. `Bash` belongs to the `exec` class as a whole: parsing the command means a shell parser, and every shell parser can be worked around. If a task needs `Bash`, then `exec` is added to the profile deliberately, with the understanding that the hook does not see the contents of the command (spec §8, the hole in hook coverage).
+The classes `exec`, `delete` and `financial` are deliberately absent here. `Bash` belongs to the `exec` class as a whole: parsing the command means a shell parser, and every shell parser can be worked around. If a task needs `Bash`, then `exec` is added to the profile deliberately, with the understanding that the hook does not see the contents of the command.
 
 ### Example: a scheduled overnight job
 
@@ -274,25 +274,25 @@ Only the footer is turned off. The control and data axes keep working: the foote
 
 ## What Cordon does not do
 
-It is more honest to name the boundaries of the stretch up front. They are described in full in the spec: the threat model in §2, the output axis in §5.3, residual risks in §8.
+It is more honest to name the boundaries of the stretch up front. What follows is the whole list, not a selection from it.
 
-**It does not protect against a user jailbreaking their own model.** The victim and the attacker are the same person; that is the model vendor's job (§2).
+**It does not protect against a user jailbreaking their own model.** The victim and the attacker are the same person; that is the model vendor's job.
 
-**It does not judge the truthfulness of visible text.** A callout saying "our product is the best" on a vendor's site stays untouched: it is indistinguishable from ordinary marketing, because that is what it is. Any detector that catches this catches everything else along with it (§2).
+**It does not judge the truthfulness of visible text.** A callout saying "our product is the best" on a vendor's site stays untouched: it is indistinguishable from ordinary marketing, because that is what it is. Any detector that catches this catches everything else along with it.
 
-**The output axis can only say "not corroborated".** It names the sources the answer matches **verbatim** and does not presume to judge paraphrase. Coordinated paraphrase across different domains passes it entirely, because telling a restated claim from the model's own conclusion requires a model, and the gate has none. Hence the rule: the absence of a footer means "Cordon saw nothing", not "checked, clean" (§5.3, §8).
+**The output axis can only say "not corroborated".** It names the sources the answer matches **verbatim** and does not presume to judge paraphrase. Coordinated paraphrase across different domains passes it entirely, because telling a restated claim from the model's own conclusion requires a model, and the gate has none. Hence the rule: the absence of a footer means "Cordon saw nothing", not "checked, clean".
 
-**An unclosed raw block on a real page stays in the text.** An opening `<script>` or `<style>` without a closing tag is treated as a mention of the tag rather than a block. Otherwise mentioning a tag name in technical documentation would swallow all the text below the mention and silently discard half of an honest document (§8).
+**An unclosed raw block on a real page stays in the text.** An opening `<script>` or `<style>` without a closing tag is treated as a mention of the tag rather than a block. Otherwise mentioning a tag name in technical documentation would swallow all the text below the mention and silently discard half of an honest document.
 
-**A word written entirely in another script is not caught.** `сор.com` typed in Cyrillic instead of `cop.com` contains no script mixing: there is one script inside the word. A confusable table would fire on any honest Russian word made of letters with Latin twins, and the Russian word "сор" exists (§8).
+**A word written entirely in another script is not caught.** `сор.com` typed in Cyrillic instead of `cop.com` contains no script mixing: there is one script inside the word. A confusable table would fire on any honest Russian word made of letters with Latin twins, and the Russian word "сор" exists.
 
-**A file that was read and shell output are not substituted.** Cordon removes what is hidden **from the human**, and hiddenness is defined by the way the human looks at the source. A web page they see rendered, and a comment inside it is hidden from them. A file they open in an editor and see in full, so `<style>`, `<script>` and comments from a file that was read are not stripped: otherwise the model would see a truncated file and the next `Write` would overwrite the original with it. The price is named: a poisoned local file — a cloned repository, a downloaded artifact — reaches the model with its hidden layer. The finding is still named out loud in the transcript and written to the journal, and both axes keep working: the certificate limits actions, provenance remembers what was read by its original text (§4.1, §8).
+**A file that was read and shell output are not substituted.** Cordon removes what is hidden **from the human**, and hiddenness is defined by the way the human looks at the source. A web page they see rendered, and a comment inside it is hidden from them. A file they open in an editor and see in full, so `<style>`, `<script>` and comments from a file that was read are not stripped: otherwise the model would see a truncated file and the next `Write` would overwrite the original with it. The price is named: a poisoned local file — a cloned repository, a downloaded artifact — reaches the model with its hidden layer. The finding is still named out loud in the transcript and written to the journal, and both axes keep working: the certificate limits actions, provenance remembers what was read by its original text.
 
-**The contents of a `Bash` command are not parsed.** The hook sees `Bash`, not the fact that the script inside writes files and reaches the network. Hence the separate `exec` class and the sandbox requirement in autonomous mode. Closing this fully happens at the operating-system kernel level (§8).
+**The contents of a `Bash` command are not parsed.** The hook sees `Bash`, not the fact that the script inside writes files and reaches the network. Hence the separate `exec` class and the sandbox requirement in autonomous mode. Closing this fully happens at the operating-system kernel level.
 
-**Verbatim transfer of untrusted text outward is allowed.** An agent may publish an injection in full in an answer to a review, from where the next agent will read it. The rule cannot be revoked: without it, summarizing what was read and quoting a document would also go to quarantine, meaning all meaningful work would stop. The chain breaks where Cordon stands, not where the text was published (§8).
+**Verbatim transfer of untrusted text outward is allowed.** An agent may publish an injection in full in an answer to a review, from where the next agent will read it. The rule cannot be revoked: without it, summarizing what was read and quoting a document would also go to quarantine, meaning all meaningful work would stop. The chain breaks where Cordon stands, not where the text was published.
 
-**The profile is written by a human, and a profile wider than necessary opens the attack.** The `financial` class in an "answer reviews" profile would make the marketplace scenario passable. This is a transfer of trust to the user, not an implementation defect, which is why the default is uselessly safe and the effective profile is shown in plain text (§8).
+**The profile is written by a human, and a profile wider than necessary opens the attack.** The `financial` class in an "answer reviews" profile would make the marketplace scenario passable. This is a transfer of trust to the user, not an implementation defect, which is why the default is uselessly safe and the effective profile is shown in plain text.
 
 ## Uninstalling
 

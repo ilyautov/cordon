@@ -52,7 +52,7 @@ export function gate(call: ToolCall, ctx: GateContext): Decision {
   try {
     return decide(call, ctx)
   } catch (error) {
-    // §7, rule 3: a core error is a deny. The only exception handler in the
+    // A core error is a deny. The only exception handler in the
     // whole module, and everything leads here.
     return { kind: 'deny', reason: `Cordon failure: ${(error as Error).message}` }
   }
@@ -351,7 +351,7 @@ const PUTS_BACK: ReadonlySet<EffectClass> = new Set(['create', 'update'])
  * against — hence the check on the source kind, not on the label alone.
  *
  * The disk is not touched at all: the gate is synchronous, and on the harness
- * a hook that times out does not block the call (§7, rule 3). So both sides
+ * a hook that times out does not block the call. So both sides
  * are resolved lexically and symbolic links are NOT followed. The price is
  * known: a link `/tmp/doc.md` pointing at somebody else's file will not get
  * an exemption, because it matches lexically — but writing through it is

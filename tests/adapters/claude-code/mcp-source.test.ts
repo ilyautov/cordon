@@ -141,8 +141,8 @@ describe('an MCP tool declared as returning rendered content', () => {
 
 describe('the default for an MCP tool: source', () => {
   it('an undeclared MCP tool does not substitute the result', () => {
-    // A deliberate choice, said out loud in doctor and in section 8 of the
-    // specification: the silent destruction of a file happens always and
+    // A deliberate choice, said out loud by doctor and in the limitations
+    // documentation: the silent destruction of a file happens always and
     // without a trace, whereas a miss takes an attacker and still runs into the
     // two remaining axes.
     const out = handle(

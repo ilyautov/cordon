@@ -10,7 +10,7 @@ export type EffectClass =
   | 'financial'
   | 'exec'
 
-/** Presence mode. An explicit setting, not a heuristic: see §6 of the spec. */
+/** Presence mode. An explicit setting from the policy, never a heuristic. */
 export type PresenceMode = 'interactive' | 'autonomous'
 
 export interface ToolCall {
@@ -107,7 +107,7 @@ export interface Source {
  * The human's declaration in the policy (`toolsReturn`) is stronger than any
  * default and works in both directions. Otherwise the source view would be
  * derived from the tool name, and an MCP tool's name is chosen by the server,
- * that is, by the untrusted side: §9.2 explains why it cannot be believed. A
+ * that is, by the untrusted side, which is why it cannot be believed. A
  * server that named its tool `read_file` does not get the built-in reader's
  * behaviour for free — but a human who knows what that server is may say so
  * out loud, and their word is final here.
@@ -135,7 +135,7 @@ export interface Source {
  * The price is named: the marketplace-reviews scenario now takes one line of
  * policy (`toolsReturn: {tool: rendered}`) for the hidden layer to be
  * stripped as before. The default is announced out loud in `cordon doctor`
- * and in §8 of the spec, because a human should not have to learn it from the
+ * and in the limitations documentation, because a human should not learn it from the
  * source code.
  *
  * `mcp-description` stays rendered, and that is not an inconsistency. The

@@ -18,7 +18,7 @@ const VIEWS: ReadonlySet<string> = new Set<SourceView>(['rendered', 'source'])
  *
  * The working directory takes no part here deliberately and never will: a
  * poisoned repository that brings its own config would switch the defence off
- * before it had a chance to fire. See §7 of the spec, rule 2.
+ * before it had a chance to fire.
  */
 export function loadPolicy(cordonHome: string): Policy {
   const path = join(cordonHome, 'policy.yaml')

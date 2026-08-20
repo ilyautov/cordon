@@ -30,7 +30,7 @@ export const DRAFT_TTL_MS = 60 * 60 * 1000
 /**
  * How often to look into the directories at all.
  *
- * An hour. Listing a directory on every event would break §7 rule 3: the hot
+ * An hour. Listing a directory on every event would break the rule that the hot
  * path must be fast, because a hook timeout on this harness does NOT block
  * the call, and the only defence against a timeout is speed. Checking the
  * timestamp nearby costs one lstat, a full pass costs thousands.
@@ -76,8 +76,8 @@ const OURS = /^[A-Za-z0-9_-]{1,81}\.json(?:\.\d{1,10}\.tmp)?$/u
  * an already existing flow of events. One moment was chosen: the user's
  * message, and only after this turn's state has already been written. There
  * are two reasons. First, the event is rare — once per message rather than
- * once per tool call. Second, on `PreToolUse` a delay is a missed call (§9.1:
- * a hook that timed out does not block the call), while on the user's message
+ * once per tool call. Second, on `PreToolUse` a delay is a missed call, since
+ * a hook that timed out does not block it, while on the user's message
  * a delay is a delay and nothing more.
  *
  * Never throws. A failed sweep — no permissions, the file vanished between

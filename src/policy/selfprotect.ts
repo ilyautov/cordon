@@ -6,8 +6,8 @@ import { basename, dirname, join, resolve, sep } from 'node:path'
  * Paths that are never writable, whatever the certificate says.
  *
  * Without this rule the very first injection says "edit the settings and
- * switch the hook off", and there is nothing left to check. See §7 of the
- * spec, rule 1.
+ * switch the hook off", and there is nothing left to check. A defence that
+ * can be talked into removing itself is not a defence.
  */
 const HARNESS_CONFIG = ['.claude', '.cursor', '.codex', '.gemini', '.config' + sep + 'cordon']
 

@@ -28,7 +28,7 @@ export type HookEvent =
  * The hook's response in Gemini CLI's shape.
  *
  * There is no field for substituting a tool result here, and that is not an
- * omission: the `AfterTool` event has none at all (§9.2). Neutralization on
+ * omission: the `AfterTool` event has none at all. Neutralization on
  * this harness is expressed as a refusal, see `handlers.ts`.
  */
 export interface HookOutput {
@@ -57,7 +57,7 @@ export interface HookOutput {
  * names are chosen by the MCP server. Parsing throws nothing — it returns
  * either an event or a refusal to parse, which the handler turns into a
  * decision. The reason is the same as on the first adapter, only sharper: on
- * this harness ANY hook failure means "allow", not a timeout alone (§9.2),
+ * this harness ANY hook failure means "allow", not a timeout alone,
  * and a crashed hook is a pass.
  */
 export function parseEvent(stdin: string): HookEvent {
@@ -140,7 +140,7 @@ export function parseEvent(stdin: string): HookEvent {
  *
  * `ask` in autonomous mode turns into `deny` for two reasons at once. The
  * first is the same as on the first adapter: there is nobody to ask, and a
- * question nobody will see is not a defence. The second is specific: by §9.2
+ * question nobody will see is not a defence. The second is specific: on this
  * a forced `ask` in headless mode appears, judging by the harness's code, to
  * hang rather than fail, because the non-interactivity check runs before the
  * hook's decision is applied. A hung hook is worse than a failed one.

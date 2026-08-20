@@ -37,7 +37,7 @@ const MAX_REASON_TEXT = 20_000
  * The trap's very presence is mandatory, and more so than on the first
  * adapter: there fail-open came from one event's timeout, here it comes from
  * ANY hook failure, and the configuration schema has no mandatory flag at all
- * (§9.2).
+ *.
  */
 export function handle(event: HookEvent, env: AdapterEnv): HookOutput {
   try {
@@ -82,7 +82,7 @@ function dispatch(event: HookEvent, env: AdapterEnv): HookOutput {
   if (event.kind === 'BeforeTool') {
     // The presence mode comes from the policy: it decides whether to ask the
     // human. There is no heuristic here and there cannot be one, this is an
-    // explicit setting (§6).
+    // explicit setting.
     return renderDecision(cordon.gate(event.call), env.policy.mode)
   }
 
@@ -192,7 +192,7 @@ function footer(event: Extract<HookEvent, { kind: 'AfterAgent' }>, env: AdapterE
  * a working defence.
  *
  * Neutralization is expressed as a refusal, because there is nothing to
- * replace the result with on this harness (§9.2). Appending through
+ * replace the result with on this harness. Appending through
  * `additionalContext` is never used: it would leave the hidden layer in place
  * and add our note beside it, that is, it would make things worse rather than
  * protect.
@@ -331,7 +331,7 @@ function modelReason(tool: string, clean: string): string {
  * its tool `read_file`. A key made of the bare name would mean that a
  * declaration the human wrote about the built-in reader silently spread to a
  * foreign server that named itself the same — precisely the trust in a name
- * from an untrusted side that §9.2 is against.
+ * from an untrusted side, which is what the rule about tool names is against.
  */
 function policyKey(tool: string, mcpServer?: string): string {
   return mcpServer === undefined ? tool : `${mcpServer}/${tool}`

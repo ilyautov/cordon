@@ -19,7 +19,7 @@ A false positive is a bug and belongs here: Cordon damaging a legitimate documen
 
 ## You want to know whether Cordon covers something
 
-Open a discussion, or an issue if you would rather. The honest answer is often "no", and there is a section for it: ["What this is NOT"](README.md#what-this-is-not) in the README, plus the residual risks in the design spec. Cordon separates data from commands; it does not judge whether content is true, and it does not defend against a page that persuades your agent in plain sight.
+Open a discussion, or an issue if you would rather. The honest answer is often "no", and there is a section for it: ["What this is NOT"](README.md#what-this-is-not) in the README, plus ["What Cordon does not do"](docs/install.md#what-cordon-does-not-do). Cordon separates data from commands; it does not judge whether content is true, and it does not defend against a page that persuades your agent in plain sight.
 
 ## You want to change something
 

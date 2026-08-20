@@ -11,7 +11,7 @@ import { parseEvent, type HookEvent, type HookOutput } from './protocol.js'
  * Synchronous deliberately, and stricter than on the first harness. There a
  * pass came from a `PreToolUse` timeout alone; here it comes from ANY hook
  * failure — a crash, garbage on the output, expired time — and Gemini's
- * configuration has no "this hook is mandatory" flag at all (§9.2). So every
+ * configuration has no "this hook is mandatory" flag at all. So every
  * path out of here must end in a printed decision.
  */
 export function runHook(stdin: string, home: string = cordonHome()): string {

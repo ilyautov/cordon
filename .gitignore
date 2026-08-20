@@ -16,3 +16,10 @@ coverage/
 
 # The CI test report, written next to the sources by the json reporter.
 vitest-report.json
+
+# Working notes: the design specification, the implementation plans and the
+# analysis of the author's other repositories. They stay on the machine they
+# were written on. What a reader of this project needs is in README.md,
+# docs/ and the comments, and a claim that lives only in an unpublished
+# document is a claim nobody can check.
+docs/superpowers/

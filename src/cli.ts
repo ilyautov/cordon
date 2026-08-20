@@ -33,7 +33,7 @@ function readInput(path: string | undefined): string {
 /**
  * `scan` always exits 0 when the input was read successfully. Turning findings
  * into a build failure would mean going back to the detector-as-verdict the
- * spec rejects in §2: a finding is a risk signal, and the decision belongs to
+ * design rejects: a finding is a risk signal, and the decision belongs to
  * the policy higher up the stack.
  */
 export function main(argv: string[]): number {
@@ -273,7 +273,7 @@ function selfCheck(): 'ok' | 'broken' {
  *
  * The expectations here are different, and that is the whole point. There is
  * nothing to replace the result with, so a poisoned one is rejected whole
- * (§9.2): the sign of working is a refusal that carries the visible text and
+ *: the sign of working is a refusal that carries the visible text and
  * does not carry the hidden one.
  */
 function geminiSelfCheck(home: string): 'ok' | 'broken' {

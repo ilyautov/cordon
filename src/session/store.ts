@@ -80,7 +80,7 @@ const READABLE: ReadonlySet<number> = new Set([1, 2, 3, VERSION])
  *
  * It exists because a harness hook is a separate process per event: the one
  * that read a tool result and the one that checks the next call share no
- * memory. See §4.2. Without disk the data axis is dead on a real harness:
+ * memory. Without disk the data axis is dead on a real harness:
  * observe writes into the void, and the gate always sees clean arguments.
  */
 export class SessionStore {

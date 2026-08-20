@@ -28,7 +28,7 @@ export interface Origin {
  * Trusted means exactly two things: the user's message and the system prompt.
  * Everything else is untrusted until the user says otherwise explicitly. An
  * MCP tool description is written by the server, not by the user, so it is
- * untrusted on a par with call results. See §4.2.
+ * untrusted on a par with call results.
  */
 export function classifySource(origin: Origin, policy: Policy): Source {
   const declared = declaredView(origin.tool, policy)

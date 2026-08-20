@@ -21,7 +21,7 @@ export interface Policy {
    *
    * It exists because Cordon answers this question by tool name, and an MCP
    * tool's name is chosen by the server, that is, by an untrusted party
-   * (§9.2). Only the human who connected that server knows the answer — and
+   *. Only the human who connected that server knows the answer — and
    * this is where they write it down.
    *
    * The key is the tool name exactly as the harness calls it. On Claude Code
