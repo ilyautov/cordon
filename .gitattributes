@@ -1,0 +1,11 @@
+# The bundle is committed on purpose and is generated, never edited by hand.
+# Marking it keeps a 554 KB machine-written diff from burying the review of
+# the sources it was built from.
+plugin/dist/cli.js linguist-generated=true
+plugin/dist/package.json linguist-generated=true
+
+# Text files keep LF in the repository whatever the checkout platform does.
+# Cordon reasons about invisible and control characters for a living, and a
+# CRLF injected by a checkout would be one more of them.
+* text=auto eol=lf
+*.png binary
