@@ -117,6 +117,8 @@ What was removed does not vanish silently: `sample` holds what was hidden, so th
 
 ## Installation
 
+The shortest path, from nothing to a working install with a check that it is alive, is [QUICKSTART.md](QUICKSTART.md): five minutes, no keys, no account.
+
 As a Claude Code plugin and as a Gemini CLI extension it installs with a single command, see [docs/install.md](docs/install.md) and [docs/install-gemini.md](docs/install-gemini.md). As a library and CLI the package is not published yet, so there is one path: build from source.
 
 ```bash
@@ -187,3 +189,7 @@ The method is not ours; it is published and peer-reviewed: Task Shield (arXiv:24
 ## License
 
 MIT: use freely, fork, extend. Pull requests with new attack vectors are welcome.
+
+---
+
+[Quickstart](QUICKSTART.md) · [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md) · [Privacy](PRIVACY_POLICY.md) · [Support](SUPPORT.md) · [Changelog](CHANGELOG.md)

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Forbids literal invisible characters in the sources and the tests.
+// Forbids literal invisible characters in the sources, the tests and the prose.
 //
 // The rule has existed since the start of the project and has been broken six
 // times, including a literal NUL in the file where the kinship of sources is
@@ -13,7 +13,15 @@
 import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { join, relative } from 'node:path'
 
-const ROOTS = ['src', 'tests', 'scripts']
+const ROOTS = ['src', 'tests', 'scripts', 'docs', '.github']
+
+/**
+ * Prose is checked as well as code, and for a sharper reason than tidiness: a
+ * reader copies a policy example out of the README into their own file. An
+ * invisible character riding along in that snippet is the very attack this
+ * project exists to stop, delivered by the project's own documentation.
+ */
+const EXTENSIONS = /\.(?:ts|mjs|js|md|txt|ya?ml)$/u
 
 /**
  * The invisible and control characters that have no business being literals in
@@ -37,14 +45,21 @@ function* files(dir) {
   for (const entry of entries) {
     const path = join(dir, entry)
     if (statSync(path).isDirectory()) yield* files(path)
-    else if (/\.(?:ts|mjs|js)$/u.test(path)) yield path
+    else if (EXTENSIONS.test(path)) yield path
   }
 }
 
 const found = []
 
-for (const root of ROOTS) {
-  for (const path of files(root)) {
+/** The markdown at the repository root, without descending into node_modules. */
+function* rootFiles() {
+  for (const entry of readdirSync('.')) {
+    if (EXTENSIONS.test(entry) && statSync(entry).isFile()) yield entry
+  }
+}
+
+for (const source of [...ROOTS.map((root) => files(root)), rootFiles()]) {
+  for (const path of source) {
     readFileSync(path, 'utf8')
       .split('\n')
       .forEach((line, index) => {
