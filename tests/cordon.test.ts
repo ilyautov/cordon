@@ -13,7 +13,7 @@ function make(overrides: Partial<Policy> = {}) {
   base.mode = 'autonomous'
   base.profile = { effects: ['read', 'create'], resources: { paths: [], hosts: [] } }
   base.tools = { wb_update_price: ['update', 'financial'], wb_reply: ['create'] }
-  base.notify = { file: log, webhook: null }
+  base.notify = { file: log }
   const policy: Policy = { ...base, ...overrides }
   return { cordon: new Cordon({ policy, cordonHome: home }), log }
 }
@@ -89,7 +89,7 @@ function makeWithHome(overrides: Partial<Policy> = {}) {
   base.mode = 'autonomous'
   base.profile = { effects: ['read', 'create'], resources: { paths: [], hosts: [] } }
   base.tools = { wb_update_price: ['update', 'financial'], wb_reply: ['create'] }
-  base.notify = { file: log, webhook: null }
+  base.notify = { file: log }
   const policy: Policy = { ...base, ...overrides }
   return { cordon: new Cordon({ policy, cordonHome: home }), log, home, policy }
 }

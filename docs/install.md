@@ -229,7 +229,7 @@ A typo in a class name yields an empty set, that is, "nothing is allowed", plus 
 
 The journal is half of autonomous mode. A call blocked overnight that the owner never heard about is indistinguishable, for them, from a call that never happened.
 
-The notification channel must be one the agent cannot reach. Telling the agent itself that the agent is blocked makes no sense. A file is the minimum; a webhook or a messenger is the job of an adapter that does not exist yet.
+The notification channel must be one the agent cannot reach. Telling the agent itself that the agent is blocked makes no sense. A file is the whole of it: there is no network anywhere in the core, so delivering to a webhook or a messenger belongs to whatever reads the file. `notify.webhook` in the policy is refused outright rather than ignored, because the field was once accepted while nothing was ever sent to it, and an owner who wrote it there believed they were being notified overnight and were not.
 
 ## The source-influence footer
 

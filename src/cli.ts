@@ -360,7 +360,7 @@ export function doctor(home: string = cordonHome()): DoctorReport {
     }
   }
 
-  if (policy.mode === 'autonomous' && !policy.notify.file && !policy.notify.webhook) {
+  if (policy.mode === 'autonomous' && !policy.notify.file) {
     warnings.push(
       'autonomous mode without a notification channel outside the agent: a call blocked overnight ' +
         'is indistinguishable, for the owner, from a call that never happened; set notify.file',

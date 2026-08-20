@@ -163,3 +163,29 @@ describe('the policy: declaring the source view (toolsReturn)', () => {
     expect(Object.getPrototypeOf(policy.toolsReturn)).not.toBe('rendered')
   })
 })
+
+describe('notify', () => {
+  it('reads the file the journal is written to', () => {
+    const home = scratch()
+    writeFileSync(join(home, 'policy.yaml'), 'notify:\n  file: /tmp/events.jsonl\n')
+    expect(loadPolicy(home).notify.file).toBe('/tmp/events.jsonl')
+  })
+
+  it('a webhook is a refusal rather than a setting that does nothing', () => {
+    // The field used to be read and stored, and nothing ever sent to it: the
+    // notifier writes a file or stays silent, and there is no network anywhere
+    // in the core by design. An owner who wrote a webhook here believed they
+    // were being notified and was not, which is the exact silence autonomous
+    // mode exists to prevent.
+    const home = scratch()
+    writeFileSync(home + '/policy.yaml', 'notify:\n  webhook: https://example.test/hook\n')
+    expect(() => loadPolicy(home)).toThrow(/webhook/u)
+    expect(() => loadPolicy(home)).toThrow(/notify\.file/u)
+  })
+
+  it('a webhook is a refusal even alongside a file that does work', () => {
+    const home = scratch()
+    writeFileSync(home + '/policy.yaml', 'notify:\n  file: /tmp/e.jsonl\n  webhook: https://example.test/hook\n')
+    expect(() => loadPolicy(home)).toThrow(/webhook/u)
+  })
+})

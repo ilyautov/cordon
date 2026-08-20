@@ -61,6 +61,17 @@ describe('cordon doctor: warnings', () => {
     expect(doctor(dir).warnings.some((w) => w.includes('notification'))).toBe(false)
   })
 
+  it('a webhook does not pass for a notification channel', () => {
+    // It used to. The field was accepted, counted as a channel, and nothing
+    // was ever delivered to it, so the warning about autonomous mode without
+    // notification disappeared while the notification did too.
+    const dir = home()
+    writeFileSync(join(dir, 'policy.yaml'), 'notify:\n  webhook: https://example.test/hook\n')
+    const report = doctor(dir)
+    expect(report.warnings.some((w) => w.includes('webhook'))).toBe(true)
+    expect(report.selfCheck).toBe('broken')
+  })
+
   it('does not warn about notification in interactive mode', () => {
     const dir = home()
     writeFileSync(join(dir, 'policy.yaml'), 'mode: interactive\n')

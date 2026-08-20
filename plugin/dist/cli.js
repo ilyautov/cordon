@@ -7385,7 +7385,7 @@ var DEFAULT_POLICY = {
   tools: {},
   trustedSources: [],
   toolsReturn: {},
-  notify: { file: null, webhook: null },
+  notify: { file: null },
   output: { footer: true }
 };
 
@@ -7461,9 +7461,13 @@ function validate(parsed, path) {
   }
   if ("notify" in input) {
     const notify = asObject(input.notify, `${path}: notify`);
+    if (Object.hasOwn(notify, "webhook")) {
+      throw new Error(
+        `${path}: notify.webhook is not delivered anywhere and never was; there is no network in the core by design. Write notify.file and deliver from that file if a webhook is wanted`
+      );
+    }
     policy.notify = {
-      file: typeof notify.file === "string" ? notify.file : null,
-      webhook: typeof notify.webhook === "string" ? notify.webhook : null
+      file: typeof notify.file === "string" ? notify.file : null
     };
   }
   if (Object.hasOwn(input, "output")) {
@@ -12631,7 +12635,7 @@ function doctor(home = cordonHome()) {
       selfCheck: "broken"
     };
   }
-  if (policy.mode === "autonomous" && !policy.notify.file && !policy.notify.webhook) {
+  if (policy.mode === "autonomous" && !policy.notify.file) {
     warnings.push(
       "autonomous mode without a notification channel outside the agent: a call blocked overnight is indistinguishable, for the owner, from a call that never happened; set notify.file"
     );

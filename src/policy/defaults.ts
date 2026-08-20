@@ -30,9 +30,15 @@ export interface Policy {
    */
   toolsReturn: Record<string, SourceView>
   notify: {
-    /** The file autonomous-mode events are written to. */
+    /**
+     * The file autonomous-mode events are written to.
+     *
+     * A file, and only a file. The channel has to be one the agent cannot
+     * reach, and it has to cost nothing on the hot path: there is no network
+     * anywhere in the core, so delivering to a webhook or a messenger is the
+     * job of something reading this file, not of Cordon.
+     */
     file: string | null
-    webhook: string | null
   }
   output: {
     /**
@@ -65,6 +71,6 @@ export const DEFAULT_POLICY: Policy = {
   tools: {},
   trustedSources: [],
   toolsReturn: {},
-  notify: { file: null, webhook: null },
+  notify: { file: null },
   output: { footer: true },
 }

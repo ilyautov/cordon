@@ -89,9 +89,19 @@ function validate(parsed: unknown, path: string): Policy {
 
   if ('notify' in input) {
     const notify = asObject(input.notify, `${path}: notify`)
+    // A refusal rather than a silent ignore. The field was accepted once and
+    // nothing was ever sent to it: an owner who wrote a webhook here believed
+    // they were being notified of blocked calls overnight and were not. A
+    // setting that promises a safety property it does not deliver is worse
+    // than no setting, so it stops the load instead of being dropped quietly.
+    if (Object.hasOwn(notify, 'webhook')) {
+      throw new Error(
+        `${path}: notify.webhook is not delivered anywhere and never was; there is no network in ` +
+          'the core by design. Write notify.file and deliver from that file if a webhook is wanted',
+      )
+    }
     policy.notify = {
       file: typeof notify.file === 'string' ? notify.file : null,
-      webhook: typeof notify.webhook === 'string' ? notify.webhook : null,
     }
   }
 
