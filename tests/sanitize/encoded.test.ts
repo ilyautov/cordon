@@ -101,6 +101,11 @@ describe('detectEncoded: legitimate base64 and hex', () => {
       '"integrity": "sha512-YZo3K82SD7Riyi0E1EQPojLz7kpepnSQI9IyPbHHg1XXXevb5dJI7tpyN2ADxGcQbHG7vcyRHk0cbwqcQriUtg=="',
     ],
     [
+      // The prefix is deliberately not a real vendor's. What this case tests is
+      // the shape, a long alphanumeric run in prose that must not be read as an
+      // encoded block, and the shape survives the prefix. A literal that looks
+      // like a live key trips every secret scanner in the ecosystem, starting
+      // with the one on the push that publishes it.
       'a key in an example',
       'export VENDOR_KEY=tk_demo_51H8xK2eZvKYlo2CqPzXvL9mNbQ4rT7wYs3EdFgHiJkLmNoPqRsTuVwXyZ0123456789',
     ],
