@@ -4,6 +4,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versions follo
 
 ## [Unreleased]
 
+CI can finish. vitest 4's forks pool passed all 860 tests in ten seconds and then never ended: a worker that does not answer the stop message leaves its IPC channel referenced, and the event loop stays alive with nothing left to do ([vitest#8766](https://github.com/vitest-dev/vitest/issues/8766)). Two things changed. The suite now runs in a single fork, which is also faster here, ten seconds down to seven, because fifty-four files each paying for a fork cost more than reusing one process. And the verdict is taken from the report the run writes rather than from whether the process managed to exit, because after a hang like that the exit says nothing. The threads pool was ruled out rather than skipped: `process.chdir` does not exist in a worker thread, and one test needs it.
+
 A fresh clone can run `npm test`. Five tests started `dist/cli.js` as a separate process without anything having built it, so they failed on a missing file rather than on what they were written to check. They now build it on demand, like their neighbours already did.
 
 The check that the committed bundle still matches the sources works again. It had been disarmed by a neighbour: one test rebuilt everything in `beforeAll`, bundle included, so by the time the check ran the artifact had just been regenerated and matched itself. The build is now split, and what the tests build on demand is `dist/` alone. Verified by changing a string in the sources without rebuilding and watching the check fail, which it did not do before.

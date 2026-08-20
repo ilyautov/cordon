@@ -19,9 +19,16 @@ jobs:
       # construction. Building dist/ here also keeps two parallel test workers
       # from each starting a build of their own.
       - run: npm run build:lib
+      # Bounded, and the verdict comes from the report rather than from the
+      # exit. vitest 4's forks pool has been seen to finish a wholly
+      # successful run and then never end, so "the process stopped" is not
+      # evidence of anything. "The report says 860 tests passed" is.
       - name: test
-        run: npx vitest run --reporter=default --reporter=json --outputFile=vitest-report.json
-      - name: the numbers in the READMEs are the real ones
+        timeout-minutes: 6
+        run: |
+          timeout --preserve-status 300 npx vitest run \
+            --reporter=default --reporter=json --outputFile=vitest-report.json || true
+      - name: the run passed, and the numbers in the READMEs are the real ones
         run: node scripts/check-claims.mjs vitest-report.json
       - run: npm run typecheck
       - run: npm run build

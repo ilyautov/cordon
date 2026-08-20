@@ -23,8 +23,15 @@ function testCount(reportPath) {
       stdio: 'ignore',
     })
   }
+  // The report is also the verdict on the run itself. On CI the process is
+  // allowed to be killed after it has finished, because vitest 4's forks pool
+  // has been seen to hang once every test has passed, so nothing upstream of
+  // here can be trusted to say whether the suite was green. A missing file
+  // throws, which is the right answer: no report means no run.
   const report = JSON.parse(readFileSync(path, 'utf8'))
-  if (!report.success) throw new Error('the suite did not pass, the counts mean nothing')
+  if (!report.success) {
+    throw new Error(`the suite did not pass: ${report.numFailedTests} of ${report.numTotalTests} failed`)
+  }
   return report.numTotalTests
 }
 
