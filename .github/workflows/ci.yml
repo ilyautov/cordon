@@ -26,7 +26,12 @@ jobs:
       - name: test
         timeout-minutes: 6
         run: |
-          timeout --preserve-status 300 npx vitest run \
+          # vitest is started directly rather than through npx, and killed
+          # rather than asked. `timeout` signals its own child, and through
+          # npx that child is a wrapper: the signal never reaches the process
+          # that is actually stuck, and the step runs on to its own limit.
+          timeout --signal=KILL 300 \
+            node node_modules/vitest/vitest.mjs run \
             --reporter=default --reporter=json --outputFile=vitest-report.json || true
       - name: the run passed, and the numbers in the READMEs are the real ones
         run: node scripts/check-claims.mjs vitest-report.json
