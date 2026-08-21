@@ -2,15 +2,15 @@
 
 # Cordon: a deterministic layer between untrusted text and agent actions
 
-> ⚠️ Early development. The core and two adapters are ready, for Claude Code and Gemini CLI: hidden-layer neutralization, provenance of untrusted data, an intent certificate, an action gate, a source-influence footer under the model's answer, and packaging that intercepts four harness events. 900 tests, a corpus of 14 pinned attack vectors and 7 legitimate documents, two runtime dependencies. Installation is described in [docs/install.md](docs/install.md) and [docs/install-gemini.md](docs/install-gemini.md). The wiring has not been exercised on a live harness yet, and one gap is named outright: whether `updatedInput` applies without a permission decision is not confirmed by the harness documentation.
+> ⚠️ Early development. The core and two adapters are ready, for Claude Code and Gemini CLI: hidden-layer neutralization, provenance of untrusted data, an intent certificate, an action gate, a source-influence footer under the model's answer, and packaging that intercepts four harness events. 918 tests, a corpus of 18 pinned attack vectors and 7 legitimate documents, two runtime dependencies. Installation is described in [docs/install.md](docs/install.md) and [docs/install-gemini.md](docs/install-gemini.md). The wiring has not been exercised on a live harness yet, and one gap is named outright: whether `updatedInput` applies without a permission decision is not confirmed by the harness documentation.
 
 > [Русская версия](README.ru.md)
 
 [![ci](https://github.com/ilyautov/cordon/actions/workflows/ci.yml/badge.svg)](https://github.com/ilyautov/cordon/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.1.1-blueviolet)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.2.0-blueviolet)](CHANGELOG.md)
 [![Finding kinds](https://img.shields.io/badge/finding%20kinds-5-1F6F5C)](#what-gets-stripped)
-[![Attack vectors](https://img.shields.io/badge/attack%20vectors-14-1F6F5C)](#development)
+[![Attack vectors](https://img.shields.io/badge/attack%20vectors-18-1F6F5C)](#development)
 ![node 22+](https://img.shields.io/badge/node-22%2B-1F6F5C)
 [![Stars](https://img.shields.io/github/stars/ilyautov/cordon?style=social)](https://github.com/ilyautov/cordon/stargazers)
 
@@ -184,7 +184,7 @@ npm run build
 
 **The loyalty corpus** in `tests/fixtures/loyalty/` verifies that the tool stays silent on legitimate texts, including texts about injections. Breaking it is not allowed: a tool that cannot be used while developing that same tool is not ready. A false positive on a corpus sample is a defect in the module, not a reason to remove the sample.
 
-**The attack corpus** in `tests/fixtures/attacks.ts` pins 14 vectors, each of which once passed the filter unnoticed. It lives as a module rather than as data files for one reason: invisible characters are written as escape sequences and are therefore visible during review. A literal character in a file is indistinguishable from emptiness in a diff.
+**The attack corpus** in `tests/fixtures/attacks.ts` pins 18 vectors, each of which once passed the filter unnoticed. It lives as a module rather than as data files for one reason: invisible characters are written as escape sequences and are therefore visible during review. A literal character in a file is indistinguishable from emptiness in a diff.
 
 The method is not ours; it is published and peer-reviewed: Task Shield (arXiv:2412.16682), CaMeL (arXiv:2503.18813), IGAC (arXiv:2606.22916), MELON (arXiv:2502.05174), ActPlane (arXiv:2606.25189).
 

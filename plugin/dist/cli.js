@@ -10313,6 +10313,53 @@ function unmask(text) {
   return text.includes(MENTION_MARK) ? text.replaceAll(MENTION_MARK, "<") : text;
 }
 var REPORT_ATTRS = ["alt", "title"];
+var HIDDEN_TEXT_ATTRS = /* @__PURE__ */ new Set([
+  "aria-label",
+  "aria-description",
+  "aria-roledescription",
+  "aria-placeholder",
+  "aria-valuetext",
+  "aria-details",
+  "placeholder",
+  "srcdoc",
+  "abbr"
+]);
+function carriesProse(value) {
+  return /\w\s+\w/u.test(value) || value.trim().length >= 40;
+}
+function hidesTextFrom(tag, name, attrs) {
+  if (HIDDEN_TEXT_ATTRS.has(name) || name.startsWith("data-")) return true;
+  return tag === "INPUT" && name === "value" && attrs["type"]?.trim().toLowerCase() === "hidden";
+}
+function attributeSpans(tag) {
+  const spans = [];
+  let at = 1;
+  while (at < tag.length && !/[\s/>]/u.test(tag[at] ?? ">")) at++;
+  while (at < tag.length) {
+    const before = at;
+    while (at < tag.length && /\s/u.test(tag[at] ?? "")) at++;
+    const char = tag[at];
+    if (char === void 0 || char === ">" || char === "/") break;
+    const nameAt = at;
+    while (at < tag.length && !/[\s=/>]/u.test(tag[at] ?? ">")) at++;
+    const name = tag.slice(nameAt, at).toLowerCase();
+    while (at < tag.length && /\s/u.test(tag[at] ?? "")) at++;
+    if (tag[at] === "=") {
+      at++;
+      while (at < tag.length && /\s/u.test(tag[at] ?? "")) at++;
+      const quote = tag[at];
+      if (quote === '"' || quote === "'") {
+        at++;
+        while (at < tag.length && tag[at] !== quote) at++;
+        at++;
+      } else {
+        while (at < tag.length && !/[\s>]/u.test(tag[at] ?? ">")) at++;
+      }
+    }
+    if (name !== "") spans.push({ name, start: before, end: at });
+  }
+  return spans;
+}
 var NAMED_COLORS = /* @__PURE__ */ new Map([
   ["white", "#ffffff"],
   ["black", "#000000"],
@@ -10372,13 +10419,19 @@ function colorFromShorthand(value) {
   }
   return null;
 }
-function isInvisibleByColor(style) {
+function isInvisibleByColor(style, pageHasBackground) {
   const declarations = parseDeclarations(style);
   const color = normalizeColor(declarations.get("color"));
   if (!color) return false;
   if (color === "transparent") return true;
   const background = normalizeColor(declarations.get("background-color")) ?? colorFromShorthand(declarations.get("background"));
-  return background !== null && background === color;
+  if (background !== null) return background === color;
+  return !pageHasBackground && isNearWhite(color);
+}
+var BACKGROUND_DECLARED = /background(-color)?\s*:|bgcolor\s*=/iu;
+function isNearWhite(color) {
+  const channels = [1, 3, 5].map((at) => Number.parseInt(color.slice(at, at + 2), 16));
+  return channels.every((value) => value >= 240);
 }
 function payloadOf(frame) {
   const text = (frame.text ?? []).join("");
@@ -10408,6 +10461,7 @@ function stripHiddenHtml(input) {
     return "";
   });
   const source = maskUnclosedRawTags(withoutComments);
+  const pageHasBackground = BACKGROUND_DECLARED.test(input);
   const cuts = [];
   const stack = [];
   const sinks = [];
@@ -10438,7 +10492,7 @@ function stripHiddenHtml(input) {
         return;
       }
       const style = attrs["style"] ?? "";
-      const hidden = attrs["hidden"] !== void 0 || attrs["aria-hidden"]?.trim().toLowerCase() === "true" || HIDDEN_STYLE.test(style) || OFFSCREEN_STYLE.test(style) || isInvisibleByColor(style);
+      const hidden = attrs["hidden"] !== void 0 || attrs["aria-hidden"]?.trim().toLowerCase() === "true" || HIDDEN_STYLE.test(style) || OFFSCREEN_STYLE.test(style) || isInvisibleByColor(style, pageHasBackground);
       if (hidden) {
         frame.doomed = true;
         frame.text = [];
@@ -10451,6 +10505,21 @@ function stripHiddenHtml(input) {
         if (value && value.trim()) {
           findings.push({ kind: "annotation", detail: `attr:${attr}`, sample: sample(value) });
         }
+      }
+      const carriers = Object.keys(attrs).filter(
+        (name2) => hidesTextFrom(tag, name2, attrs) && carriesProse(attrs[name2] ?? "")
+      );
+      if (carriers.length === 0) return;
+      const from = parser.startIndex;
+      const tagText = source.slice(from, parser.endIndex + 1);
+      for (const span of attributeSpans(tagText)) {
+        if (!carriers.includes(span.name)) continue;
+        findings.push({
+          kind: "hidden-html",
+          detail: `attr:${span.name}`,
+          sample: sample(attrs[span.name] ?? "", 512)
+        });
+        cuts.push([from + span.start, from + span.end]);
       }
     },
     ontext(text) {

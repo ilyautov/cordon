@@ -71,6 +71,93 @@ function unmask(text: string): string {
 
 const REPORT_ATTRS = ['alt', 'title'] as const
 
+/**
+ * Attributes whose value is text for a machine and never for the reader.
+ *
+ * The page shows nothing, the model reads every word: this is the first trick
+ * in the book and it used to go through untouched. `alt` and `title` are
+ * deliberately not here — they are flagged above and left in place, because
+ * an image description is often the only description there is, and cutting it
+ * costs the reader real content.
+ *
+ * `data-*` is a family rather than a list: the point of the prefix is that
+ * anyone may invent a name under it.
+ */
+const HIDDEN_TEXT_ATTRS: ReadonlySet<string> = new Set([
+  'aria-label', 'aria-description', 'aria-roledescription', 'aria-placeholder',
+  'aria-valuetext', 'aria-details', 'placeholder', 'srcdoc', 'abbr',
+])
+
+/**
+ * Whether an attribute's value is worth cutting out.
+ *
+ * An instruction needs words. Requiring two of them, or a value long enough
+ * to hold a sentence, keeps `data-id="12"` and `data-index="3"` where they
+ * are: those are on nearly every page, and removing them would be a change
+ * with no defence in it.
+ */
+function carriesProse(value: string): boolean {
+  return /\w\s+\w/u.test(value) || value.trim().length >= 40
+}
+
+function hidesTextFrom(tag: string, name: string, attrs: Record<string, string>): boolean {
+  if (HIDDEN_TEXT_ATTRS.has(name) || name.startsWith('data-')) return true
+  // A hidden input is a field the reader never sees and the model reads like
+  // any other text.
+  return tag === 'INPUT' && name === 'value' && attrs['type']?.trim().toLowerCase() === 'hidden'
+}
+
+interface AttrSpan {
+  name: string
+  /** Offsets within the opening tag, whitespace before the name included. */
+  start: number
+  end: number
+}
+
+/**
+ * The attributes of one opening tag, with the offsets they occupy in it.
+ *
+ * Written out rather than found with a regular expression on purpose: an
+ * attribute name occurring inside another attribute's value — `title="see
+ * data-note=x"` — is exactly what a pattern would match, and cutting by that
+ * offset would take a bite out of the middle of the tag. The scan is over one
+ * bounded string and respects quoting, so it cannot land inside a value.
+ */
+function attributeSpans(tag: string): AttrSpan[] {
+  const spans: AttrSpan[] = []
+  let at = 1
+  while (at < tag.length && !/[\s/>]/u.test(tag[at] ?? '>')) at++
+
+  while (at < tag.length) {
+    const before = at
+    while (at < tag.length && /\s/u.test(tag[at] ?? '')) at++
+    const char = tag[at]
+    if (char === undefined || char === '>' || char === '/') break
+
+    const nameAt = at
+    while (at < tag.length && !/[\s=/>]/u.test(tag[at] ?? '>')) at++
+    const name = tag.slice(nameAt, at).toLowerCase()
+
+    while (at < tag.length && /\s/u.test(tag[at] ?? '')) at++
+    if (tag[at] === '=') {
+      at++
+      while (at < tag.length && /\s/u.test(tag[at] ?? '')) at++
+      const quote = tag[at]
+      if (quote === '"' || quote === "'") {
+        at++
+        while (at < tag.length && tag[at] !== quote) at++
+        at++
+      } else {
+        while (at < tag.length && !/[\s>]/u.test(tag[at] ?? '>')) at++
+      }
+    }
+
+    if (name !== '') spans.push({ name, start: before, end: at })
+  }
+
+  return spans
+}
+
 /** Only the names that actually turn up in the text-in-background-colour attack. */
 const NAMED_COLORS: ReadonlyMap<string, string> = new Map([
   ['white', '#ffffff'],
@@ -149,7 +236,7 @@ function colorFromShorthand(value: string | undefined): string | null {
  * background comes from a class, and catching it would mean showering normal
  * pages with findings.
  */
-function isInvisibleByColor(style: string): boolean {
+function isInvisibleByColor(style: string, pageHasBackground: boolean): boolean {
   const declarations = parseDeclarations(style)
   const color = normalizeColor(declarations.get('color'))
   if (!color) return false
@@ -158,7 +245,25 @@ function isInvisibleByColor(style: string): boolean {
   const background =
     normalizeColor(declarations.get('background-color')) ??
     colorFromShorthand(declarations.get('background'))
-  return background !== null && background === color
+  if (background !== null) return background === color
+
+  // No background on the element, and none anywhere in the document: what is
+  // behind the text is the client's default, and that is white. White on
+  // white was the textbook trick and it walked past this check, because the
+  // check waited for a background nobody had to declare.
+  //
+  // The condition is deliberately narrow. A page that sets a background
+  // somewhere may well set a dark one, and white text on it is ordinary
+  // design — cutting that would take real content away from the reader.
+  return !pageHasBackground && isNearWhite(color)
+}
+
+/** Declared anywhere at all: an attribute, an inline style, a style block. */
+const BACKGROUND_DECLARED = /background(-color)?\s*:|bgcolor\s*=/iu
+
+function isNearWhite(color: string): boolean {
+  const channels = [1, 3, 5].map((at) => Number.parseInt(color.slice(at, at + 2), 16))
+  return channels.every((value) => value >= 0xf0)
 }
 
 /**
@@ -249,6 +354,7 @@ export function stripHiddenHtml(input: string): { clean: string; findings: Findi
   })
 
   const source = maskUnclosedRawTags(withoutComments)
+  const pageHasBackground = BACKGROUND_DECLARED.test(input)
   const cuts: Array<readonly [number, number]> = []
   const stack: Frame[] = []
   // The stack of frames that collect text: one buffer each, so a
@@ -294,7 +400,7 @@ export function stripHiddenHtml(input: string): { clean: string; findings: Findi
         attrs['aria-hidden']?.trim().toLowerCase() === 'true' ||
         HIDDEN_STYLE.test(style) ||
         OFFSCREEN_STYLE.test(style) ||
-        isInvisibleByColor(style)
+        isInvisibleByColor(style, pageHasBackground)
 
       if (hidden) {
         frame.doomed = true
@@ -309,6 +415,26 @@ export function stripHiddenHtml(input: string): { clean: string; findings: Findi
         if (value && value.trim()) {
           findings.push({ kind: 'annotation', detail: `attr:${attr}`, sample: sample(value) })
         }
+      }
+
+      // The value is cut out of the tag rather than the tag rewritten: the
+      // rest of the document, this tag included, stays byte for byte what it
+      // was. Only the attributes actually carrying words are touched.
+      const carriers = Object.keys(attrs).filter(
+        (name) => hidesTextFrom(tag, name, attrs) && carriesProse(attrs[name] ?? ''),
+      )
+      if (carriers.length === 0) return
+
+      const from = parser.startIndex
+      const tagText = source.slice(from, parser.endIndex + 1)
+      for (const span of attributeSpans(tagText)) {
+        if (!carriers.includes(span.name)) continue
+        findings.push({
+          kind: 'hidden-html',
+          detail: `attr:${span.name}`,
+          sample: sample(attrs[span.name] ?? '', 512),
+        })
+        cuts.push([from + span.start, from + span.end])
       }
     },
 
