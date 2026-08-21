@@ -339,3 +339,54 @@ describe('the loyalty corpus: a legitimate argument must pass clean', () => {
     expect(dirty('sku-0000000042')).toBe(false)
   })
 })
+
+// A store with no ceiling was a way to switch the second axis off with volume
+// alone: every hook process restores the whole file before every call, so
+// enough reading meets the timeout, and a timed-out hook is a hook that
+// permits. The ceiling is only half the answer — stopping quietly at it would
+// be the same hole in a politer form.
+describe('the ceiling on what a session remembers', () => {
+  const source: Source = { id: 'w1', kind: 'web', label: 'https://a.example/x', trust: 'untrusted' }
+  const long = 'the ordinary text of a review about an item that sells well. '.repeat(200)
+
+  it('a fresh store is not saturated', () => {
+    expect(new TaintStore().saturated).toBe(false)
+  })
+
+  it('the store stops growing at its ceiling', () => {
+    const store = new TaintStore(50)
+    store.record(long, source)
+    expect(store.toJSON().shingles.length + store.toJSON().atoms.length).toBeLessThanOrEqual(50)
+  })
+
+  it('reaching the ceiling is said out loud rather than passed over', () => {
+    const store = new TaintStore(50)
+    store.record(long, source)
+    expect(store.saturated).toBe(true)
+  })
+
+  it('what was remembered before the ceiling is still found', () => {
+    // The ceiling must not undo the memory it stopped: refusing to recognize
+    // what was already recorded would be a denial of service of our own.
+    const store = new TaintStore(50)
+    store.record(long, source)
+    expect(store.check(long.slice(0, 120)).tainted).toBe(true)
+  })
+
+  it('a state restored at its ceiling knows it is full', () => {
+    // The next hook is a new process. Without this it would decide it was
+    // starting from a clean memory, and everything read afterwards would look
+    // like it had never been read.
+    const store = new TaintStore(50)
+    store.record(long, source)
+    const restored = TaintStore.fromJSON(JSON.parse(JSON.stringify(store.toJSON())), 50)
+    expect(restored.saturated).toBe(true)
+  })
+
+  it('a state restored below its ceiling does not', () => {
+    const store = new TaintStore()
+    store.record('a short review of an item that arrived on time', source)
+    const restored = TaintStore.fromJSON(JSON.parse(JSON.stringify(store.toJSON())))
+    expect(restored.saturated).toBe(false)
+  })
+})

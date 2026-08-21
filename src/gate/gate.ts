@@ -77,10 +77,21 @@ function decide(call: ToolCall, ctx: GateContext): Decision {
   // The hidden layer was not fully stripped, which means the model read
   // poisoned text. Reading further is not dangerous; acting on what was read
   // is dangerous exactly to the extent that we do not know what it read.
-  if (ctx.unredacted === true) {
+  if (ctx.unredacted === true || ctx.taint.saturated) {
     const harmless = verdict.classified
       && verdict.effects.every((effect) => effect === 'read' || effect === 'summarize')
-    if (!harmless) return escalate(ctx, 'a hidden layer in a tool result could not be stripped')
+    // Two different blindnesses, one consequence. Either the model read text
+    // we could not clean, or it read more than we can remember — and in both
+    // cases what we do not know is what it read. Reading on is safe; acting on
+    // it is dangerous exactly to that extent.
+    if (!harmless) {
+      return escalate(
+        ctx,
+        ctx.unredacted === true
+          ? 'a hidden layer in a tool result could not be stripped'
+          : 'provenance is full: this session read more than the store holds, and stopped remembering',
+      )
+    }
   }
 
   if (!verdict.classified) {

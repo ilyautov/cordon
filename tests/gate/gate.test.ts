@@ -586,3 +586,40 @@ describe('gate: returning content to the same source', () => {
     expect(decision.kind === 'deny' && decision.reason).toMatch(/certificate|create|update/u)
   })
 })
+
+/**
+ * A store that has stopped remembering is the same blindness as a layer that
+ * could not be stripped: in both cases what the model read is what we do not
+ * know. Without this the ceiling would be an invitation — read enough and the
+ * second axis switches itself off.
+ */
+describe('gate: provenance that stopped remembering', () => {
+  function saturated() {
+    const ctx = setup({ mode: 'interactive' })
+    const store = new TaintStore(20)
+    // Varied on purpose: repeating one sentence produces the same windows over
+    // and over, and identical windows are one entry, not many.
+    const text = Array.from({ length: 40 }, (_, i) => `review ${i}: the item arrived on time and works`).join(' ')
+    store.record(text, { id: 'w1', kind: 'web', label: 'https://a.example/x', trust: 'untrusted' })
+    expect(store.saturated).toBe(true)
+    return { ...ctx, taint: store }
+  }
+
+  it('a full store escalates everything except reading', () => {
+    expect(gate({ tool: 'wb_reply', args: { text: 'hello' } }, saturated()).kind).toBe('ask')
+  })
+
+  it('a full store does not get in the way of reading', () => {
+    expect(gate({ tool: 'Read', args: { file_path: '/proj/a.ts' } }, saturated()).kind).toBe('allow')
+  })
+
+  it('the reason names the ceiling rather than the hidden layer', () => {
+    const decision = gate({ tool: 'wb_reply', args: { text: 'hello' } }, saturated())
+    expect(decision.kind === 'ask' && decision.reason).toContain('provenance is full')
+  })
+
+  it('a store below its ceiling changes nothing', () => {
+    const ctx = setup({ mode: 'interactive' })
+    expect(gate({ tool: 'wb_reply', args: { text: 'hello' } }, ctx).kind).toBe('allow')
+  })
+})

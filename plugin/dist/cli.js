@@ -7945,9 +7945,14 @@ function decide(call, ctx) {
   const selfHit = selfProtection(parts, ctx);
   if (selfHit) return selfHit;
   const verdict = classify(call, ctx.policy.tools);
-  if (ctx.unredacted === true) {
+  if (ctx.unredacted === true || ctx.taint.saturated) {
     const harmless = verdict.classified && verdict.effects.every((effect) => effect === "read" || effect === "summarize");
-    if (!harmless) return escalate(ctx, "a hidden layer in a tool result could not be stripped");
+    if (!harmless) {
+      return escalate(
+        ctx,
+        ctx.unredacted === true ? "a hidden layer in a tool result could not be stripped" : "provenance is full: this session read more than the store holds, and stopped remembering"
+      );
+    }
   }
   if (!verdict.classified) {
     return escalate(ctx, verdict.reason);
@@ -10629,8 +10634,18 @@ import { join as join3 } from "node:path";
 
 // src/provenance/store.ts
 var MAX_SOURCES_PER_SHINGLE = 4;
+var MAX_ENTRIES = 1e6;
 var SHARED_WINDOWS_FOR_KINSHIP = 3;
 var TaintStore = class _TaintStore {
+  /**
+   * The ceiling is a parameter rather than a constant reached through the
+   * module, so that a test can meet it. A limit no test ever reaches is a
+   * limit nobody has seen work.
+   */
+  constructor(maxEntries = MAX_ENTRIES) {
+    this.maxEntries = maxEntries;
+  }
+  maxEntries;
   sources = /* @__PURE__ */ new Map();
   /**
    * The sources of each window. A list rather than a single source: a window
@@ -10651,22 +10666,50 @@ var TaintStore = class _TaintStore {
    * result.
    */
   prefilter = /* @__PURE__ */ new Set();
+  /** Windows and atoms held, counted together: both are entries in the file. */
+  entries = 0;
+  full = false;
+  /**
+   * Whether the store has stopped remembering everything it was given.
+   *
+   * The gate escalates on this. It is deliberately not an error: what was
+   * recorded before the ceiling is still true, and refusing to read on would
+   * be a denial of service of our own making.
+   */
+  get saturated() {
+    return this.full;
+  }
+  /** Whether there is room for one more entry; the ceiling is noted when met. */
+  room() {
+    if (this.entries < this.maxEntries) return true;
+    this.full = true;
+    return false;
+  }
   record(text, source) {
     if (source.trust === "trusted") return;
     this.sources.set(source.id, source);
     const normalized = normalize(text);
     for (let at = 0; at + SHINGLE_WINDOW <= normalized.length; at += SHINGLE_STEP) {
       const codes = hashCodes(normalized, at, at + SHINGLE_WINDOW);
-      this.prefilter.add(codes[0]);
       const key = formatHash(codes);
       const known = this.byShingle.get(key);
-      if (!known) this.byShingle.set(key, [source.id]);
-      else if (!known.includes(source.id) && known.length < MAX_SOURCES_PER_SHINGLE) {
+      if (!known) {
+        if (!this.room()) break;
+        this.prefilter.add(codes[0]);
+        this.byShingle.set(key, [source.id]);
+        this.entries++;
+      } else if (!known.includes(source.id) && known.length < MAX_SOURCES_PER_SHINGLE) {
+        if (!this.room()) break;
+        this.prefilter.add(codes[0]);
         known.push(source.id);
+        this.entries++;
       }
     }
     for (const atom of atoms(text)) {
-      if (!this.byAtom.has(atom)) this.byAtom.set(atom, source.id);
+      if (this.byAtom.has(atom)) continue;
+      if (!this.room()) break;
+      this.byAtom.set(atom, source.id);
+      this.entries++;
     }
   }
   check(value) {
@@ -10776,9 +10819,9 @@ var TaintStore = class _TaintStore {
    * defence exactly where the file was corrupted or substituted. A refusal to
    * read is noticeable, a quiet loss of memory is not.
    */
-  static fromJSON(data) {
+  static fromJSON(data, maxEntries = MAX_ENTRIES) {
     const input = asObject2(data, "store");
-    const store = new _TaintStore();
+    const store = new _TaintStore(maxEntries);
     for (const raw of asArray(input, "sources", "store.sources")) {
       const source = asSource(raw);
       store.sources.set(source.id, source);
@@ -10788,12 +10831,20 @@ var TaintStore = class _TaintStore {
       if (!codes) throw new Error(`store.shingles: the key ${key} was not built by us`);
       store.prefilter.add(codes[0]);
       const known = store.byShingle.get(key);
-      if (!known) store.byShingle.set(key, [id]);
-      else if (!known.includes(id) && known.length < MAX_SOURCES_PER_SHINGLE) known.push(id);
+      if (!known) {
+        store.byShingle.set(key, [id]);
+        store.entries++;
+      } else if (!known.includes(id) && known.length < MAX_SOURCES_PER_SHINGLE) {
+        known.push(id);
+        store.entries++;
+      }
     }
     for (const [atom, id] of asPairs(input, "atoms", "store.atoms")) {
+      if (store.byAtom.has(atom)) continue;
       store.byAtom.set(atom, id);
+      store.entries++;
     }
+    if (store.entries >= maxEntries) store.full = true;
     return store;
   }
 };

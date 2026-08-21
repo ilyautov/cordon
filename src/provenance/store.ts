@@ -33,6 +33,26 @@ export interface TaintMatch {
 const MAX_SOURCES_PER_SHINGLE = 4
 
 /**
+ * The ceiling on how much the store will remember in one session.
+ *
+ * There was none, and that was a way to switch the defence off with nothing
+ * but volume. Measured on this machine: the state file comes out at roughly
+ * the size of the untrusted text read into it, and restoring it costs about
+ * 65 ms per megabyte — and every hook process, before every single tool call,
+ * restores it whole. Enough reading and the hook meets its timeout, which
+ * both harnesses read as leave to proceed. An attacker who cannot get past
+ * provenance could simply outgrow it.
+ *
+ * A million entries is about eight megabytes of state and about a second to
+ * load, serialize and write back. That is the ceiling, not the norm.
+ *
+ * Stopping quietly at the ceiling would be the same hole in a politer form:
+ * everything read afterwards would look clean. So the store says when it has
+ * stopped remembering, and the session is marked — see `saturated`.
+ */
+const MAX_ENTRIES = 1_000_000
+
+/**
  * How many shared windows count as a sign of common origin.
  *
  * One window is 32 consecutive characters, and two honest texts may well
@@ -76,6 +96,35 @@ export class TaintStore {
    */
   private readonly prefilter = new Set<number>()
 
+  /** Windows and atoms held, counted together: both are entries in the file. */
+  private entries = 0
+  private full = false
+
+  /**
+   * The ceiling is a parameter rather than a constant reached through the
+   * module, so that a test can meet it. A limit no test ever reaches is a
+   * limit nobody has seen work.
+   */
+  constructor(private readonly maxEntries: number = MAX_ENTRIES) {}
+
+  /**
+   * Whether the store has stopped remembering everything it was given.
+   *
+   * The gate escalates on this. It is deliberately not an error: what was
+   * recorded before the ceiling is still true, and refusing to read on would
+   * be a denial of service of our own making.
+   */
+  get saturated(): boolean {
+    return this.full
+  }
+
+  /** Whether there is room for one more entry; the ceiling is noted when met. */
+  private room(): boolean {
+    if (this.entries < this.maxEntries) return true
+    this.full = true
+    return false
+  }
+
   record(text: string, source: Source): void {
     // Exactly the label "trusted" is skipped and nothing else. A label of an
     // unknown kind means a broken adapter, and recording too much here is
@@ -86,16 +135,25 @@ export class TaintStore {
     const normalized = normalize(text)
     for (let at = 0; at + SHINGLE_WINDOW <= normalized.length; at += SHINGLE_STEP) {
       const codes = hashCodes(normalized, at, at + SHINGLE_WINDOW)
-      this.prefilter.add(codes[0])
       const key = formatHash(codes)
       const known = this.byShingle.get(key)
-      if (!known) this.byShingle.set(key, [source.id])
-      else if (!known.includes(source.id) && known.length < MAX_SOURCES_PER_SHINGLE) {
+      if (!known) {
+        if (!this.room()) break
+        this.prefilter.add(codes[0])
+        this.byShingle.set(key, [source.id])
+        this.entries++
+      } else if (!known.includes(source.id) && known.length < MAX_SOURCES_PER_SHINGLE) {
+        if (!this.room()) break
+        this.prefilter.add(codes[0])
         known.push(source.id)
+        this.entries++
       }
     }
     for (const atom of atoms(text)) {
-      if (!this.byAtom.has(atom)) this.byAtom.set(atom, source.id)
+      if (this.byAtom.has(atom)) continue
+      if (!this.room()) break
+      this.byAtom.set(atom, source.id)
+      this.entries++
     }
   }
 
@@ -229,9 +287,9 @@ export class TaintStore {
    * defence exactly where the file was corrupted or substituted. A refusal to
    * read is noticeable, a quiet loss of memory is not.
    */
-  static fromJSON(data: unknown): TaintStore {
+  static fromJSON(data: unknown, maxEntries: number = MAX_ENTRIES): TaintStore {
     const input = asObject(data, 'store')
-    const store = new TaintStore()
+    const store = new TaintStore(maxEntries)
 
     for (const raw of asArray(input, 'sources', 'store.sources')) {
       const source = asSource(raw)
@@ -245,12 +303,24 @@ export class TaintStore {
       if (!codes) throw new Error(`store.shingles: the key ${key} was not built by us`)
       store.prefilter.add(codes[0])
       const known = store.byShingle.get(key)
-      if (!known) store.byShingle.set(key, [id])
-      else if (!known.includes(id) && known.length < MAX_SOURCES_PER_SHINGLE) known.push(id)
+      if (!known) {
+        store.byShingle.set(key, [id])
+        store.entries++
+      } else if (!known.includes(id) && known.length < MAX_SOURCES_PER_SHINGLE) {
+        known.push(id)
+        store.entries++
+      }
     }
     for (const [atom, id] of asPairs(input, 'atoms', 'store.atoms')) {
+      if (store.byAtom.has(atom)) continue
       store.byAtom.set(atom, id)
+      store.entries++
     }
+    // A file already at the ceiling was written by a session that had stopped
+    // remembering. The mark travels in the session state, but a store restored
+    // full has to say so on its own as well: the next process must not decide
+    // it is starting from a clean memory.
+    if (store.entries >= maxEntries) store.full = true
     return store
   }
 }
