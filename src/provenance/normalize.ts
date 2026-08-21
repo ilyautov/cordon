@@ -1,3 +1,5 @@
+import { homedir } from 'node:os'
+
 /** The shingle window length, in characters of normalized text. */
 export const SHINGLE_WINDOW = 32
 
@@ -48,7 +50,14 @@ export function atoms(text: string): string[] {
     // sticks to a path just as it sticks to a link. Without trimming, a path
     // from a document lands in the index with a foreign tail and never
     // matches again — that is, it quietly stops being found.
-    found.add(trimTail(match[0]))
+    const path = trimTail(match[0])
+    found.add(path)
+    // Both spellings, always. A page writes `~/.ssh/config` and the agent
+    // calls Read with the absolute path, or the other way round; one spelling
+    // in the index and the other in the argument means the two never meet,
+    // and the page chooses which spelling it writes.
+    const other = otherSpelling(path)
+    if (other !== null) found.add(other)
   }
   for (const match of source.matchAll(/\b[a-z0-9][a-z0-9_-]{7,}\b/giu)) {
     const token = match[0].toLowerCase()
@@ -67,6 +76,21 @@ export function atoms(text: string): string[] {
  * per offset eat an order of magnitude. Numbers let a window be rejected
  * before the key is needed at all.
  */
+/**
+ * The same path written the other way: `~/x` against `<home>/x`.
+ *
+ * The home directory is the agent's own — the hook runs as the agent — so
+ * this is a fact about the machine rather than a guess. A home of `/` gives
+ * nothing back: every absolute path would otherwise acquire a tilde twin.
+ */
+function otherSpelling(path: string): string | null {
+  const home = homedir().toLowerCase().replace(/\/+$/u, '')
+  if (home === '') return null
+  if (path.startsWith('~/')) return home + path.slice(1)
+  if (path.startsWith(`${home}/`)) return `~${path.slice(home.length)}`
+  return null
+}
+
 /** Trailing punctuation belongs to the sentence, not to the token. */
 function trimTail(token: string): string {
   return token.toLowerCase().replace(/[.,;:!?)\]]+$/u, '')

@@ -1,4 +1,5 @@
 import type { Source, SourceView, TrustLabel } from '../core/types.js'
+import { decodings } from './decode.js'
 import {
   SHINGLE_STEP,
   SHINGLE_WINDOW,
@@ -203,13 +204,59 @@ export class TaintStore {
       }
     }
 
+    // The same value in another spelling. A match found in a decoded form
+    // says nothing about where it sits in the given one, so the whole value
+    // is declared tainted: quarantine cuts with a margin rather than guesses,
+    // and it is the same rule the offset mapping falls back to above.
+    for (const variant of decodings(value)) {
+      const extra = this.probe(variant)
+      if (extra.ids.length === 0) continue
+      const whole: [number, number] = [0, value.length]
+      spans.push(whole)
+      for (const id of extra.ids) {
+        hits.add(id)
+        perSource.set(id, [...(perSource.get(id) ?? []), whole])
+      }
+      found.push(...extra.atoms)
+    }
+
     return {
       tainted: hits.size > 0,
       sources: [...hits].map((id) => this.sources.get(id)).filter((s): s is Source => Boolean(s)),
       spans: merge(spans),
       bySource: [...perSource].map(([id, own]) => ({ id, spans: merge(own) })),
-      atoms: found,
+      atoms: [...new Set(found)],
     }
+  }
+
+  /**
+   * Which sources a value touches, without working out where.
+   *
+   * Used for the decoded spellings of an argument, where the offsets belong to
+   * a string the caller never had: the answer needed there is whether, not
+   * where.
+   */
+  private probe(value: string): { ids: string[]; atoms: string[] } {
+    const ids = new Set<string>()
+    const found: string[] = []
+
+    const normalized = normalize(value)
+    for (let at = 0; at + SHINGLE_WINDOW <= normalized.length; at++) {
+      const codes = hashCodes(normalized, at, at + SHINGLE_WINDOW)
+      if (!this.prefilter.has(codes[0])) continue
+      const owners = this.byShingle.get(formatHash(codes))
+      if (owners === undefined) continue
+      for (const id of owners) ids.add(id)
+    }
+
+    for (const atom of atoms(value)) {
+      const sourceId = this.byAtom.get(atom)
+      if (sourceId === undefined) continue
+      ids.add(sourceId)
+      found.push(atom)
+    }
+
+    return { ids: [...ids], atoms: found }
   }
 
   /**

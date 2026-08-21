@@ -7371,7 +7371,7 @@ import { fileURLToPath } from "node:url";
 
 // src/adapters/claude-code/main.ts
 import { accessSync, constants } from "node:fs";
-import { homedir as homedir2 } from "node:os";
+import { homedir as homedir3 } from "node:os";
 import { join as join6 } from "node:path";
 
 // src/core/mkdir.ts
@@ -7719,6 +7719,7 @@ function classify(call, fromPolicy) {
 }
 
 // src/provenance/normalize.ts
+import { homedir as homedir2 } from "node:os";
 var SHINGLE_WINDOW = 32;
 var SHINGLE_STEP = 8;
 function normalize(text) {
@@ -7734,13 +7735,23 @@ function atoms(text) {
     found.add(match[0].toLowerCase());
   }
   for (const match of source.matchAll(/(?<![\w/])[/~][\w./-]{4,}/gu)) {
-    found.add(trimTail(match[0]));
+    const path = trimTail(match[0]);
+    found.add(path);
+    const other = otherSpelling(path);
+    if (other !== null) found.add(other);
   }
   for (const match of source.matchAll(/\b[a-z0-9][a-z0-9_-]{7,}\b/giu)) {
     const token = match[0].toLowerCase();
     if (/\d/u.test(token)) found.add(token);
   }
   return [...found];
+}
+function otherSpelling(path) {
+  const home = homedir2().toLowerCase().replace(/\/+$/u, "");
+  if (home === "") return null;
+  if (path.startsWith("~/")) return home + path.slice(1);
+  if (path.startsWith(`${home}/`)) return `~${path.slice(home.length)}`;
+  return null;
 }
 function trimTail(token) {
   return token.toLowerCase().replace(/[.,;:!?)\]]+$/u, "");
@@ -10632,6 +10643,39 @@ import { createHash } from "node:crypto";
 import { readFileSync as readFileSync2, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join as join3 } from "node:path";
 
+// src/provenance/decode.ts
+var MAX_ROUNDS = 3;
+function decodings(value) {
+  if (!value.includes("%") && !value.includes("+")) return [];
+  const seen = /* @__PURE__ */ new Set([value]);
+  const out = [];
+  let current = value;
+  for (let round = 0; round < MAX_ROUNDS; round++) {
+    const next = decodeOnce(current);
+    if (next === null || seen.has(next)) break;
+    seen.add(next);
+    out.push(next);
+    current = next;
+  }
+  const plus = value.replace(/\+/gu, " ");
+  if (!seen.has(plus)) {
+    seen.add(plus);
+    out.push(plus);
+    const decoded = decodeOnce(plus);
+    if (decoded !== null && !seen.has(decoded)) out.push(decoded);
+  }
+  return out;
+}
+function decodeOnce(value) {
+  if (!value.includes("%")) return null;
+  try {
+    const decoded = decodeURIComponent(value);
+    return decoded === value ? null : decoded;
+  } catch {
+    return null;
+  }
+}
+
 // src/provenance/store.ts
 var MAX_SOURCES_PER_SHINGLE = 4;
 var MAX_ENTRIES = 1e6;
@@ -10749,13 +10793,50 @@ var TaintStore = class _TaintStore {
         at = lowered.indexOf(atom, at + atom.length);
       }
     }
+    for (const variant of decodings(value)) {
+      const extra = this.probe(variant);
+      if (extra.ids.length === 0) continue;
+      const whole = [0, value.length];
+      spans.push(whole);
+      for (const id of extra.ids) {
+        hits.add(id);
+        perSource.set(id, [...perSource.get(id) ?? [], whole]);
+      }
+      found.push(...extra.atoms);
+    }
     return {
       tainted: hits.size > 0,
       sources: [...hits].map((id) => this.sources.get(id)).filter((s) => Boolean(s)),
       spans: merge(spans),
       bySource: [...perSource].map(([id, own2]) => ({ id, spans: merge(own2) })),
-      atoms: found
+      atoms: [...new Set(found)]
     };
+  }
+  /**
+   * Which sources a value touches, without working out where.
+   *
+   * Used for the decoded spellings of an argument, where the offsets belong to
+   * a string the caller never had: the answer needed there is whether, not
+   * where.
+   */
+  probe(value) {
+    const ids = /* @__PURE__ */ new Set();
+    const found = [];
+    const normalized = normalize(value);
+    for (let at = 0; at + SHINGLE_WINDOW <= normalized.length; at++) {
+      const codes = hashCodes(normalized, at, at + SHINGLE_WINDOW);
+      if (!this.prefilter.has(codes[0])) continue;
+      const owners = this.byShingle.get(formatHash(codes));
+      if (owners === void 0) continue;
+      for (const id of owners) ids.add(id);
+    }
+    for (const atom of atoms(value)) {
+      const sourceId = this.byAtom.get(atom);
+      if (sourceId === void 0) continue;
+      ids.add(sourceId);
+      found.push(atom);
+    }
+    return { ids: [...ids], atoms: found };
   }
   /**
    * Groups of sources whose text matches verbatim.
@@ -11972,7 +12053,7 @@ function deny(reason) {
 
 // src/adapters/claude-code/main.ts
 function cordonHome() {
-  return process.env.CORDON_HOME ?? join6(homedir2(), ".cordon");
+  return process.env.CORDON_HOME ?? join6(homedir3(), ".cordon");
 }
 function runHook(stdin, home = cordonHome()) {
   let event;

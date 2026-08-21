@@ -2,7 +2,7 @@
 
 # Cordon: a deterministic layer between untrusted text and agent actions
 
-> ⚠️ Early development. The core and two adapters are ready, for Claude Code and Gemini CLI: hidden-layer neutralization, provenance of untrusted data, an intent certificate, an action gate, a source-influence footer under the model's answer, and packaging that intercepts four harness events. 883 tests, a corpus of 14 pinned attack vectors and 7 legitimate documents, two runtime dependencies. Installation is described in [docs/install.md](docs/install.md) and [docs/install-gemini.md](docs/install-gemini.md). The wiring has not been exercised on a live harness yet, and one gap is named outright: whether `updatedInput` applies without a permission decision is not confirmed by the harness documentation.
+> ⚠️ Early development. The core and two adapters are ready, for Claude Code and Gemini CLI: hidden-layer neutralization, provenance of untrusted data, an intent certificate, an action gate, a source-influence footer under the model's answer, and packaging that intercepts four harness events. 900 tests, a corpus of 14 pinned attack vectors and 7 legitimate documents, two runtime dependencies. Installation is described in [docs/install.md](docs/install.md) and [docs/install-gemini.md](docs/install-gemini.md). The wiring has not been exercised on a live harness yet, and one gap is named outright: whether `updatedInput` applies without a permission decision is not confirmed by the harness documentation.
 
 > [Русская версия](README.ru.md)
 
