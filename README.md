@@ -8,7 +8,7 @@
 
 [![ci](https://github.com/ilyautov/cordon/actions/workflows/ci.yml/badge.svg)](https://github.com/ilyautov/cordon/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.2.3-blueviolet)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.3.0-blueviolet)](CHANGELOG.md)
 [![Finding kinds](https://img.shields.io/badge/finding%20kinds-5-1F6F5C)](#what-gets-stripped)
 [![Attack vectors](https://img.shields.io/badge/attack%20vectors-18-1F6F5C)](#development)
 ![node 22+](https://img.shields.io/badge/node-22%2B-1F6F5C)

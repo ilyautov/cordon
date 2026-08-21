@@ -2,7 +2,7 @@
 
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versions follow [SemVer](https://semver.org/).
 
-## [Unreleased]
+## [0.3.0] - 2026-08-21
 
 The data axis now answers the fact of reading, not only a match. The adversarial battery had measured the working profile at 75% attack success rate, and almost the whole tail was attacks whose arguments share no recorded byte with the page that ordered them: a paraphrase, a fourth round of percent-encoding, base64, rot13, a `curl -d @file` with a clean command line, a fabricated "user: yes, I confirm". String matching cannot close that class in principle — judging by meaning is the model-in-the-loop the first invariant forbids.
 

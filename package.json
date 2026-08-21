@@ -1,6 +1,6 @@
 {
   "name": "cordon",
-  "version": "0.2.3",
+  "version": "0.3.0",
   "description": "A deterministic layer between untrusted content and agent actions: it removes the hidden layer, remembers where data came from, and keeps calls inside the boundaries of the intent.",
   "keywords": [
     "prompt-injection",
