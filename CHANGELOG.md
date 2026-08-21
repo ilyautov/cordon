@@ -2,6 +2,18 @@
 
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versions follow [SemVer](https://semver.org/).
 
+## [0.2.3] - 2026-08-21
+
+Cordon has been run on a live harness. Claude Code 2.1.236, hooks bound to all four events, a session of its own and a home of its own; the whole path was watched from the outside rather than from a test double. All four events fire. A call outside the certificate is refused and the file is not created. A link that came out of a file that was read is refused, because a URL cannot be partly quarantined and a truncated one is a different call. The source-influence footer appears under the model's answer. The record, with the journal lines it produced, is in [docs/live-run.md](docs/live-run.md).
+
+The question both READMEs named outright is answered: the harness applies `updatedInput` without a permission decision. Asked for a file of three lines, one of them copied verbatim out of untrusted text, what landed on disk was the other two. It applies only to a call the harness was going to allow anyway — with the tool not pre-approved the write never happened at all — so quarantine is not a second permission system and does not become one.
+
+That measurement came with the finding that mattered most, and it was not good news. A refusal announces itself: the call did not happen and the model says so. A rewrite goes through with a piece cut out, and nothing tells the model — its account of the turn described three lines while the file had two. Every refusal in that run was journaled and this was not, which left the file itself as the only record that anything had been changed. A rewrite is now written to the journal alongside the refusals.
+
+`ToolSearch` is classified as `read`. Where the harness defers a tool, the model reaches it only through a schema lookup, and an unclassified tool escalates — so a profile of `read, summarize` could not look up `WebFetch`, and the journal recorded a refusal against the lookup rather than against anything the model wanted to do. That is a false positive in ordinary work, which this project treats as worse than a miss. Nothing is loosened by listing it: a schema is not a call, and the call it leads to is classified on its own merits.
+
+Gemini CLI still has no live run. Its events, their names and the shape of a rewrite are all different, and nothing measured here transfers to it.
+
 ## [0.2.2] - 2026-08-21
 
 The name an argument goes by no longer decides whether it is a path. The same three lists — which argument names hold a path, which hold a URL, which hold a command — existed in three copies, in the gate and in each adapter, and they had drifted apart. The gate knew `urls`, `webhook`, `baseurl` and the plural spellings; the adapters knew a shorter list without them. `filename` was in none of the three, and it is what a tool call says when it writes a file.
