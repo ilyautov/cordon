@@ -2,7 +2,7 @@
 
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versions follow [SemVer](https://semver.org/).
 
-## [Unreleased]
+## [0.5.0] - 2026-08-21
 
 Cordon now runs inside a LangChain agent's own loop. `createCordonMiddleware(options)` — built on the v1 `createMiddleware` contract — wires the same core to two hooks, and the adapter holds no security logic, as everywhere else. `beforeModel` feeds the last user message to the core, so this transport keeps what the MCP gateway does not have: real user turns, with the certificate issued per turn, the exposure and unredacted marks lifted by a new message, and the user-named atoms feeding the exposure exemption. The hook fires on every agent step and the loop never appends human messages, so a turn is told from a repeated pass by position and text — object identity would not survive LangGraph rebuilding messages between steps, and the stateless identical-text case is named in the docs as the blind spot it is.
 
