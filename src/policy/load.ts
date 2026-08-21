@@ -107,6 +107,19 @@ function validate(parsed: unknown, path: string): Policy {
 
   // The field is read as an own property: the policy file is parsed from
   // outside, and `__proto__` inside it must not look like a setting.
+  if (Object.hasOwn(input, 'exposure')) {
+    const exposure = input['exposure']
+    // A silent default here would mean the human switched the rule off, it
+    // stayed on, and they never learned about it — the same argument as for
+    // output.footer below.
+    if (typeof exposure !== 'boolean') {
+      throw new Error(`${path}: exposure must be true or false, not ${String(exposure)}`)
+    }
+    policy.exposure = exposure
+  }
+
+  // The field is read as an own property: the policy file is parsed from
+  // outside, and `__proto__` inside it must not look like a setting.
   if (Object.hasOwn(input, 'output')) {
     const output = asObject(input['output'], `${path}: output`)
     if (Object.hasOwn(output, 'footer')) {

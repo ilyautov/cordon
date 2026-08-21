@@ -70,13 +70,20 @@ describe('handle', () => {
   })
 
   it('PreToolUse lets a reply to a review through', () => {
+    // Under the exposure rule the reply goes through when the user named the
+    // review: the read happens after the prompt, so the mark is up, and the
+    // number in the arguments came from the operator's own message. A number
+    // the review itself does not carry — otherwise the taint axis would
+    // answer first.
     const shared = env()
+    handle({ kind: 'UserPromptSubmit', sessionId: 's5', prompt: 'reply to review 44556677' }, shared)
     handle(
       { kind: 'PostToolUse', sessionId: 's5', call: { tool: 'wb_reviews', args: {} }, response: REVIEW },
       shared,
     )
     const out = handle(
-      { kind: 'PreToolUse', sessionId: 's5', call: { tool: 'wb_reply', args: { text: 'thank you for the review' } } },
+      { kind: 'PreToolUse', sessionId: 's5',
+        call: { tool: 'wb_reply', args: { nmId: '44556677', text: 'thank you for the review' } } },
       shared,
     )
     expect(out).toEqual({})
@@ -333,14 +340,19 @@ describe('handle: the same quotation in another spelling', () => {
   })
 
   it('an answer that merely contains a percent is not touched', () => {
+    // The prompt names the review: after an untrusted read the exposure rule
+    // escalates a consequential call whose destination nobody named, and this
+    // test measures the percent, not the mark.
     const shared = env()
+    handle({ kind: 'UserPromptSubmit', sessionId: 'e2', prompt: 'reply to review 44556677' }, shared)
     handle(
       { kind: 'PostToolUse', sessionId: 'e2', call: { tool: 'Read', args: { file_path: '/tmp/notes.md' } },
         response: ID },
       shared,
     )
     const out = handle(
-      { kind: 'PreToolUse', sessionId: 'e2', call: { tool: 'wb_reply', args: { text: 'a 50% discount until Friday' } } },
+      { kind: 'PreToolUse', sessionId: 'e2',
+        call: { tool: 'wb_reply', args: { nmId: '44556677', text: 'a 50% discount until Friday' } } },
       shared,
     )
     expect(out).toEqual({})

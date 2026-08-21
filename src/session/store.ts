@@ -25,7 +25,33 @@ export interface SessionState {
    * An absent field means "no narrowing was asked for", that is, null.
    */
   directive?: EffectClass[] | null
+  /**
+   * The session read untrusted content after the last user message.
+   *
+   * The mark answers a question provenance cannot: the battery measured that
+   * the paraphrase/encoding tail of attacks carries not a single recorded
+   * byte in its arguments, so matching against what was read never fires
+   * there. What is known is that the read happened — and that is what this
+   * field records, together with the source's label for the refusal reason.
+   * `at` is the turn of the read.
+   *
+   * An absent field means "no mark".
+   */
+  exposure?: { at: number; source: string } | null
+  /**
+   * Atoms — links, paths, identifiers — extracted from the user's own
+   * messages. A call under the exposure mark passes when every one of its
+   * targets is in this list: the destination was named by the human, not by
+   * the page. Capped rather than unbounded: a destination named long ago
+   * expires instead of the list growing for the whole session.
+   *
+   * An absent field means "the user named nothing", that is, an empty list.
+   */
+  userAtoms?: string[]
 }
+
+/** The cap on atoms the user named. Exceeding it drops the OLDEST ones (FIFO). */
+export const MAX_USER_ATOMS = 500
 
 /**
  * The message text accumulated from the display event's deltas.
@@ -129,7 +155,7 @@ export class SessionStore {
     }
 
     if (states.length === 0) {
-      return { turn: 0, taint: new TaintStore(), unredacted: false, directive: null }
+      return { turn: 0, taint: new TaintStore(), unredacted: false, directive: null, exposure: null, userAtoms: [] }
     }
     return states.reduce(mergeStates)
   }
@@ -194,6 +220,8 @@ export class SessionStore {
     const taint = Object.hasOwn(data, 'taint') ? data['taint'] : undefined
     const unredacted = Object.hasOwn(data, 'unredacted') ? data['unredacted'] : undefined
     const directive = Object.hasOwn(data, 'directive') ? data['directive'] : undefined
+    const exposure = Object.hasOwn(data, 'exposure') ? data['exposure'] : undefined
+    const userAtoms = Object.hasOwn(data, 'userAtoms') ? data['userAtoms'] : undefined
     if (
       typeof version !== 'number' || !READABLE.has(version) ||
       typeof turn !== 'number' || !Number.isInteger(turn) || turn < 0
@@ -217,12 +245,30 @@ export class SessionStore {
     ) {
       throw new Error(`the session state ${shown(sessionId)} is incompatible`)
     }
+    // The exposure mark and the user atoms are validated by the same rule as
+    // the mark above, and for the same reason: coercing a malformed value to
+    // "no mark" would lift an escalation, and coercing malformed user atoms
+    // to an empty list would silently drop destinations the user named. An
+    // absent field is not an error: version-4 files written before these
+    // fields existed must still be readable, and absence means exactly
+    // absence.
+    if (exposure !== undefined && exposure !== null && !isExposure(exposure)) {
+      throw new Error(`the session state ${shown(sessionId)} is incompatible`)
+    }
+    if (
+      userAtoms !== undefined &&
+      (!Array.isArray(userAtoms) || userAtoms.some((item) => typeof item !== 'string'))
+    ) {
+      throw new Error(`the session state ${shown(sessionId)} is incompatible`)
+    }
 
     return {
       turn,
       taint: TaintStore.fromJSON(taint),
       unredacted: unredacted === true,
       directive: Array.isArray(directive) ? (directive as EffectClass[]) : null,
+      exposure: isExposure(exposure) ? exposure : null,
+      userAtoms: Array.isArray(userAtoms) ? (userAtoms as string[]).slice(-MAX_USER_ATOMS) : [],
     }
   }
 
@@ -235,6 +281,8 @@ export class SessionStore {
       taint: state.taint.toJSON(),
       unredacted: state.unredacted === true,
       directive: state.directive ?? null,
+      exposure: state.exposure ?? null,
+      userAtoms: (state.userAtoms ?? []).slice(-MAX_USER_ATOMS),
     })
 
     atomicWrite(dir, path, body)
@@ -395,13 +443,32 @@ export function safeName(sessionId: string): string {
 }
 
 /**
+ * The shape of a stored exposure mark.
+ *
+ * The fields are read as own properties: the file comes from outside, and a
+ * lookup through the prototype would return a member of Object.prototype
+ * instead of an absent field.
+ */
+function isExposure(value: unknown): value is { at: number; source: string } {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false
+  const data = value as Record<string, unknown>
+  const at = Object.hasOwn(data, 'at') ? data['at'] : undefined
+  const source = Object.hasOwn(data, 'source') ? data['source'] : undefined
+  return typeof at === 'number' && Number.isInteger(at) && at >= 0 &&
+    typeof source === 'string' && source !== ''
+}
+
+/**
  * Two pieces of one session's state into one.
  *
  * Every field merges towards the stricter reading. Provenance unites, because
  * a source one process saw is a source that was read. The mark is an or, for
  * the same reason it exists. The turn is the later one, since it only goes
  * forward. A narrowing intersects — `narrow` intersects and nothing else, so
- * a state file can take rights away and can never hand them back.
+ * a state file can take rights away and can never hand them back. The
+ * exposure mark is an or as well: a piece that carries it means the session
+ * did read untrusted content, and a piece that does not only means that
+ * writer did not see the read.
  */
 function mergeStates(into: SessionState, other: SessionState): SessionState {
   into.taint.absorb(other.taint.toJSON())
@@ -410,7 +477,32 @@ function mergeStates(into: SessionState, other: SessionState): SessionState {
     taint: into.taint,
     unredacted: into.unredacted === true || other.unredacted === true,
     directive: mergeDirectives(into.directive ?? null, other.directive ?? null),
+    exposure: into.exposure ?? other.exposure ?? null,
+    userAtoms: mergeUserAtoms(into.userAtoms ?? [], other.userAtoms ?? []),
   }
+}
+
+/**
+ * The one field that merges towards the PERMISSIVE reading, and deliberately.
+ *
+ * A forged atom here exempts a call from the exposure rule, so the question
+ * is who can write one into a state file. Writing there means writing into
+ * `~/.cordon/sessions`, and that is closed twice: self-protection denies the
+ * agent any path under Cordon's home (checked before everything else in the
+ * gate, overridden by nothing), and the directory's mode 0700 denies every
+ * other user of the machine. What remains is a process running as the user
+ * outside the agent — and such a process can edit the policy file itself,
+ * against which no merge rule defends. The same argument already appears at
+ * the directive: a state file can only be written by someone who needs no
+ * forgery. The union is capped, so two writers cannot grow the list without
+ * bound either.
+ */
+function mergeUserAtoms(a: readonly string[], b: readonly string[]): string[] {
+  const out: string[] = []
+  for (const atom of [...a, ...b]) {
+    if (!out.includes(atom)) out.push(atom)
+  }
+  return out.slice(-MAX_USER_ATOMS)
 }
 
 /** Null is the absence of a narrowing, so it narrows nothing. */

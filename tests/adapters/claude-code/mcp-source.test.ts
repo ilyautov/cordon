@@ -204,7 +204,11 @@ describe('the default for an MCP tool: source', () => {
   })
 
   it('the default does not escalate the next call', () => {
+    // The operator names the entry: without it the exposure rule would
+    // escalate the call on the fact of the untrusted read, and the test would
+    // measure the mark rather than the source-view default.
     const shared = env()
+    handle({ kind: 'UserPromptSubmit', sessionId: 'm9', prompt: 'record a note under entry 44556677' }, shared)
     handle(
       { kind: 'PostToolUse', sessionId: 'm9',
         call: { tool: 'mcp__wb__reviews', args: {} },
@@ -212,7 +216,8 @@ describe('the default for an MCP tool: source', () => {
       shared,
     )
     const out = handle(
-      { kind: 'PreToolUse', sessionId: 'm9', call: { tool: 'wb_note', args: { text: 'an ordinary note' } } },
+      { kind: 'PreToolUse', sessionId: 'm9',
+        call: { tool: 'wb_note', args: { nmId: '44556677', text: 'an ordinary note' } } },
       shared,
     )
     expect(out).toEqual({})

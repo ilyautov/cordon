@@ -86,14 +86,24 @@ describe('the loyalty corpus: documents the human reads as source', () => {
     })
 
     it(`${file}, once read, does not escalate the next call`, () => {
+      // The exposure rule escalates a consequential call whose destination
+      // nobody named — on the fact of the read, not on this file's content.
+      // The operator's prompt names the review, the call carries the number,
+      // and what is measured stays the same: an honest document poisons
+      // nothing.
       const shared = env()
+      handle(
+        { kind: 'UserPromptSubmit', sessionId: `esc-${file}`, prompt: 'reply to review 44556677' },
+        shared,
+      )
       handle(
         { kind: 'PostToolUse', sessionId: `esc-${file}`, call: { tool: 'Read', args: { file_path: path } },
           response: readFileSync(path, 'utf8') },
         shared,
       )
       const out = handle(
-        { kind: 'PreToolUse', sessionId: `esc-${file}`, call: { tool: 'wb_reply', args: { text: 'done' } } },
+        { kind: 'PreToolUse', sessionId: `esc-${file}`,
+          call: { tool: 'wb_reply', args: { nmId: '44556677', text: 'done' } } },
         shared,
       )
       expect(out).toEqual({})

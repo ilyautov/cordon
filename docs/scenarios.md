@@ -61,11 +61,11 @@ is in the certificate.
 
 | Claim | Test |
 |---|---|
-| A reply to a poisoned review goes through | `tests/cordon.test.ts`, "a reply to a review goes through" |
-| Changing a price does not go through and lands in the log | `tests/cordon.test.ts`, "changing a price does not go through and lands in the log" |
+| A reply to a review goes through when the user named the review | `tests/cordon.test.ts`, "a reply to a review goes through when the user named the review" |
+| Changing a price does not go through and lands in the log | `tests/cordon.test.ts`, "a price change does not go through and lands in the log" |
 | The owner learns about the block outside the agent's channel | same file, the event-file check |
 | A successful call does not clutter the log | `tests/cordon.test.ts`, "a successful call is not written to the log" |
-| Taint survives a restart of the hook process | `tests/cordon.test.ts`, "taint recorded by one instance is seen by another" |
+| Taint survives a restart of the hook process | `tests/cordon.test.ts`, "a taint written by one instance is seen by another" |
 
 Notification here is not decoration. Autonomous mode is useless without it: the
 agent silently stops working, and the owner finds out a day later. The
@@ -80,14 +80,18 @@ it executes the declared intent rather than guessing at it. The mitigation is
 organizational only: the out-of-the-box default grants just `read` and
 `summarize`, and widening it is a deliberate act by the user.
 
-**Verbatim transfer of text outward is allowed.** A reply to a review is a
-reversible effect, and a reversible effect answers only to the target: a link,
-a path, an item number. The agent may publish the injection in full in its
-reply, from where the next agent will read it. This is the worm vector, and it is
-left open knowingly. The rule cannot be revoked: without it,
-summarizing what was read, quoting a document and answering from it all go to
-quarantine, meaning all meaningful work stops. The chain breaks not where the
-text was published but where the next Cordon stands.
+**Verbatim transfer of text outward was left open knowingly — and the exposure
+mark closed it.** A reply to a review is `create`, a reversible effect, and a
+reversible effect answers only to a target: a link, a path, an item number. So
+the agent could publish the injection in full in its reply, from where the
+next agent would read it — the worm vector, measured by the battery at a pass
+on every working profile. The mark answers it without judging the text: after
+an untrusted read, publishing is a consequential act, and it escalates unless
+the operator named the destination. The price is the friction named above:
+the night run's replies now need the review named in the operator's
+instruction. What stays open is narrower: a retelling onto a destination the
+user themselves named — the exemption looks at where the call goes, not at
+what it carries, and that residue is what resource bounds are for.
 
 **A local draft suffers more than a public action.** `Write` is classified as
 `create` and `update`, and `update` is irreversible. Writing a quotation into a
@@ -139,16 +143,20 @@ transparency.
 
 | Claim | Test |
 |---|---|
-| The hidden callout is stripped before the model reads it | `tests/scenarios/web-research.test.ts`, "a hidden callout for the assistant is stripped before the model reads it" |
-| Visible advertising stays in the text and produces no findings | same file, "visible advertising stays: a declared boundary, not a defect" |
-| Both axes are silent on page reading | same file, "reading pages is inside the certificate, both axes are silent here" |
+| The hidden insert is removed before the model reads it | `tests/scenarios/web-research.test.ts`, "a hidden insert for the assistant is removed before the model reads it" |
+| Visible advertising stays in the text and produces no findings | same file, "visible advertising stays: that is a declared boundary, not a defect" |
+| A page the user named passes after an untrusted read | same file, "reading pages is in the certificate, and a page the user named passes" |
 | The source is available to show to the user | same file, "the source stays in the envelope and is available to show to the user" |
 | A visible directive for the assistant is not removed | same file, "a visible directive for the assistant is not removed from the text" |
-| Summarizing advertising outward goes through | same file, "summarizing advertising outward goes through, and that is the right direction of error" |
+| Republishing what was read escalates under the mark | same file, "republishing what was read now escalates: the mark answers the worm vector" |
+| A retelling onto a destination the user named still goes through | same file, "a retelling onto a destination the user named still goes through" |
 
-The last two tests assert that Cordon does **not** close the vector. They are
-written so that the opposite claim breaks the build instead of remaining a
-verbal promise.
+The last three tests pin the boundary in both directions. The worm vector —
+republishing an injection verbatim — was open knowingly and is now closed by
+the exposure mark; what remains open is the retelling onto a destination from
+the user's own message, and the visible directive that no component may judge.
+They are written so that the opposite claim in either direction breaks the
+build instead of remaining a verbal promise.
 
 ### What stays open
 

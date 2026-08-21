@@ -2,6 +2,16 @@
 
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versions follow [SemVer](https://semver.org/).
 
+## [Unreleased]
+
+The data axis now answers the fact of reading, not only a match. The adversarial battery had measured the working profile at 75% attack success rate, and almost the whole tail was attacks whose arguments share no recorded byte with the page that ordered them: a paraphrase, a fourth round of percent-encoding, base64, rot13, a `curl -d @file` with a clean command line, a fabricated "user: yes, I confirm". String matching cannot close that class in principle — judging by meaning is the model-in-the-loop the first invariant forbids.
+
+The mechanism follows Progent (arXiv:2504.11703) and FIDES P-T (arXiv:2505.23643). A session that read untrusted content is marked, and while the mark stands, a call acting beyond reading — any irreversible class, plus `create`, which carries the verbatim-republish worm — escalates unless every one of its targets was named by the user in their own message. Atoms are extracted from user prompts with the same function provenance uses, so a link or an identifier is the same token on both sides of the comparison. A new user message lifts the mark, on the same argument as for the uncleaned-layer mark: the user has seen the outcome of that turn and could stop it. Content returning to the very file it was read from stays exempt — the mark does not touch the return-to-origin path.
+
+Measured on the regenerated battery: the wide profile drops from 79% to 7% ASR, and a fourth profile, `wide-no-exposure`, keeps the old world in the run so the delta is measured rather than asserted. The two rows that still succeed are documented, not hidden: exfiltration to a destination the user themselves named (the exemption is by destination, not by payload — resource bounds are the answer) and the false-kinship denial of service. The price is measured too: after any untrusted read, an autonomous agent's consequential calls escalate until the operator names the destination — [docs/adversarial-report.md](docs/adversarial-report.md) prices both directions.
+
+The rule is switched off with `exposure: false` in the policy. The default is on, a non-boolean value is a load error rather than a silent default, and `cordon doctor` names the off state out loud with its price, because from the outside it is indistinguishable from a session that simply read nothing untrusted.
+
 ## [0.2.3] - 2026-08-21
 
 Cordon has been run on a live harness. Claude Code 2.1.236, hooks bound to all four events, a session of its own and a home of its own; the whole path was watched from the outside rather than from a test double. All four events fire. A call outside the certificate is refused and the file is not created. A link that came out of a file that was read is refused, because a URL cannot be partly quarantined and a truncated one is a different call. The source-influence footer appears under the model's answer. The record, with the journal lines it produced, is in [docs/live-run.md](docs/live-run.md).

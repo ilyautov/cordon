@@ -7407,6 +7407,7 @@ var DEFAULT_POLICY = {
   trustedSources: [],
   toolsReturn: {},
   notify: { file: null },
+  exposure: true,
   output: { footer: true }
 };
 
@@ -7490,6 +7491,13 @@ function validate(parsed, path) {
     policy.notify = {
       file: typeof notify.file === "string" ? notify.file : null
     };
+  }
+  if (Object.hasOwn(input, "exposure")) {
+    const exposure = input["exposure"];
+    if (typeof exposure !== "boolean") {
+      throw new Error(`${path}: exposure must be true or false, not ${String(exposure)}`);
+    }
+    policy.exposure = exposure;
   }
   if (Object.hasOwn(input, "output")) {
     const output = asObject(input["output"], `${path}: output`);
@@ -7616,6 +7624,109 @@ function touchesCordonItself(target, cordonHome2) {
   return false;
 }
 
+// src/provenance/normalize.ts
+import { homedir as homedir2 } from "node:os";
+var SHINGLE_WINDOW = 32;
+var SHINGLE_STEP = 8;
+function normalize(text) {
+  return text.normalize("NFKC").toLowerCase().replace(/\s+/gu, " ").trim();
+}
+function atoms(text) {
+  const found = /* @__PURE__ */ new Set();
+  const source = text.normalize("NFKC");
+  for (const match of source.matchAll(/(?:https?:\/\/|mailto:)\S+/giu)) {
+    found.add(trimTail(match[0]));
+  }
+  for (const match of source.matchAll(/\b[\w.-]+@[\w-]+\.[a-z]{2,}\b/giu)) {
+    found.add(match[0].toLowerCase());
+  }
+  for (const match of source.matchAll(/(?<![\w/])[/~][\w./-]{4,}/gu)) {
+    const path = trimTail(match[0]);
+    found.add(path);
+    const other = otherSpelling(path);
+    if (other !== null) found.add(other);
+  }
+  for (const match of source.matchAll(/\b[a-z0-9][a-z0-9_-]{7,}\b/giu)) {
+    const token = match[0].toLowerCase();
+    if (/\d/u.test(token)) found.add(token);
+  }
+  return [...found];
+}
+function otherSpelling(path) {
+  const home = homedir2().toLowerCase().replace(/\/+$/u, "");
+  if (home === "") return null;
+  if (path.startsWith("~/")) return home + path.slice(1);
+  if (path.startsWith(`${home}/`)) return `~${path.slice(home.length)}`;
+  return null;
+}
+function trimTail(token) {
+  return token.toLowerCase().replace(/[.,;:!?)\]]+$/u, "");
+}
+function hashCodes(text, from, to) {
+  let fnv = 2166136261;
+  let djb = 5381;
+  for (let i = from; i < to; i++) {
+    const code = text.charCodeAt(i);
+    fnv = Math.imul(fnv ^ code, 16777619) >>> 0;
+    djb = Math.imul(djb, 33) + code >>> 0;
+  }
+  return [fnv, djb];
+}
+function formatHash(codes) {
+  return `${codes[0].toString(36)}:${codes[1].toString(36)}`;
+}
+function parseHash(key) {
+  const parts = key.split(":");
+  if (parts.length !== 2) return null;
+  const [left, right] = parts;
+  if (left === void 0 || right === void 0) return null;
+  if (!/^[0-9a-z]+$/u.test(left) || !/^[0-9a-z]+$/u.test(right)) return null;
+  const first = Number.parseInt(left, 36);
+  const second = Number.parseInt(right, 36);
+  if (first > 4294967295 || second > 4294967295) return null;
+  return [first, second];
+}
+function hash(chunk) {
+  return formatHash(hashCodes(chunk, 0, chunk.length));
+}
+function mapWords(text) {
+  const atNormalized = [];
+  const atOriginal = [];
+  const words = [];
+  let length = 0;
+  for (const match of text.matchAll(/\S+/gu)) {
+    if (words.length > 0) length += 1;
+    atNormalized.push(length);
+    atOriginal.push([match.index, match.index + match[0].length]);
+    const word = match[0].normalize("NFKC").toLowerCase();
+    words.push(word);
+    length += word.length;
+  }
+  const built = words.join(" ");
+  return { text: built, atNormalized, atOriginal, exact: built === normalize(text) };
+}
+function originalSpan(map, from, to) {
+  if (!map.exact) return null;
+  const count = map.atNormalized.length;
+  if (count === 0 || to <= from) return null;
+  let low = 0;
+  let high = count - 1;
+  while (low < high) {
+    const middle = low + high + 1 >> 1;
+    if ((map.atNormalized[middle] ?? 0) <= from) low = middle;
+    else high = middle - 1;
+  }
+  let start = -1;
+  let end = -1;
+  for (let i = low; i < count && (map.atNormalized[i] ?? 0) < to; i++) {
+    const bounds = map.atOriginal[i];
+    if (!bounds) break;
+    if (start < 0) start = bounds[0];
+    end = bounds[1];
+  }
+  return start < 0 ? null : [start, end];
+}
+
 // src/scope/certificate.ts
 var KNOWN = /* @__PURE__ */ new Set([
   "read",
@@ -7724,109 +7835,6 @@ function classify(call, fromPolicy) {
     };
   }
   return { effects: [...declared], classified: true, reason: "" };
-}
-
-// src/provenance/normalize.ts
-import { homedir as homedir2 } from "node:os";
-var SHINGLE_WINDOW = 32;
-var SHINGLE_STEP = 8;
-function normalize(text) {
-  return text.normalize("NFKC").toLowerCase().replace(/\s+/gu, " ").trim();
-}
-function atoms(text) {
-  const found = /* @__PURE__ */ new Set();
-  const source = text.normalize("NFKC");
-  for (const match of source.matchAll(/(?:https?:\/\/|mailto:)\S+/giu)) {
-    found.add(trimTail(match[0]));
-  }
-  for (const match of source.matchAll(/\b[\w.-]+@[\w-]+\.[a-z]{2,}\b/giu)) {
-    found.add(match[0].toLowerCase());
-  }
-  for (const match of source.matchAll(/(?<![\w/])[/~][\w./-]{4,}/gu)) {
-    const path = trimTail(match[0]);
-    found.add(path);
-    const other = otherSpelling(path);
-    if (other !== null) found.add(other);
-  }
-  for (const match of source.matchAll(/\b[a-z0-9][a-z0-9_-]{7,}\b/giu)) {
-    const token = match[0].toLowerCase();
-    if (/\d/u.test(token)) found.add(token);
-  }
-  return [...found];
-}
-function otherSpelling(path) {
-  const home = homedir2().toLowerCase().replace(/\/+$/u, "");
-  if (home === "") return null;
-  if (path.startsWith("~/")) return home + path.slice(1);
-  if (path.startsWith(`${home}/`)) return `~${path.slice(home.length)}`;
-  return null;
-}
-function trimTail(token) {
-  return token.toLowerCase().replace(/[.,;:!?)\]]+$/u, "");
-}
-function hashCodes(text, from, to) {
-  let fnv = 2166136261;
-  let djb = 5381;
-  for (let i = from; i < to; i++) {
-    const code = text.charCodeAt(i);
-    fnv = Math.imul(fnv ^ code, 16777619) >>> 0;
-    djb = Math.imul(djb, 33) + code >>> 0;
-  }
-  return [fnv, djb];
-}
-function formatHash(codes) {
-  return `${codes[0].toString(36)}:${codes[1].toString(36)}`;
-}
-function parseHash(key) {
-  const parts = key.split(":");
-  if (parts.length !== 2) return null;
-  const [left, right] = parts;
-  if (left === void 0 || right === void 0) return null;
-  if (!/^[0-9a-z]+$/u.test(left) || !/^[0-9a-z]+$/u.test(right)) return null;
-  const first = Number.parseInt(left, 36);
-  const second = Number.parseInt(right, 36);
-  if (first > 4294967295 || second > 4294967295) return null;
-  return [first, second];
-}
-function hash(chunk) {
-  return formatHash(hashCodes(chunk, 0, chunk.length));
-}
-function mapWords(text) {
-  const atNormalized = [];
-  const atOriginal = [];
-  const words = [];
-  let length = 0;
-  for (const match of text.matchAll(/\S+/gu)) {
-    if (words.length > 0) length += 1;
-    atNormalized.push(length);
-    atOriginal.push([match.index, match.index + match[0].length]);
-    const word = match[0].normalize("NFKC").toLowerCase();
-    words.push(word);
-    length += word.length;
-  }
-  const built = words.join(" ");
-  return { text: built, atNormalized, atOriginal, exact: built === normalize(text) };
-}
-function originalSpan(map, from, to) {
-  if (!map.exact) return null;
-  const count = map.atNormalized.length;
-  if (count === 0 || to <= from) return null;
-  let low = 0;
-  let high = count - 1;
-  while (low < high) {
-    const middle = low + high + 1 >> 1;
-    if ((map.atNormalized[middle] ?? 0) <= from) low = middle;
-    else high = middle - 1;
-  }
-  let start = -1;
-  let end = -1;
-  for (let i = low; i < count && (map.atNormalized[i] ?? 0) < to; i++) {
-    const bounds = map.atOriginal[i];
-    if (!bounds) break;
-    if (start < 0) start = bounds[0];
-    end = bounds[1];
-  }
-  return start < 0 ? null : [start, end];
 }
 
 // src/gate/quarantine.ts
@@ -7993,10 +8001,18 @@ function decide(call, ctx) {
     return escalate(ctx, outside);
   }
   const scan = scanTaint(parts, ctx.taint);
-  if (!scan.tainted) return { kind: "allow" };
+  if (!scan.tainted) {
+    const exposed = exposedCall(verdict.effects, parts, ctx);
+    if (exposed) return escalate(ctx, exposed);
+    return { kind: "allow" };
+  }
   if (!verdict.effects.some((effect) => IRREVERSIBLE.has(effect))) {
     const targets = scan.targets.filter((atom) => !isDate(atom));
-    if (targets.length === 0) return { kind: "allow" };
+    if (targets.length === 0) {
+      const exposed = exposedCall(verdict.effects, parts, ctx);
+      if (exposed) return escalate(ctx, exposed);
+      return { kind: "allow" };
+    }
     return escalate(ctx, `an argument carries a target from an untrusted source: ${targets.join(", ")}`);
   }
   if (returnsToOrigin(scan.sources, parts, verdict.effects)) return { kind: "allow" };
@@ -8075,6 +8091,22 @@ function selfMarkers(cordonHome2) {
 function escalate(ctx, reason) {
   return ctx.policy.mode === "interactive" ? { kind: "ask", reason } : { kind: "deny", reason };
 }
+function exposedCall(effects, parts, ctx) {
+  if (ctx.policy.exposure === false) return null;
+  const exposure = ctx.exposure;
+  if (exposure === void 0 || exposure === null) return null;
+  if (!effects.some((effect) => EXPOSURE_SENSITIVE.has(effect))) return null;
+  const targets = /* @__PURE__ */ new Set();
+  for (const { value } of parts) {
+    if (typeof value !== "string") continue;
+    for (const atom of atoms(value)) {
+      if (!isDate(atom)) targets.add(atom);
+    }
+  }
+  const named = new Set(ctx.userAtoms ?? []);
+  if (targets.size > 0 && [...targets].every((atom) => named.has(atom))) return null;
+  return `this session read untrusted content (${exposure.source}) since your last message; the call acts beyond reading and its destination was not named by you`;
+}
 var IRREVERSIBLE = /* @__PURE__ */ new Set([
   "network-egress",
   "financial",
@@ -8083,6 +8115,7 @@ var IRREVERSIBLE = /* @__PURE__ */ new Set([
   "export",
   "exec"
 ]);
+var EXPOSURE_SENSITIVE = /* @__PURE__ */ new Set([...IRREVERSIBLE, "create"]);
 function scanTaint(parts, taint) {
   const spans = {};
   const targets = /* @__PURE__ */ new Set();
@@ -11105,6 +11138,7 @@ function merge(spans) {
 }
 
 // src/session/store.ts
+var MAX_USER_ATOMS = 500;
 var EFFECTS2 = /* @__PURE__ */ new Set([
   "read",
   "summarize",
@@ -11162,7 +11196,7 @@ var SessionStore = class {
       if (raw !== null) states.push(this.parseState(raw, sessionId));
     }
     if (states.length === 0) {
-      return { turn: 0, taint: new TaintStore(), unredacted: false, directive: null };
+      return { turn: 0, taint: new TaintStore(), unredacted: false, directive: null, exposure: null, userAtoms: [] };
     }
     return states.reduce(mergeStates);
   }
@@ -11212,6 +11246,8 @@ var SessionStore = class {
     const taint = Object.hasOwn(data, "taint") ? data["taint"] : void 0;
     const unredacted = Object.hasOwn(data, "unredacted") ? data["unredacted"] : void 0;
     const directive = Object.hasOwn(data, "directive") ? data["directive"] : void 0;
+    const exposure = Object.hasOwn(data, "exposure") ? data["exposure"] : void 0;
+    const userAtoms = Object.hasOwn(data, "userAtoms") ? data["userAtoms"] : void 0;
     if (typeof version !== "number" || !READABLE.has(version) || typeof turn !== "number" || !Number.isInteger(turn) || turn < 0) {
       throw new Error(`the session state ${shown(sessionId)} is incompatible`);
     }
@@ -11221,11 +11257,19 @@ var SessionStore = class {
     if (directive !== void 0 && directive !== null && (!Array.isArray(directive) || directive.some((item) => typeof item !== "string" || !EFFECTS2.has(item)))) {
       throw new Error(`the session state ${shown(sessionId)} is incompatible`);
     }
+    if (exposure !== void 0 && exposure !== null && !isExposure(exposure)) {
+      throw new Error(`the session state ${shown(sessionId)} is incompatible`);
+    }
+    if (userAtoms !== void 0 && (!Array.isArray(userAtoms) || userAtoms.some((item) => typeof item !== "string"))) {
+      throw new Error(`the session state ${shown(sessionId)} is incompatible`);
+    }
     return {
       turn,
       taint: TaintStore.fromJSON(taint),
       unredacted: unredacted === true,
-      directive: Array.isArray(directive) ? directive : null
+      directive: Array.isArray(directive) ? directive : null,
+      exposure: isExposure(exposure) ? exposure : null,
+      userAtoms: Array.isArray(userAtoms) ? userAtoms.slice(-MAX_USER_ATOMS) : []
     };
   }
   save(sessionId, state) {
@@ -11236,7 +11280,9 @@ var SessionStore = class {
       turn: state.turn,
       taint: state.taint.toJSON(),
       unredacted: state.unredacted === true,
-      directive: state.directive ?? null
+      directive: state.directive ?? null,
+      exposure: state.exposure ?? null,
+      userAtoms: (state.userAtoms ?? []).slice(-MAX_USER_ATOMS)
     });
     atomicWrite(dir, path, body);
     for (const piece of this.read.get(sessionId) ?? []) {
@@ -11326,14 +11372,30 @@ function safeName(sessionId) {
   const digest = createHash("sha256").update(sessionId, "utf8").digest("hex").slice(0, 16);
   return cleaned === "" ? digest : `${cleaned}-${digest}`;
 }
+function isExposure(value) {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const data = value;
+  const at = Object.hasOwn(data, "at") ? data["at"] : void 0;
+  const source = Object.hasOwn(data, "source") ? data["source"] : void 0;
+  return typeof at === "number" && Number.isInteger(at) && at >= 0 && typeof source === "string" && source !== "";
+}
 function mergeStates(into, other) {
   into.taint.absorb(other.taint.toJSON());
   return {
     turn: Math.max(into.turn, other.turn),
     taint: into.taint,
     unredacted: into.unredacted === true || other.unredacted === true,
-    directive: mergeDirectives(into.directive ?? null, other.directive ?? null)
+    directive: mergeDirectives(into.directive ?? null, other.directive ?? null),
+    exposure: into.exposure ?? other.exposure ?? null,
+    userAtoms: mergeUserAtoms(into.userAtoms ?? [], other.userAtoms ?? [])
   };
+}
+function mergeUserAtoms(a, b) {
+  const out = [];
+  for (const atom of [...a, ...b]) {
+    if (!out.includes(atom)) out.push(atom);
+  }
+  return out.slice(-MAX_USER_ATOMS);
 }
 function mergeDirectives(a, b) {
   if (a === null) return b;
@@ -11353,6 +11415,20 @@ var Cordon = class {
   unredacted = false;
   directive = null;
   lastSource = null;
+  /**
+   * The session read untrusted content after the last user message. The mark
+   * keys the gate's decision on the FACT of the read, not on a match against
+   * what was read: the battery measured that the paraphrase/encoding tail of
+   * attacks shares no recorded byte with its arguments, so provenance stays
+   * silent there by construction.
+   */
+  exposure = null;
+  /**
+   * Atoms from the user's own messages. A call under the exposure mark passes
+   * when the user themselves named every one of its targets — the destination
+   * came from the human, not from the page.
+   */
+  userAtoms = [];
   /** The state key on disk. It comes from the harness, that is, from outside. */
   sessionId;
   constructor(options) {
@@ -11365,6 +11441,8 @@ var Cordon = class {
     this.turn = restored.turn;
     this.taint = restored.taint;
     this.unredacted = restored.unredacted === true;
+    this.exposure = restored.exposure ?? null;
+    this.userAtoms = restored.userAtoms ?? [];
     this.cert = issue(this.policy, this.turn);
     this.directive = restored.directive ?? null;
     if (this.directive) this.cert = narrow(this.cert, this.directive);
@@ -11376,6 +11454,13 @@ var Cordon = class {
     this.directive = null;
     const warnings = [];
     this.unredacted = false;
+    this.exposure = null;
+    for (const atom of atoms(text)) {
+      if (!this.userAtoms.includes(atom)) this.userAtoms.push(atom);
+    }
+    if (this.userAtoms.length > MAX_USER_ATOMS) {
+      this.userAtoms = this.userAtoms.slice(-MAX_USER_ATOMS);
+    }
     const requested = parseDirective(text);
     if (requested && requested.length > 0) {
       this.directive = requested;
@@ -11418,6 +11503,7 @@ var Cordon = class {
     if (role === "content") {
       this.taint.record(clean, source);
       if (!substitute && clean !== text) this.taint.record(text, source);
+      if (source.trust === "untrusted") this.exposure = { at: this.turn, source: source.label };
     }
     if (source.trust === "untrusted") this.lastSource = source;
     this.persist();
@@ -11430,7 +11516,9 @@ var Cordon = class {
       taint: this.taint,
       cordonHome: this.cordonHome,
       turn: this.turn,
-      unredacted: this.unredacted
+      unredacted: this.unredacted,
+      exposure: this.exposure,
+      userAtoms: this.userAtoms
     });
     if (decision.kind === "deny" || decision.kind === "ask" || decision.kind === "rewrite") {
       this.notifier.notify({
@@ -11491,7 +11579,9 @@ var Cordon = class {
       turn: this.turn,
       taint: this.taint,
       unredacted: this.unredacted,
-      directive: this.directive
+      directive: this.directive,
+      exposure: this.exposure,
+      userAtoms: this.userAtoms
     });
   }
 };
@@ -12743,6 +12833,7 @@ function doctor(home = cordonHome()) {
       effects: [],
       warnings,
       footer: false,
+      exposure: false,
       mcpView: MCP_VIEW,
       declaredViews: [],
       harnesses: HARNESS_LIMITS,
@@ -12764,6 +12855,11 @@ function doctor(home = cordonHome()) {
       "trustedSources are declared while tools is empty: trust has been granted to sources, but no tool is classified, so every call escalates"
     );
   }
+  if (!policy.exposure) {
+    warnings.push(
+      "exposure is off in the policy: a session that read untrusted content may act beyond reading without escalation, and the attacks whose arguments share no byte with what was read \u2014 paraphrase, encoding, a clean curl command \u2014 stay open; the adversarial battery measures the difference on the wide profile (see docs/adversarial-report.md)"
+    );
+  }
   for (const [tool, view] of Object.entries(policy.toolsReturn)) {
     if (view !== "rendered" || !SOURCE_TOOLS.has(tool)) continue;
     warnings.push(
@@ -12781,6 +12877,7 @@ function doctor(home = cordonHome()) {
     effects: [...policy.profile.effects],
     warnings,
     footer: policy.output.footer,
+    exposure: policy.exposure,
     mcpView: MCP_VIEW,
     declaredViews: declaredViews(policy.toolsReturn),
     harnesses: HARNESS_LIMITS,
@@ -12807,6 +12904,10 @@ function printDoctor(home) {
 `);
   process.stdout.write(
     `source-influence footer: ${report2.footer ? "on" : "off in the policy"}
+`
+  );
+  process.stdout.write(
+    `exposure (escalation after reading untrusted content): ${report2.exposure ? "on" : "off in the policy"}
 `
   );
   process.stdout.write(

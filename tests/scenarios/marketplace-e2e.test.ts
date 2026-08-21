@@ -56,7 +56,17 @@ describe('end-to-end scenario: automatic replies to reviews under attack', () =>
     const home = seller()
     const session = 'night-run'
 
-    // 1. The agent reads the reviews. The instruction inside is visible to the
+    // 1. The operator's instruction names the review to work on. Under the
+    //    exposure rule this is what keeps the night run alive: after reading
+    //    untrusted reviews, a reply goes through when its destination came
+    //    from the operator rather than from a review.
+    hook(home, {
+      session_id: session,
+      hook_event_name: 'UserPromptSubmit',
+      prompt: 'Reply to review 44556677 with a thank-you.',
+    })
+
+    // 2. The agent reads the reviews. The instruction inside is visible to the
     //    human, so neutralization does not touch it: this is not a hidden layer.
     const read = hook(home, {
       session_id: session,
@@ -67,17 +77,18 @@ describe('end-to-end scenario: automatic replies to reviews under attack', () =>
     })
     expect(read).toEqual({})
 
-    // 2. Replying to a review is create, and it is in the certificate. The work
-    //    does not come to a halt.
+    // 3. Replying to a review is create, and it is in the certificate. The
+    //    work does not come to a halt: the review number in the arguments is
+    //    the one the operator named.
     const reply = hook(home, {
       session_id: session,
       hook_event_name: 'PreToolUse',
       tool_name: 'wb_reply',
-      tool_input: { text: 'Thank you for the review, we are glad you liked the item.' },
+      tool_input: { nmId: '44556677', text: 'Thank you for the review, we are glad you liked the item.' },
     })
     expect(reply).toEqual({})
 
-    // 3. Changing the price is update and financial. They are not in the
+    // 4. Changing the price is update and financial. They are not in the
     //    certificate, and no arguments will change that: the attack ends on the
     //    control axis.
     const attack = hook(home, {
@@ -203,6 +214,16 @@ describe('the end-to-end scenario on the bundled plugin', () => {
     const home = seller()
     const session = 'process-run'
 
+    // The operator names the review: under the exposure rule a reply after an
+    // untrusted read goes through when its destination came from the user.
+    expect(
+      spawn(home, {
+        session_id: session,
+        hook_event_name: 'UserPromptSubmit',
+        prompt: 'Reply to review 44556677 with a thank-you.',
+      }),
+    ).toEqual({})
+
     expect(
       spawn(home, {
         session_id: session,
@@ -218,7 +239,7 @@ describe('the end-to-end scenario on the bundled plugin', () => {
         session_id: session,
         hook_event_name: 'PreToolUse',
         tool_name: 'wb_reply',
-        tool_input: { text: 'Thank you for the review.' },
+        tool_input: { nmId: '44556677', text: 'Thank you for the review.' },
       }),
     ).toEqual({})
 

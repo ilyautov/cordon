@@ -168,8 +168,26 @@ describe('cordon doctor: printing for the human', () => {
   })
 })
 
-describe('doctor: the third axis', () => {
-  it('names the footer state instead of staying silent about it', () => {
+describe('doctor: the exposure valve', () => {
+  it('names the exposure state instead of staying silent about it', () => {
+    // A switched-off exposure rule is indistinguishable from the outside from
+    // a session that simply read nothing untrusted: either way nothing
+    // escalates. That is exactly the ambiguity doctor removes.
+    const dir = mkdtempSync(join(tmpdir(), 'cordon-doctor-'))
+    expect(doctor(dir).exposure).toBe(true)
+
+    writeFileSync(join(dir, 'policy.yaml'), 'exposure: false\n')
+    expect(doctor(dir).exposure).toBe(false)
+  })
+
+  it('warns when exposure is switched off, with the price named', () => {
+    const dir = home()
+    writeFileSync(join(dir, 'policy.yaml'), 'exposure: false\n')
+    expect(doctor(dir).warnings.some((w) => w.includes('exposure'))).toBe(true)
+  })
+})
+
+describe('doctor: the third axis', () => {  it('names the footer state instead of staying silent about it', () => {
     // A switched-off footer is indistinguishable from the outside from a
     // footer that has nothing to say. That is exactly the ambiguity doctor
     // removes.

@@ -130,6 +130,15 @@ export interface DoctorReport {
    */
   footer: boolean
   /**
+   * Whether the exposure rule is in force: a session that read untrusted
+   * content escalates calls acting beyond reading.
+   *
+   * Named out loud, because a switched-off rule is indistinguishable from the
+   * outside from a session that simply read nothing untrusted: either way
+   * nothing escalates.
+   */
+  exposure: boolean
+  /**
    * The effective default for an MCP tool result.
    *
    * Named out loud, because whether the hidden layer is stripped from an MCP
@@ -353,6 +362,7 @@ export function doctor(home: string = cordonHome()): DoctorReport {
       effects: [],
       warnings,
       footer: false,
+      exposure: false,
       mcpView: MCP_VIEW,
       declaredViews: [],
       harnesses: HARNESS_LIMITS,
@@ -381,6 +391,19 @@ export function doctor(home: string = cordonHome()): DoctorReport {
     )
   }
 
+  if (!policy.exposure) {
+    // The price is named with the switch: the off state looks from the
+    // outside exactly like a session that read nothing untrusted, so without
+    // this line the human cannot tell the two apart. The numbers are the
+    // battery's measurement, not an estimate — see docs/adversarial-report.md.
+    warnings.push(
+      'exposure is off in the policy: a session that read untrusted content may act beyond reading ' +
+        'without escalation, and the attacks whose arguments share no byte with what was read — ' +
+        'paraphrase, encoding, a clean curl command — stay open; the adversarial battery measures ' +
+        'the difference on the wide profile (see docs/adversarial-report.md)',
+    )
+  }
+
   for (const [tool, view] of Object.entries(policy.toolsReturn)) {
     if (view !== 'rendered' || !SOURCE_TOOLS.has(tool)) continue
     warnings.push(
@@ -403,6 +426,7 @@ export function doctor(home: string = cordonHome()): DoctorReport {
     effects: [...policy.profile.effects],
     warnings,
     footer: policy.output.footer,
+    exposure: policy.exposure,
     mcpView: MCP_VIEW,
     declaredViews: declaredViews(policy.toolsReturn),
     harnesses: HARNESS_LIMITS,
@@ -428,6 +452,11 @@ function printDoctor(home: string): number {
   process.stdout.write(`effect classes: ${report.effects.join(', ') || 'none at all'}\n`)
   process.stdout.write(
     `source-influence footer: ${report.footer ? 'on' : 'off in the policy'}\n`,
+  )
+  // Same reason as the footer: the off state is invisible from the outside,
+  // so the state is printed either way, and the price is in the warnings.
+  process.stdout.write(
+    `exposure (escalation after reading untrusted content): ${report.exposure ? 'on' : 'off in the policy'}\n`,
   )
   // The default is always named out loud. Whether the hidden layer is
   // stripped from an MCP server's result depends on it, and the human should

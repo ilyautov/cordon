@@ -78,6 +78,26 @@ describe('the policy: the output axis footer', () => {
   })
 })
 
+describe('the policy: the exposure valve', () => {
+  it('exposure is on by default', () => {
+    expect(loadPolicy(scratch()).exposure).toBe(true)
+  })
+
+  it('it is switched off explicitly', () => {
+    const dir = scratch()
+    writeFileSync(join(dir, 'policy.yaml'), 'exposure: false\n')
+    expect(loadPolicy(dir).exposure).toBe(false)
+  })
+
+  it('a non-boolean value is a load error, not a silent default', () => {
+    // Same argument as for the footer: the human switched the rule off, it
+    // stayed on (or the other way round), and they never found out.
+    const dir = scratch()
+    writeFileSync(join(dir, 'policy.yaml'), 'exposure: off\n')
+    expect(() => loadPolicy(dir)).toThrow(/exposure/u)
+  })
+})
+
 describe('the policy: declaring the source view (toolsReturn)', () => {
   it('the table is empty when nothing is declared', () => {
     expect(loadPolicy(scratch()).toolsReturn).toEqual({})

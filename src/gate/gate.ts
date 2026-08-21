@@ -2,6 +2,7 @@ import { resolve, sep } from 'node:path'
 import type { Certificate, Decision, EffectClass, Source, ToolCall } from '../core/types.js'
 import type { Policy } from '../policy/defaults.js'
 import { canonicalForms, touchesCordonItself } from '../policy/selfprotect.js'
+import { atoms } from '../provenance/normalize.js'
 import type { TaintStore } from '../provenance/store.js'
 import { covers } from '../scope/certificate.js'
 import { classify } from '../scope/effects.js'
@@ -20,6 +21,19 @@ export interface GateContext {
    * because the absence of the mark is its normal state.
    */
   unredacted?: boolean
+  /**
+   * The session read untrusted content after the last user message: the turn
+   * of the read and the source's label. Optional because the absence of the
+   * mark is its normal state.
+   */
+  exposure?: { at: number; source: string } | null
+  /**
+   * Atoms — links, paths, identifiers — named by the user in their own
+   * messages. The exposure exemption compares a call's targets against this
+   * list and against nothing else: a destination written inside untrusted
+   * content vouches for nothing, however it is phrased.
+   */
+  userAtoms?: readonly string[]
 }
 
 /**
@@ -97,7 +111,11 @@ function decide(call: ToolCall, ctx: GateContext): Decision {
   }
 
   const scan = scanTaint(parts, ctx.taint)
-  if (!scan.tainted) return { kind: 'allow' }
+  if (!scan.tainted) {
+    const exposed = exposedCall(verdict.effects, parts, ctx)
+    if (exposed) return escalate(ctx, exposed)
+    return { kind: 'allow' }
+  }
 
   // The data axis answers differently in different cases, and that is not a
   // concession but a condition of usability. An agent that read a document
@@ -112,7 +130,11 @@ function decide(call: ToolCall, ctx: GateContext): Decision {
   // that is, to whatever the attacker uses to aim the action.
   if (!verdict.effects.some((effect) => IRREVERSIBLE.has(effect))) {
     const targets = scan.targets.filter((atom) => !isDate(atom))
-    if (targets.length === 0) return { kind: 'allow' }
+    if (targets.length === 0) {
+      const exposed = exposedCall(verdict.effects, parts, ctx)
+      if (exposed) return escalate(ctx, exposed)
+      return { kind: 'allow' }
+    }
     return escalate(ctx, `an argument carries a target from an untrusted source: ${targets.join(', ')}`)
   }
 
@@ -252,6 +274,59 @@ function escalate(ctx: GateContext, reason: string): Decision {
 }
 
 /**
+ * The exposure rule: the session read untrusted content since the user's last
+ * message, and the call acts beyond reading. It fires ONLY on paths that
+ * would otherwise return allow — where a certificate, bounds or taint check
+ * already escalated, its reason says more than this one would.
+ *
+ * The exemption is by destination, not by payload: a call passes when EVERY
+ * atom of its arguments was named by the user in their own messages. A call
+ * with no atoms at all does not pass vacuously — `npm test` after reading a
+ * poisoned page escalates too: a shell command is not parsed (a declared
+ * limit), so there is no telling an identifier-free command from an attack,
+ * and the error must run towards the question.
+ *
+ * The declared hole, honestly: a payload PARAPHRASED onto a destination the
+ * user did name is invisible here — the exemption looks at where the call
+ * goes, not at what it carries, and matching the retold text to what was read
+ * is the string-matching ceiling this mechanism exists to bypass. That
+ * residue is what resource bounds (hosts/paths in the certificate) are for.
+ */
+function exposedCall(
+  effects: readonly EffectClass[],
+  parts: readonly Field[],
+  ctx: GateContext,
+): string | null {
+  // The valve: a policy that says exposure: false asks for exactly the
+  // pre-exposure behaviour, and doctor names the price of that out loud.
+  if (ctx.policy.exposure === false) return null
+  const exposure = ctx.exposure
+  if (exposure === undefined || exposure === null) return null
+  if (!effects.some((effect) => EXPOSURE_SENSITIVE.has(effect))) return null
+
+  // The call's targets are the atoms of its arguments, extracted by the same
+  // function that extracts them from the user's messages: a link or an
+  // identifier must mean the same token on both sides of the comparison, or
+  // the exemption would hinge on a spelling difference. A date is not a
+  // target here either, for the same reason as in the taint rule: it matches
+  // by coincidence and cannot be used to aim an action.
+  const targets = new Set<string>()
+  for (const { value } of parts) {
+    if (typeof value !== 'string') continue
+    for (const atom of atoms(value)) {
+      if (!isDate(atom)) targets.add(atom)
+    }
+  }
+  const named = new Set(ctx.userAtoms ?? [])
+  if (targets.size > 0 && [...targets].every((atom) => named.has(atom))) return null
+
+  return (
+    `this session read untrusted content (${exposure.source}) since your last message; ` +
+    'the call acts beyond reading and its destination was not named by you'
+  )
+}
+
+/**
  * Effect classes whose error cannot be undone: the action went outward or
  * changed the world. For them the cost of an extra question is certainly
  * lower than the cost of a miss, so taint of any kind means quarantine.
@@ -264,6 +339,27 @@ const IRREVERSIBLE: ReadonlySet<EffectClass> = new Set([
   'export',
   'exec',
 ])
+
+/**
+ * The classes the exposure mark answers to: everything irreversible, plus
+ * create. Create is reversible, and it is here because of the worm vector: a
+ * page ordering a verbatim republication of its own paragraph ("post this
+ * exact note") carries no target atom, so neither the taint rule nor the
+ * certificate says anything about it — the battery measured it passing on
+ * every profile that grants create. The mark closes it: after reading the
+ * page, publishing anything is a consequential act whose destination the page
+ * chose, not the user.
+ *
+ * The shape of the rule follows Progent (arXiv:2504.11703) and FIDES P-T
+ * (arXiv:2505.23643): the policy narrows on the FACT of reading untrusted
+ * content, and consequential calls are answered strictly out of an
+ * all-trusted context — not on whether the arguments repeat what was read.
+ *
+ * Declared after IRREVERSIBLE and not above it: a module-level const spread
+ * of a later const is a ReferenceError at load time, and a crashed hook reads
+ * as permission on both harnesses.
+ */
+const EXPOSURE_SENSITIVE: ReadonlySet<EffectClass> = new Set([...IRREVERSIBLE, 'create'])
 
 interface Scan {
   tainted: boolean

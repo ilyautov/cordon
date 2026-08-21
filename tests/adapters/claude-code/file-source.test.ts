@@ -181,14 +181,20 @@ describe('a finding in a file that was read does not vanish silently', () => {
 
 describe('reading a file does not escalate the actions that follow', () => {
   it('after a file with a hidden layer an ordinary call goes through', () => {
+    // The exposure rule escalates a consequential call whose destination
+    // nobody named, so the operator names the review and the call carries the
+    // number. What this test measures is unchanged: the hidden layer in a
+    // file read as source does not by itself mark anything.
     const shared = env()
+    handle({ kind: 'UserPromptSubmit', sessionId: 'e1', prompt: 'reply to review 44556677' }, shared)
     handle(
       { kind: 'PostToolUse', sessionId: 'e1', call: { tool: 'Read', args: { file_path: '/tmp/index.html' } },
         response: INDEX_HTML },
       shared,
     )
     const out = handle(
-      { kind: 'PreToolUse', sessionId: 'e1', call: { tool: 'wb_reply', args: { text: 'thank you for the review' } } },
+      { kind: 'PreToolUse', sessionId: 'e1',
+        call: { tool: 'wb_reply', args: { nmId: '44556677', text: 'thank you for the review' } } },
       shared,
     )
     expect(out).toEqual({})
@@ -245,7 +251,11 @@ describe('provenance works on the source text of the file', () => {
   it('a web page is still remembered cleaned', () => {
     // The hidden layer never reached the model, so it has nowhere to come from
     // in an argument either. Recording it would mean chasing our own shadow.
+    // The operator names the destination: without it the exposure rule would
+    // escalate the call on the fact of the read, and the test would measure
+    // the mark rather than what was remembered.
     const shared = env()
+    handle({ kind: 'UserPromptSubmit', sessionId: 'p3', prompt: 'record the plan under entry 44556677' }, shared)
     handle(
       { kind: 'PostToolUse', sessionId: 'p3', call: { tool: 'WebFetch', args: { url: 'https://shop.example' } },
         response: `<p>visible</p><div style="display:none">${FROM_HIDDEN}</div>` },
@@ -253,7 +263,7 @@ describe('provenance works on the source text of the file', () => {
     )
     const out = handle(
       { kind: 'PreToolUse', sessionId: 'p3',
-        call: { tool: 'wb_note', args: { text: `Recorded in the plan: ${FROM_HIDDEN}. End of the record.` } } },
+        call: { tool: 'wb_note', args: { nmId: '44556677', text: `Recorded in the plan: ${FROM_HIDDEN}. End of the record.` } } },
       shared,
     )
     expect(out).toEqual({})

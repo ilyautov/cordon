@@ -40,6 +40,24 @@ export interface Policy {
      */
     file: string | null
   }
+  /**
+   * Whether a session that read untrusted content is marked, and calls acting
+   * beyond reading then escalate unless the user named their destination.
+   *
+   * The rule is what answers the paraphrase/encoding class of attacks, where
+   * the malicious call shares no recorded byte with what was read — the
+   * battery measures the difference on the wide profile. The switch exists
+   * because the rule has a real price: in autonomous mode any consequential
+   * call after an untrusted read is refused until the next user message, and
+   * an owner who cannot pay that needs a way to say so without deleting the
+   * plugin.
+   *
+   * Turning it off weakens no other axis: provenance, the certificate and the
+   * quarantine answer exactly as before. `cordon doctor` names the price of
+   * the off state out loud, because from the outside a switched-off rule is
+   * indistinguishable from a session that simply read nothing untrusted.
+   */
+  exposure: boolean
   output: {
     /**
      * Whether to append a source-influence footer under the model's answer.
@@ -72,5 +90,6 @@ export const DEFAULT_POLICY: Policy = {
   trustedSources: [],
   toolsReturn: {},
   notify: { file: null },
+  exposure: true,
   output: { footer: true },
 }

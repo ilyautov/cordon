@@ -103,6 +103,64 @@ describe('SessionStore', () => {
     writeFileSync(join(dir, 'sessions', nameOf(dir, 'abc')), JSON.stringify({ turn: 1 }))
     expect(() => new SessionStore(dir).load('abc')).toThrow()
   })
+
+  it('the exposure mark survives a restart', () => {
+    const dir = home()
+    new SessionStore(dir).save('abc', {
+      turn: 3,
+      taint: new TaintStore(),
+      exposure: { at: 2, source: 'https://evil.example' },
+    })
+    expect(new SessionStore(dir).load('abc').exposure).toEqual({ at: 2, source: 'https://evil.example' })
+  })
+
+  it('there is no exposure mark by default', () => {
+    expect(new SessionStore(home()).load('abc').exposure).toBeNull()
+  })
+
+  it('the atoms named by the user survive a restart', () => {
+    const dir = home()
+    new SessionStore(dir).save('abc', {
+      turn: 1,
+      taint: new TaintStore(),
+      userAtoms: ['1937461028', 'https://team-board.example/post'],
+    })
+    expect(new SessionStore(dir).load('abc').userAtoms).toEqual([
+      '1937461028',
+      'https://team-board.example/post',
+    ])
+  })
+
+  it('there are no user atoms by default', () => {
+    expect(new SessionStore(home()).load('abc').userAtoms).toEqual([])
+  })
+
+  it('an exposure mark of the wrong shape is a refusal, not a clean state', () => {
+    // Coercing a malformed mark to "no mark" would lift an escalation by
+    // corrupting one field — the most permissive state for the price of one
+    // write. The file comes from outside, so the shape is validated, not read.
+    const dir = home()
+    const name = nameOf(dir, 'abc')
+    const base = { version: 4, turn: 1, taint: new TaintStore().toJSON() }
+    writeFileSync(join(dir, 'sessions', name), JSON.stringify({ ...base, exposure: 'yes' }))
+    expect(() => new SessionStore(dir).load('abc')).toThrow()
+
+    writeFileSync(
+      join(dir, 'sessions', name),
+      JSON.stringify({ ...base, exposure: { at: 'two', source: 'https://evil.example' } }),
+    )
+    expect(() => new SessionStore(dir).load('abc')).toThrow()
+  })
+
+  it('user atoms of the wrong shape are a refusal, not an empty list', () => {
+    const dir = home()
+    const name = nameOf(dir, 'abc')
+    writeFileSync(
+      join(dir, 'sessions', name),
+      JSON.stringify({ version: 4, turn: 1, taint: new TaintStore().toJSON(), userAtoms: '1937461028' }),
+    )
+    expect(() => new SessionStore(dir).load('abc')).toThrow()
+  })
 })
 
 /**
@@ -250,6 +308,38 @@ describe('two writers on one session', () => {
     second.save('s', two)
 
     expect(new SessionStore(dir).load('s').directive).toEqual(['read'])
+  })
+
+  it('an exposure mark set by one writer is not lifted by another', () => {
+    // The mark merges as an or: a piece that carries it means this session did
+    // read untrusted content, and a piece that does not carry it only means
+    // that writer did not see the read.
+    const dir = home()
+    const first = new SessionStore(dir)
+    const second = new SessionStore(dir)
+    const one = first.load('s')
+    const two = second.load('s')
+    one.exposure = { at: 1, source: 'https://evil.example' }
+    first.save('s', one)
+    second.save('s', two)
+
+    expect(new SessionStore(dir).load('s').exposure).toEqual({ at: 1, source: 'https://evil.example' })
+  })
+
+  it('user atoms named to different writers unite', () => {
+    const dir = home()
+    const first = new SessionStore(dir)
+    const second = new SessionStore(dir)
+    const one = first.load('s')
+    const two = second.load('s')
+    one.userAtoms = ['1937461028']
+    two.userAtoms = ['https://team-board.example/post']
+    first.save('s', one)
+    second.save('s', two)
+
+    const merged = new SessionStore(dir).load('s').userAtoms ?? []
+    expect(merged).toContain('1937461028')
+    expect(merged).toContain('https://team-board.example/post')
   })
 
   it('a writer takes in what it read and leaves one file behind', () => {

@@ -21,7 +21,9 @@ src/sanitize/     the hidden layer: invisible characters, mixed scripts, hidden 
                   encoded blocks, percent-encoding. Pure functions over strings
 src/provenance/   who said this: atoms, shingles, the taint store
 src/scope/        the intent certificate and effect classes. Untrusted content never enters
-src/gate/         the decision on a call, plus the quarantine backstop
+src/gate/         the decision on a call, plus the quarantine backstop. The exposure
+                  rule lives here: the decision answers to the fact of reading
+                  untrusted content, not only to a match against it
 src/output/       the source-influence footer under the model's answer
 src/session/      state between processes, and its expiry
 src/policy/       loading and defaults, plus protection of Cordon's own files

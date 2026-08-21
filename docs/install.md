@@ -117,6 +117,8 @@ Without a policy file the default applies: `autonomous` mode, a profile of two c
 
 **`notify.file`**: path to the event journal. See the section on the journal.
 
+**`exposure`**: `true` or `false`, default `true`. While it is on, a session that read untrusted content is marked, and a call acting beyond reading — anything from the irreversible classes, plus `create` — escalates while the mark stands, unless the user named the call's destination (a link, a path, an identifier) in their own message. This is the rule that answers the attacks whose arguments share no byte with what was read: a paraphrase, an encoding, a clean shell command. The measured difference on the adversarial battery's working profile is a drop from 79% to 7% attack success rate; see [adversarial-report.md](adversarial-report.md). The price is friction: in autonomous mode, after any untrusted read a consequential call is refused until the user's next message names its destination. `false` restores the previous behaviour and weakens no other axis, and `cordon doctor` names the off state out loud with its price — from the outside it is indistinguishable from a session that simply read nothing untrusted.
+
 ### Example: interactive work on code
 
 ```yaml

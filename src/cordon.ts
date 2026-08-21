@@ -2,11 +2,12 @@ import { humanSeesRendered, type Certificate, type Decision, type EffectClass, t
 import { gate as decide } from './gate/gate.js'
 import { FileNotifier, SILENT, type Notifier } from './notify/notifier.js'
 import type { Policy } from './policy/defaults.js'
+import { atoms } from './provenance/normalize.js'
 import { TaintStore } from './provenance/store.js'
 import { sanitize } from './sanitize/index.js'
 import type { Finding } from './sanitize/types.js'
 import { issue, narrow, parseDirective } from './scope/certificate.js'
-import { SessionStore } from './session/store.js'
+import { MAX_USER_ATOMS, SessionStore } from './session/store.js'
 
 export interface Envelope {
   /** The cleaned text. It may be handed to the model only when `substitute`. */
@@ -56,6 +57,20 @@ export class Cordon {
   private unredacted = false
   private directive: EffectClass[] | null = null
   private lastSource: Source | null = null
+  /**
+   * The session read untrusted content after the last user message. The mark
+   * keys the gate's decision on the FACT of the read, not on a match against
+   * what was read: the battery measured that the paraphrase/encoding tail of
+   * attacks shares no recorded byte with its arguments, so provenance stays
+   * silent there by construction.
+   */
+  private exposure: { at: number; source: string } | null = null
+  /**
+   * Atoms from the user's own messages. A call under the exposure mark passes
+   * when the user themselves named every one of its targets — the destination
+   * came from the human, not from the page.
+   */
+  private userAtoms: string[] = []
 
   /** The state key on disk. It comes from the harness, that is, from outside. */
   readonly sessionId: string
@@ -76,6 +91,8 @@ export class Cordon {
     this.turn = restored.turn
     this.taint = restored.taint
     this.unredacted = restored.unredacted === true
+    this.exposure = restored.exposure ?? null
+    this.userAtoms = restored.userAtoms ?? []
 
     // The certificate is NOT restored from disk: it is issued from the policy
     // on every run. Only the requested narrowing comes from disk, and it is
@@ -111,6 +128,23 @@ export class Cordon {
     // longer means punishing them for what they have already checked with
     // their own eyes.
     this.unredacted = false
+
+    // The exposure mark is lifted on the same argument: whatever the model
+    // did with the untrusted content it read, the user has seen the outcome
+    // of that turn and could intervene. What the user names in the message is
+    // remembered instead: a call made under the mark passes when every one of
+    // its targets was named here, by the human rather than by the page. The
+    // extraction is the same `atoms` provenance uses, so a link or an
+    // identifier means the same token on both sides of the comparison.
+    this.exposure = null
+    for (const atom of atoms(text)) {
+      if (!this.userAtoms.includes(atom)) this.userAtoms.push(atom)
+    }
+    // The cap drops the oldest names first: a destination named long ago
+    // expires before the list can grow without bound.
+    if (this.userAtoms.length > MAX_USER_ATOMS) {
+      this.userAtoms = this.userAtoms.slice(-MAX_USER_ATOMS)
+    }
 
     const requested = parseDirective(text)
     if (requested && requested.length > 0) {
@@ -160,6 +194,14 @@ export class Cordon {
     if (role === 'content') {
       this.taint.record(clean, source)
       if (!substitute && clean !== text) this.taint.record(text, source)
+      // The fact of the read is marked apart from what was read: an attack
+      // whose arguments share no byte with the page (a paraphrase, an
+      // encoding, a clean curl command) leaves provenance silent, and the
+      // mark is what the gate answers to there. Labels do not count: a
+      // heading the source wrote ABOUT the content is not the content the
+      // model read — recording those would mark the session for the user's
+      // own values echoed back.
+      if (source.trust === 'untrusted') this.exposure = { at: this.turn, source: source.label }
     }
     if (source.trust === 'untrusted') this.lastSource = source
     this.persist()
@@ -174,6 +216,8 @@ export class Cordon {
       cordonHome: this.cordonHome,
       turn: this.turn,
       unredacted: this.unredacted,
+      exposure: this.exposure,
+      userAtoms: this.userAtoms,
     })
 
     // A rewrite is journaled alongside the refusals, and it is the entry the
@@ -251,6 +295,8 @@ export class Cordon {
       taint: this.taint,
       unredacted: this.unredacted,
       directive: this.directive,
+      exposure: this.exposure,
+      userAtoms: this.userAtoms,
     })
   }
 }
