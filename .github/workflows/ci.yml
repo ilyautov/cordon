@@ -19,21 +19,22 @@ jobs:
       # construction. Building dist/ here also keeps two parallel test workers
       # from each starting a build of their own.
       - run: npm run build:lib
-      # Bounded, and the verdict comes from the report rather than from the
-      # exit. vitest 4's forks pool has been seen to finish a wholly
-      # successful run and then never end, so "the process stopped" is not
-      # evidence of anything. "The report says 860 tests passed" is.
+      # Bounded, because a suite that stops finishing must fail rather than
+      # burn the job's whole allowance. The verdict is read from the report
+      # instead of the exit code: a run killed at the limit exits non-zero
+      # with nothing to say, while the report names how many tests ran and
+      # whether they passed, and the READMEs are checked against that number
+      # in the same step.
       - name: test
-        timeout-minutes: 6
+        timeout-minutes: 5
         run: |
-          # vitest is started directly rather than through npx, and killed
-          # rather than asked. `timeout` signals its own child, and through
-          # npx that child is a wrapper: the signal never reaches the process
-          # that is actually stuck, and the step runs on to its own limit.
-          timeout --signal=KILL 300 \
+          # vitest is started directly rather than through npm, so that the
+          # kill reaches it: `timeout` signals its own child, and through a
+          # package script that child is a wrapper.
+          timeout --signal=KILL 240 \
             node node_modules/vitest/vitest.mjs run \
-            --reporter=default --reporter=json --outputFile=vitest-report.json || true
-      - name: the run passed, and the numbers in the READMEs are the real ones
+            --reporter=default --reporter=json --outputFile=vitest-report.json
+      - name: the numbers in the READMEs are the real ones
         run: node scripts/check-claims.mjs vitest-report.json
       - run: npm run typecheck
       - run: npm run build

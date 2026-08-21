@@ -17,5 +17,5 @@ export const BUILT_CLI = join(process.cwd(), 'dist', 'cli.js')
  */
 export function ensureBuiltCli(): void {
   if (existsSync(BUILT_CLI)) return
-  execFileSync('npm', ['run', 'build:lib'], { stdio: 'inherit' })
+  execFileSync('npm', ['run', 'build:lib'], { stdio: ['ignore', 'inherit', 'inherit'] })
 }

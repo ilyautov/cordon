@@ -155,8 +155,18 @@ describe('the plugin is self-contained', () => {
     const out = join(mkdtempSync(join(tmpdir(), 'cordon-rebuild-')), 'cli.js')
     const script = (JSON.parse(readFileSync('package.json', 'utf8')) as { scripts: Record<string, string> })
       .scripts.bundle!
+    // The script calls `esbuild` by bare name, which resolves only because
+    // npm puts node_modules/.bin on PATH for the scripts it runs. Started any
+    // other way, this test failed on a missing binary rather than on the
+    // artifact it is here to check, so the child is given that directory
+    // itself.
     execFileSync('/bin/sh', ['-c', script.replaceAll('plugin/dist/', join(out, '..') + '/')], {
+      input: '',
       encoding: 'utf8',
+      env: {
+        ...process.env,
+        PATH: `${join(process.cwd(), 'node_modules', '.bin')}:${process.env.PATH ?? ''}`,
+      },
     })
     expect(readFileSync(out, 'utf8')).toBe(readFileSync(BUNDLE, 'utf8'))
   }, 60_000)

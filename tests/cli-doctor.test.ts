@@ -138,6 +138,7 @@ describe('cordon doctor: printing for the human', () => {
     // hook that had no reason to fire.
     const dir = home()
     const out = execFileSync('node', [join(process.cwd(), 'plugin', 'dist', 'cli.js'), 'doctor'], {
+      input: '',
       env: { ...process.env, CORDON_HOME: dir },
       encoding: 'utf8',
     })
@@ -151,6 +152,7 @@ describe('cordon doctor: printing for the human', () => {
     let code = 0
     try {
       execFileSync('node', [join(process.cwd(), 'plugin', 'dist', 'cli.js'), 'doctor'], {
+        input: '',
         env: { ...process.env, CORDON_HOME: dir },
         encoding: 'utf8',
       })
@@ -185,6 +187,7 @@ describe('doctor: the default source view', () => {
   it('prints the default out loud', () => {
     const dir = home()
     const out = execFileSync('node', [join(process.cwd(), 'plugin', 'dist', 'cli.js'), 'doctor'], {
+      input: '',
       env: { ...process.env, CORDON_HOME: dir },
       encoding: 'utf8',
     })
@@ -231,6 +234,7 @@ describe('doctor: the default source view', () => {
     // A field in a structure that is never printed does not help the reader.
     const dir = home()
     const out = execFileSync('node', [join(process.cwd(), 'dist', 'cli.js'), 'doctor'], {
+      input: '',
       encoding: 'utf8',
       env: { ...process.env, CORDON_HOME: dir },
     })

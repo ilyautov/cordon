@@ -79,7 +79,7 @@ describe('packaging the plugin: the quiet ways of not working', () => {
   beforeAll(() => {
     // The path to the BUILT file is checked, so the build has to exist.
     if (!existsSync(join(PLUGIN_ROOT, 'dist', 'cli.js'))) {
-      execFileSync('npm', ['run', 'build'], { stdio: 'inherit' })
+      execFileSync('npm', ['run', 'build'], { stdio: ['ignore', 'inherit', 'inherit'] })
     }
   }, 60_000)
 
