@@ -2,6 +2,14 @@
 
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versions follow [SemVer](https://semver.org/).
 
+## [0.2.2] - 2026-08-21
+
+The name an argument goes by no longer decides whether it is a path. The same three lists — which argument names hold a path, which hold a URL, which hold a command — existed in three copies, in the gate and in each adapter, and they had drifted apart. The gate knew `urls`, `webhook`, `baseurl` and the plural spellings; the adapters knew a shorter list without them. `filename` was in none of the three, and it is what a tool call says when it writes a file.
+
+What that cost is measurable rather than theoretical. Cordon's self-protection — the rule that nothing may write to Cordon's own state — reads the path out of the argument, so a write aimed at `~/.cordon/state` under the name `filename`, `absolutePath` or `output_path` was not a path at all and went through. On the other side, a file read from a trusted directory under the name `filename` was not recognized as trusted, and its contents were taken for untrusted text. Four tests now cover exactly these; against the old lists all four fail.
+
+There is one list now, in `src/core/argument-keys.ts`, and one folding of the name — case dropped, `_` and `-` removed, so `output_path`, `outputPath` and `output-path` are one name. `file` and `files` are deliberately left out: tools use them for a record as often as for a path, and a non-string under a path key is a refusal in the gate, which would turn a naming coincidence into a blocked tool call.
+
 ## [0.2.1] - 2026-08-21
 
 Two hooks at once no longer erase each other's provenance. A harness runs its hooks in parallel and each is a process of its own; both used to read the same state, add their own source to it and write it back whole, so the later write took the earlier one's memory with it and nothing said so. Measured against the built plugin before the fix: twelve runs out of twelve lost one of the two sources. Erased provenance is an empty store — precisely the permissive state an attacker is after, obtained by doing two things at once rather than by defeating anything.
