@@ -1,5 +1,6 @@
-import { appendFileSync, mkdirSync } from 'node:fs'
+import { appendFileSync } from 'node:fs'
 import { dirname } from 'node:path'
+import { makeDirectory } from '../core/mkdir.js'
 
 export interface NotifyEvent {
   at: string
@@ -26,7 +27,7 @@ export class FileNotifier implements Notifier {
 
   notify(event: NotifyEvent): void {
     try {
-      mkdirSync(dirname(this.path), { recursive: true })
+      makeDirectory(dirname(this.path), 0o755)
       appendFileSync(this.path, JSON.stringify(event) + '\n', 'utf8')
     } catch {
       // Notification is a side effect. Its failure must not turn a deny into

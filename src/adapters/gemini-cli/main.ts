@@ -1,5 +1,6 @@
-import { accessSync, constants, mkdirSync } from 'node:fs'
+import { accessSync, constants } from 'node:fs'
 import { join } from 'node:path'
+import { makeDirectory } from '../../core/mkdir.js'
 import { loadPolicy } from '../../policy/load.js'
 import { cordonHome } from '../claude-code/main.js'
 import { handle, silentOnFailure } from './handlers.js'
@@ -36,7 +37,7 @@ export function runHook(stdin: string, home: string = cordonHome()): string {
  */
 function ensureUsableHome(home: string): void {
   const sessions = join(home, 'sessions')
-  mkdirSync(sessions, { recursive: true, mode: 0o700 })
+  makeDirectory(sessions)
   accessSync(sessions, constants.W_OK)
 }
 

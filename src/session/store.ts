@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
-import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { makeDirectory } from '../core/mkdir.js'
 import type { EffectClass } from '../core/types.js'
 import { TaintStore } from '../provenance/store.js'
 
@@ -243,7 +244,7 @@ export class SessionStore {
  * next run.
  */
 function atomicWrite(dir: string, path: string, body: string): void {
-  mkdirSync(dir, { recursive: true, mode: 0o700 })
+  makeDirectory(dir)
   const temp = `${path}.${process.pid}.tmp`
   writeFileSync(temp, body, { encoding: 'utf8', mode: 0o600 })
   renameSync(temp, path)

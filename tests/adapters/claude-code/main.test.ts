@@ -8,6 +8,21 @@ function home(): string {
   return mkdtempSync(join(tmpdir(), 'cordon-main-'))
 }
 
+/**
+ * A home that cannot be created, on any system and for any user.
+ *
+ * This used to be a path under /proc, which is unreachable on Linux and
+ * simply absent on macOS. Worse, a recursive mkdir under /proc never returns
+ * there, so the suite hung in CI while passing locally. A plain file standing
+ * where a directory has to be gives ENOTDIR immediately everywhere, and root
+ * has no more power over it than anyone else.
+ */
+function unreachableHome(): string {
+  const file = join(mkdtempSync(join(tmpdir(), 'cordon-blocked-')), 'a-file-not-a-directory')
+  writeFileSync(file, 'x')
+  return join(file, 'home')
+}
+
 describe('runHook', () => {
   it('the default policy forbids creation', () => {
     const out = JSON.parse(runHook(JSON.stringify({
@@ -33,7 +48,7 @@ describe('runHook', () => {
   it('an unreachable home directory is a refusal', () => {
     const out = JSON.parse(runHook(JSON.stringify({
       session_id: 'a', hook_event_name: 'PreToolUse', tool_name: 'Read', tool_input: {},
-    }), '/proc/no-such/path'))
+    }), unreachableHome()))
     expect(out.hookSpecificOutput.permissionDecision).toBe('deny')
   })
 
@@ -90,7 +105,7 @@ describe('the entry point: unfit input', () => {
   })
 
   it('5. an unreachable home directory', () => {
-    expect(JSON.parse(runHook(JSON.stringify(call), '/proc/no-such/path')).hookSpecificOutput.permissionDecision)
+    expect(JSON.parse(runHook(JSON.stringify(call), unreachableHome())).hookSpecificOutput.permissionDecision)
       .toBe('deny')
   })
 
