@@ -59,15 +59,16 @@ export const SWEEP_MARK = 'last-sweep'
  * The names the sweep recognizes as its own.
  *
  * Exactly what `safeName` produces: a filtered identifier of up to 64
- * characters, a dash, sixteen hash digits. Plus the temporary-file tail left
- * behind by an interrupted atomic write.
+ * characters, a dash, sixteen hash digits. Then, for a session state, the
+ * piece written by one process — sixteen hexadecimal digits of its own. Plus
+ * the temporary-file tail left behind by an interrupted atomic write.
  *
  * Checking the name is self-protection rather than tidiness: `sessions/` may
  * hold anything a human or somebody else put there, and we agree to delete
  * from it only what we certainly wrote ourselves. A dot is allowed in the
  * pattern only before the known tails, so ".." will not pass as a name.
  */
-const OURS = /^[A-Za-z0-9_-]{1,81}\.json(?:\.\d{1,10}\.tmp)?$/u
+const OURS = /^[A-Za-z0-9_-]{1,81}(?:\.[a-f0-9]{1,32})?\.json(?:\.\d{1,10}\.tmp)?$/u
 
 /**
  * Cleans up session states and drafts whose time has run out.
@@ -100,7 +101,10 @@ export function sweep(cordonHome: string, keepSessionId: string, now: number = D
     // did not run to the end must not repeat on every event.
     mark(cordonHome)
 
-    const keep = `${safeName(keepSessionId)}.json`
+    // The name without a tail: a session's state is several files now, one
+    // per process that wrote it, and all of them belong to the session that
+    // is running.
+    const keep = safeName(keepSessionId)
     sweepDir(join(cordonHome, 'sessions'), SESSION_TTL_MS, keep, now)
     sweepDir(join(cordonHome, 'drafts'), DRAFT_TTL_MS, keep, now)
   } catch {
@@ -174,8 +178,10 @@ function sweepDir(dir: string, ttl: number, keep: string, now: number): void {
   for (const entry of entries) {
     const name = entry.name
     if (!entry.isFile() || !OURS.test(name)) continue
-    // The currently running session's file and its abandoned temporary tails.
-    if (name === keep || name.startsWith(`${keep}.`)) continue
+    // The currently running session's files and their abandoned temporary
+    // tails. The digest inside `keep` is sixteen characters of a hash of the
+    // whole identifier, so a prefix cannot belong to another session.
+    if (name.startsWith(`${keep}.`)) continue
 
     // The budget is spent only on our own. Otherwise five thousand foreign
     // files dropped into the directory would cancel the sweep entirely

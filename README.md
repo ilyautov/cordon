@@ -2,13 +2,13 @@
 
 # Cordon: a deterministic layer between untrusted text and agent actions
 
-> ⚠️ Early development. The core and two adapters are ready, for Claude Code and Gemini CLI: hidden-layer neutralization, provenance of untrusted data, an intent certificate, an action gate, a source-influence footer under the model's answer, and packaging that intercepts four harness events. 918 tests, a corpus of 18 pinned attack vectors and 7 legitimate documents, two runtime dependencies. Installation is described in [docs/install.md](docs/install.md) and [docs/install-gemini.md](docs/install-gemini.md). The wiring has not been exercised on a live harness yet, and one gap is named outright: whether `updatedInput` applies without a permission decision is not confirmed by the harness documentation.
+> ⚠️ Early development. The core and two adapters are ready, for Claude Code and Gemini CLI: hidden-layer neutralization, provenance of untrusted data, an intent certificate, an action gate, a source-influence footer under the model's answer, and packaging that intercepts four harness events. 923 tests, a corpus of 18 pinned attack vectors and 7 legitimate documents, two runtime dependencies. Installation is described in [docs/install.md](docs/install.md) and [docs/install-gemini.md](docs/install-gemini.md). The wiring has not been exercised on a live harness yet, and one gap is named outright: whether `updatedInput` applies without a permission decision is not confirmed by the harness documentation.
 
 > [Русская версия](README.ru.md)
 
 [![ci](https://github.com/ilyautov/cordon/actions/workflows/ci.yml/badge.svg)](https://github.com/ilyautov/cordon/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.2.0-blueviolet)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.2.1-blueviolet)](CHANGELOG.md)
 [![Finding kinds](https://img.shields.io/badge/finding%20kinds-5-1F6F5C)](#what-gets-stripped)
 [![Attack vectors](https://img.shields.io/badge/attack%20vectors-18-1F6F5C)](#development)
 ![node 22+](https://img.shields.io/badge/node-22%2B-1F6F5C)

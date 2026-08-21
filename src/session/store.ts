@@ -1,5 +1,5 @@
-import { createHash } from 'node:crypto'
-import { readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { createHash, randomBytes } from 'node:crypto'
+import { readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { makeDirectory } from '../core/mkdir.js'
 import type { EffectClass } from '../core/types.js'
@@ -87,18 +87,89 @@ const READABLE: ReadonlySet<number> = new Set([1, 2, 3, VERSION])
 export class SessionStore {
   constructor(private readonly cordonHome: string) {}
 
-  load(sessionId: string): SessionState {
-    const path = this.pathFor(sessionId)
+  /** The pieces this store took in, by session: what its own write replaces. */
+  private readonly read = new Map<string, string[]>()
 
-    let raw: string
+  /**
+   * This store's own piece of every session state it writes.
+   *
+   * Random, and belonging to the instance rather than to the process. Random
+   * because within a session's lifetime a process id comes round again, and
+   * two writers sharing a name would be the very overwrite this is here to
+   * stop. Per instance because that is what makes the overwrite reproducible
+   * without starting processes: two stores in one test behave exactly like
+   * two hooks on a harness.
+   */
+  private readonly piece = randomBytes(8).toString('hex')
+
+  /**
+   * The session's state, assembled from every piece of it on disk.
+   *
+   * There is more than one piece because a harness runs its hooks in parallel.
+   * Two PostToolUse processes used to read the same state, add their own
+   * source to it and write it back whole: the later write erased the earlier
+   * one's provenance, and nothing said so. Measured before the fix, twelve
+   * runs out of twelve lost one of the two sources. Erased provenance is an
+   * empty store — exactly the permissive state an attacker is after, obtained
+   * by doing two things at once.
+   *
+   * So each process writes its own file and reading merges them. Merging is
+   * monotone in the safe direction everywhere: the taint stores unite, the
+   * mark is an or, the turn is the later one, and a narrowing intersects,
+   * which is the only direction `narrow` moves in anyway.
+   */
+  load(sessionId: string): SessionState {
+    const pieces = this.piecesOf(sessionId)
+    this.read.set(sessionId, pieces)
+
+    const states: SessionState[] = []
+    for (const path of pieces) {
+      const raw = this.readPiece(path, sessionId)
+      if (raw !== null) states.push(this.parseState(raw, sessionId))
+    }
+
+    if (states.length === 0) {
+      return { turn: 0, taint: new TaintStore(), unredacted: false, directive: null }
+    }
+    return states.reduce(mergeStates)
+  }
+
+  /** The files that together are this session's state, oldest name first. */
+  private piecesOf(sessionId: string): string[] {
+    const dir = join(this.cordonHome, 'sessions')
+    const prefix = safeName(sessionId)
+    let names: string[]
     try {
-      raw = readFileSync(path, 'utf8')
+      names = readdirSync(dir)
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-        return { turn: 0, taint: new TaintStore(), unredacted: false, directive: null }
-      }
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []
       throw new Error(`the session state ${shown(sessionId)} is unreadable: ${(error as Error).message}`)
     }
+    return names
+      .filter((name) => name === `${prefix}.json` || (name.startsWith(`${prefix}.`) && name.endsWith('.json')))
+      .sort()
+      .map((name) => join(dir, name))
+  }
+
+  /**
+   * One piece, or null when it is no longer there.
+   *
+   * A piece can vanish between the listing and the read: another process
+   * writes its own file and removes the ones it had already taken in. That is
+   * not a loss — what was in them is in the file it wrote — so it is not an
+   * error either. Anything else still throws: a state we cannot read must not
+   * quietly become an empty one.
+   */
+  private readPiece(path: string, sessionId: string): string | null {
+    try {
+      return readFileSync(path, 'utf8')
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null
+      throw new Error(`the session state ${shown(sessionId)} is unreadable: ${(error as Error).message}`)
+    }
+  }
+
+  private parseState(raw: string, sessionId: string): SessionState {
 
     // A broken state is a refusal. Silently returning an empty store means
     // reporting that nothing untrusted was read, that is, handing the
@@ -156,6 +227,7 @@ export class SessionStore {
   }
 
   save(sessionId: string, state: SessionState): void {
+    const dir = join(this.cordonHome, 'sessions')
     const path = this.pathFor(sessionId)
     const body = JSON.stringify({
       version: VERSION,
@@ -165,7 +237,25 @@ export class SessionStore {
       directive: state.directive ?? null,
     })
 
-    atomicWrite(join(this.cordonHome, 'sessions'), path, body)
+    atomicWrite(dir, path, body)
+
+    // The pieces this process read are inside what it has just written, so
+    // they can go. Only those: a piece that appeared after the read belongs to
+    // a process still running, and its contents are nowhere else.
+    //
+    // The order matters. Writing first and removing after means a reader
+    // between the two sees the same state twice, which merging makes
+    // harmless; removing first would mean a reader seeing neither.
+    for (const piece of this.read.get(sessionId) ?? []) {
+      if (piece === path) continue
+      try {
+        rmSync(piece, { force: true })
+      } catch {
+        // Another process may have taken the same piece in and removed it
+        // first. Its contents are in two files by then, not in none.
+      }
+    }
+    this.read.set(sessionId, [path])
   }
 
   /**
@@ -215,7 +305,7 @@ export class SessionStore {
   }
 
   private pathFor(sessionId: string): string {
-    return join(this.cordonHome, 'sessions', `${safeName(sessionId)}.json`)
+    return join(this.cordonHome, 'sessions', `${safeName(sessionId)}.${this.piece}.json`)
   }
 
   /**
@@ -302,4 +392,30 @@ export function safeName(sessionId: string): string {
   const cleaned = sessionId.replace(/[^a-zA-Z0-9_-]/gu, '_').slice(0, 64)
   const digest = createHash('sha256').update(sessionId, 'utf8').digest('hex').slice(0, 16)
   return cleaned === '' ? digest : `${cleaned}-${digest}`
+}
+
+/**
+ * Two pieces of one session's state into one.
+ *
+ * Every field merges towards the stricter reading. Provenance unites, because
+ * a source one process saw is a source that was read. The mark is an or, for
+ * the same reason it exists. The turn is the later one, since it only goes
+ * forward. A narrowing intersects — `narrow` intersects and nothing else, so
+ * a state file can take rights away and can never hand them back.
+ */
+function mergeStates(into: SessionState, other: SessionState): SessionState {
+  into.taint.absorb(other.taint.toJSON())
+  return {
+    turn: Math.max(into.turn, other.turn),
+    taint: into.taint,
+    unredacted: into.unredacted === true || other.unredacted === true,
+    directive: mergeDirectives(into.directive ?? null, other.directive ?? null),
+  }
+}
+
+/** Null is the absence of a narrowing, so it narrows nothing. */
+function mergeDirectives(a: EffectClass[] | null, b: EffectClass[] | null): EffectClass[] | null {
+  if (a === null) return b
+  if (b === null) return a
+  return a.filter((effect) => b.includes(effect))
 }

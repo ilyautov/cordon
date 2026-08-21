@@ -2,7 +2,7 @@ import { mkdtempSync, writeFileSync, readdirSync, mkdirSync, existsSync } from '
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { SessionStore } from '../../src/session/store.js'
+import { SessionStore, type SessionState } from '../../src/session/store.js'
 import { TaintStore } from '../../src/provenance/store.js'
 import type { Source } from '../../src/core/types.js'
 
@@ -168,5 +168,104 @@ describe('SessionStore: the session identifier comes from outside', () => {
     // a name chosen by someone else.
     expect(store.load('a/b').taint.check(INJECTION).tainted).toBe(true)
     expect(store.load('a_b').taint.check(INJECTION).tainted).toBe(false)
+  })
+})
+
+/**
+ * A harness runs its hooks in parallel, and each one is a process of its own.
+ * Two of them used to read the same state, add a source to it and write it
+ * back whole: the later write erased the earlier one's provenance and nothing
+ * said so. Measured against the built plugin before the fix, twelve runs out
+ * of twelve lost one of the two sources — and erased provenance is an empty
+ * store, the permissive state an attacker is after, for the price of doing
+ * two things at once.
+ */
+describe('two writers on one session', () => {
+  const a: Source = { id: 'a', kind: 'file', label: '/tmp/a.md', trust: 'untrusted' }
+  const b: Source = { id: 'b', kind: 'file', label: '/tmp/b.md', trust: 'untrusted' }
+  const TEXT_A = 'the first document says the order number is 1937461028 and nothing else'
+  const TEXT_B = 'the second document says the order number is 5566778899 and nothing else'
+
+  function home(): string {
+    return mkdtempSync(join(tmpdir(), 'cordon-race-'))
+  }
+
+  it('neither writer erases the other', () => {
+    const dir = home()
+    const first = new SessionStore(dir)
+    const second = new SessionStore(dir)
+
+    // Both read the same state before either has written: this is the whole
+    // of the race, and it is what two hooks on one turn do.
+    const one = first.load('s')
+    const two = second.load('s')
+    one.taint.record(TEXT_A, a)
+    two.taint.record(TEXT_B, b)
+    first.save('s', one)
+    second.save('s', two)
+
+    const after = new SessionStore(dir).load('s')
+    expect(after.taint.check(TEXT_A).tainted).toBe(true)
+    expect(after.taint.check(TEXT_B).tainted).toBe(true)
+  })
+
+  it('four writers at once lose nothing either', () => {
+    const dir = home()
+    const stores = Array.from({ length: 4 }, () => new SessionStore(dir))
+    const states = stores.map((store) => store.load('s'))
+    states.forEach((state, i) => {
+      state.taint.record(`document number ${i} carries the identifier 111222${i}333 inside it`, {
+        id: `s${i}`, kind: 'file', label: `/tmp/${i}.md`, trust: 'untrusted',
+      })
+    })
+    stores.forEach((store, i) => store.save('s', states[i] as SessionState))
+
+    const after = new SessionStore(dir).load('s')
+    for (let i = 0; i < 4; i++) {
+      expect(after.taint.check(`the identifier 111222${i}333 turned up here`).tainted).toBe(true)
+    }
+  })
+
+  it('a mark set by one writer is not lifted by another', () => {
+    const dir = home()
+    const first = new SessionStore(dir)
+    const second = new SessionStore(dir)
+    const one = first.load('s')
+    const two = second.load('s')
+    one.unredacted = true
+    first.save('s', one)
+    second.save('s', two)
+
+    expect(new SessionStore(dir).load('s').unredacted).toBe(true)
+  })
+
+  it('a narrowing asked for by one writer is not widened by another', () => {
+    const dir = home()
+    const first = new SessionStore(dir)
+    const second = new SessionStore(dir)
+    const one = first.load('s')
+    const two = second.load('s')
+    one.directive = ['read']
+    first.save('s', one)
+    second.save('s', two)
+
+    expect(new SessionStore(dir).load('s').directive).toEqual(['read'])
+  })
+
+  it('a writer takes in what it read and leaves one file behind', () => {
+    // Otherwise a long session would accumulate a file per tool call, each
+    // holding the whole state.
+    const dir = home()
+    const first = new SessionStore(dir)
+    const state = first.load('s')
+    state.taint.record(TEXT_A, a)
+    first.save('s', state)
+
+    const second = new SessionStore(dir)
+    const later = second.load('s')
+    later.taint.record(TEXT_B, b)
+    second.save('s', later)
+
+    expect(readdirSync(join(dir, 'sessions')).filter((n) => n.endsWith('.json'))).toHaveLength(1)
   })
 })

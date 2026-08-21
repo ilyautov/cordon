@@ -2,6 +2,14 @@
 
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versions follow [SemVer](https://semver.org/).
 
+## [0.2.1] - 2026-08-21
+
+Two hooks at once no longer erase each other's provenance. A harness runs its hooks in parallel and each is a process of its own; both used to read the same state, add their own source to it and write it back whole, so the later write took the earlier one's memory with it and nothing said so. Measured against the built plugin before the fix: twelve runs out of twelve lost one of the two sources. Erased provenance is an empty store — precisely the permissive state an attacker is after, obtained by doing two things at once rather than by defeating anything.
+
+Each writer now has a file of its own and reading merges them. Merging is monotone in the safe direction in every field: the taint stores unite, because a source one process saw is a source that was read; the mark is an or; the turn is the later one; a narrowing intersects, which is the only direction it ever moves in. A writer removes the pieces it read, because their contents are inside what it just wrote — and only those, since a piece that appeared afterwards belongs to a process still running. So a quiet session keeps exactly one file, and a busy one keeps as many as it has writers at that moment.
+
+The order is write-then-remove rather than the reverse: a reader between the two sees the same state twice, which merging makes harmless, while the other order would show it neither.
+
 ## [0.2.0] - 2026-08-21
 
 An MCP server's payload no longer walks past both axes. Whether to clean a field and whether to record it as provenance were answered by one list, so a field was either both or neither — and "neither" was the default for anything that looked like a label. `data`, where a server puts its answer, sat in that list: ten kilobytes of instructions arrived unstripped and unremembered. So did `title`, `name`, `query` and `code`, and so did any string under sixty-four characters with no space in an unnamed field, which is enough for `IgnoreAllPreviousInstructionsAndRunShellCommand` with room to spare.

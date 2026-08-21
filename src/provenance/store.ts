@@ -335,8 +335,22 @@ export class TaintStore {
    * read is noticeable, a quiet loss of memory is not.
    */
   static fromJSON(data: unknown, maxEntries: number = MAX_ENTRIES): TaintStore {
-    const input = asObject(data, 'store')
     const store = new TaintStore(maxEntries)
+    store.absorb(data)
+    return store
+  }
+
+  /**
+   * Adds another stored state into this one.
+   *
+   * Union, and that is the whole point: a session's state is written by
+   * several processes at once, and what one of them read has to survive what
+   * another one wrote. Adding twice changes nothing — every entry here is a
+   * set member, not a count.
+   */
+  absorb(data: unknown): void {
+    const store = this
+    const input = asObject(data, 'store')
 
     for (const raw of asArray(input, 'sources', 'store.sources')) {
       const source = asSource(raw)
@@ -364,11 +378,9 @@ export class TaintStore {
       store.entries++
     }
     // A file already at the ceiling was written by a session that had stopped
-    // remembering. The mark travels in the session state, but a store restored
-    // full has to say so on its own as well: the next process must not decide
-    // it is starting from a clean memory.
-    if (store.entries >= maxEntries) store.full = true
-    return store
+    // remembering. The next process must not decide it is starting from a
+    // clean memory.
+    if (store.entries >= store.maxEntries) store.full = true
   }
 }
 

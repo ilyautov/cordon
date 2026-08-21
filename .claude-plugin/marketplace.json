@@ -9,7 +9,7 @@
       "name": "cordon",
       "source": "./plugin",
       "description": "A deterministic layer between untrusted content and agent actions",
-      "version": "0.2.0"
+      "version": "0.2.1"
     }
   ]
 }

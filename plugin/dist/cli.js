@@ -10708,8 +10708,8 @@ ${removed}` : html.clean;
 }
 
 // src/session/store.ts
-import { createHash } from "node:crypto";
-import { readFileSync as readFileSync2, renameSync, rmSync, writeFileSync } from "node:fs";
+import { createHash, randomBytes } from "node:crypto";
+import { readFileSync as readFileSync2, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join as join3 } from "node:path";
 
 // src/provenance/decode.ts
@@ -10970,8 +10970,21 @@ var TaintStore = class _TaintStore {
    * read is noticeable, a quiet loss of memory is not.
    */
   static fromJSON(data, maxEntries = MAX_ENTRIES) {
-    const input = asObject2(data, "store");
     const store = new _TaintStore(maxEntries);
+    store.absorb(data);
+    return store;
+  }
+  /**
+   * Adds another stored state into this one.
+   *
+   * Union, and that is the whole point: a session's state is written by
+   * several processes at once, and what one of them read has to survive what
+   * another one wrote. Adding twice changes nothing — every entry here is a
+   * set member, not a count.
+   */
+  absorb(data) {
+    const store = this;
+    const input = asObject2(data, "store");
     for (const raw of asArray(input, "sources", "store.sources")) {
       const source = asSource(raw);
       store.sources.set(source.id, source);
@@ -10994,8 +11007,7 @@ var TaintStore = class _TaintStore {
       store.byAtom.set(atom, id);
       store.entries++;
     }
-    if (store.entries >= maxEntries) store.full = true;
-    return store;
+    if (store.entries >= store.maxEntries) store.full = true;
   }
 };
 var KINDS = /* @__PURE__ */ new Set([
@@ -11099,17 +11111,79 @@ var SessionStore = class {
     this.cordonHome = cordonHome2;
   }
   cordonHome;
+  /** The pieces this store took in, by session: what its own write replaces. */
+  read = /* @__PURE__ */ new Map();
+  /**
+   * This store's own piece of every session state it writes.
+   *
+   * Random, and belonging to the instance rather than to the process. Random
+   * because within a session's lifetime a process id comes round again, and
+   * two writers sharing a name would be the very overwrite this is here to
+   * stop. Per instance because that is what makes the overwrite reproducible
+   * without starting processes: two stores in one test behave exactly like
+   * two hooks on a harness.
+   */
+  piece = randomBytes(8).toString("hex");
+  /**
+   * The session's state, assembled from every piece of it on disk.
+   *
+   * There is more than one piece because a harness runs its hooks in parallel.
+   * Two PostToolUse processes used to read the same state, add their own
+   * source to it and write it back whole: the later write erased the earlier
+   * one's provenance, and nothing said so. Measured before the fix, twelve
+   * runs out of twelve lost one of the two sources. Erased provenance is an
+   * empty store — exactly the permissive state an attacker is after, obtained
+   * by doing two things at once.
+   *
+   * So each process writes its own file and reading merges them. Merging is
+   * monotone in the safe direction everywhere: the taint stores unite, the
+   * mark is an or, the turn is the later one, and a narrowing intersects,
+   * which is the only direction `narrow` moves in anyway.
+   */
   load(sessionId) {
-    const path = this.pathFor(sessionId);
-    let raw;
+    const pieces = this.piecesOf(sessionId);
+    this.read.set(sessionId, pieces);
+    const states = [];
+    for (const path of pieces) {
+      const raw = this.readPiece(path, sessionId);
+      if (raw !== null) states.push(this.parseState(raw, sessionId));
+    }
+    if (states.length === 0) {
+      return { turn: 0, taint: new TaintStore(), unredacted: false, directive: null };
+    }
+    return states.reduce(mergeStates);
+  }
+  /** The files that together are this session's state, oldest name first. */
+  piecesOf(sessionId) {
+    const dir = join3(this.cordonHome, "sessions");
+    const prefix = safeName(sessionId);
+    let names;
     try {
-      raw = readFileSync2(path, "utf8");
+      names = readdirSync(dir);
     } catch (error) {
-      if (error.code === "ENOENT") {
-        return { turn: 0, taint: new TaintStore(), unredacted: false, directive: null };
-      }
+      if (error.code === "ENOENT") return [];
       throw new Error(`the session state ${shown(sessionId)} is unreadable: ${error.message}`);
     }
+    return names.filter((name) => name === `${prefix}.json` || name.startsWith(`${prefix}.`) && name.endsWith(".json")).sort().map((name) => join3(dir, name));
+  }
+  /**
+   * One piece, or null when it is no longer there.
+   *
+   * A piece can vanish between the listing and the read: another process
+   * writes its own file and removes the ones it had already taken in. That is
+   * not a loss — what was in them is in the file it wrote — so it is not an
+   * error either. Anything else still throws: a state we cannot read must not
+   * quietly become an empty one.
+   */
+  readPiece(path, sessionId) {
+    try {
+      return readFileSync2(path, "utf8");
+    } catch (error) {
+      if (error.code === "ENOENT") return null;
+      throw new Error(`the session state ${shown(sessionId)} is unreadable: ${error.message}`);
+    }
+  }
+  parseState(raw, sessionId) {
     let parsed;
     try {
       parsed = JSON.parse(raw);
@@ -11142,6 +11216,7 @@ var SessionStore = class {
     };
   }
   save(sessionId, state) {
+    const dir = join3(this.cordonHome, "sessions");
     const path = this.pathFor(sessionId);
     const body = JSON.stringify({
       version: VERSION,
@@ -11150,7 +11225,15 @@ var SessionStore = class {
       unredacted: state.unredacted === true,
       directive: state.directive ?? null
     });
-    atomicWrite(join3(this.cordonHome, "sessions"), path, body);
+    atomicWrite(dir, path, body);
+    for (const piece of this.read.get(sessionId) ?? []) {
+      if (piece === path) continue;
+      try {
+        rmSync(piece, { force: true });
+      } catch {
+      }
+    }
+    this.read.set(sessionId, [path]);
   }
   /**
    * The accumulated text of the message being displayed.
@@ -11192,7 +11275,7 @@ var SessionStore = class {
     }
   }
   pathFor(sessionId) {
-    return join3(this.cordonHome, "sessions", `${safeName(sessionId)}.json`);
+    return join3(this.cordonHome, "sessions", `${safeName(sessionId)}.${this.piece}.json`);
   }
   /**
    * The draft file lies in its own directory rather than next to the state.
@@ -11229,6 +11312,20 @@ function safeName(sessionId) {
   const cleaned = sessionId.replace(/[^a-zA-Z0-9_-]/gu, "_").slice(0, 64);
   const digest = createHash("sha256").update(sessionId, "utf8").digest("hex").slice(0, 16);
   return cleaned === "" ? digest : `${cleaned}-${digest}`;
+}
+function mergeStates(into, other) {
+  into.taint.absorb(other.taint.toJSON());
+  return {
+    turn: Math.max(into.turn, other.turn),
+    taint: into.taint,
+    unredacted: into.unredacted === true || other.unredacted === true,
+    directive: mergeDirectives(into.directive ?? null, other.directive ?? null)
+  };
+}
+function mergeDirectives(a, b) {
+  if (a === null) return b;
+  if (b === null) return a;
+  return a.filter((effect) => b.includes(effect));
 }
 
 // src/cordon.ts
@@ -11604,19 +11701,19 @@ function renderFooter(marks) {
 }
 
 // src/session/sweep.ts
-import { lstatSync, readdirSync, rmSync as rmSync2, writeFileSync as writeFileSync2 } from "node:fs";
+import { lstatSync, readdirSync as readdirSync2, rmSync as rmSync2, writeFileSync as writeFileSync2 } from "node:fs";
 import { join as join5 } from "node:path";
 var SESSION_TTL_MS = 24 * 60 * 60 * 1e3;
 var DRAFT_TTL_MS = 60 * 60 * 1e3;
 var SWEEP_INTERVAL_MS = 60 * 60 * 1e3;
 var SWEEP_BUDGET = 5e3;
 var SWEEP_MARK = "last-sweep";
-var OURS = /^[A-Za-z0-9_-]{1,81}\.json(?:\.\d{1,10}\.tmp)?$/u;
+var OURS = /^[A-Za-z0-9_-]{1,81}(?:\.[a-f0-9]{1,32})?\.json(?:\.\d{1,10}\.tmp)?$/u;
 function sweep(cordonHome2, keepSessionId, now = Date.now()) {
   try {
     if (!due(cordonHome2, now)) return;
     mark(cordonHome2);
-    const keep = `${safeName(keepSessionId)}.json`;
+    const keep = safeName(keepSessionId);
     sweepDir(join5(cordonHome2, "sessions"), SESSION_TTL_MS, keep, now);
     sweepDir(join5(cordonHome2, "drafts"), DRAFT_TTL_MS, keep, now);
   } catch {
@@ -11640,7 +11737,7 @@ function sweepDir(dir, ttl, keep, now) {
   let entries;
   try {
     if (!lstatSync(dir).isDirectory()) return;
-    entries = readdirSync(dir, { withFileTypes: true });
+    entries = readdirSync2(dir, { withFileTypes: true });
   } catch {
     return;
   }
@@ -11648,7 +11745,7 @@ function sweepDir(dir, ttl, keep, now) {
   for (const entry of entries) {
     const name = entry.name;
     if (!entry.isFile() || !OURS.test(name)) continue;
-    if (name === keep || name.startsWith(`${keep}.`)) continue;
+    if (name.startsWith(`${keep}.`)) continue;
     if (budget <= 0) return;
     budget -= 1;
     const path = join5(dir, name);
