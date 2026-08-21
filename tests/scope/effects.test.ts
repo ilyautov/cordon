@@ -12,6 +12,17 @@ describe('classify', () => {
     expect(classify({ tool: 'Edit', args: {} }, {}).effects).toEqual(['update'])
   })
 
+  // Measured on Claude Code 2.1.236: with ToolSearch unclassified, a session
+  // whose profile was read and summarize could not reach WebFetch at all, and
+  // the journal recorded the refusal against ToolSearch rather than against
+  // anything the model wanted to do. The narrowest profile there is has to be
+  // able to look up a schema.
+  it('looking a tool up is a read, so the narrowest profile still allows it', () => {
+    const verdict = classify({ tool: 'ToolSearch', args: { query: 'select:Read' } }, {})
+    expect(verdict.classified).toBe(true)
+    expect(verdict.effects).toEqual(['read'])
+  })
+
   it('Bash is exec, not read', () => {
     const verdict = classify({ tool: 'Bash', args: { command: 'ls' } }, {})
     expect(verdict.effects).toEqual(['exec'])

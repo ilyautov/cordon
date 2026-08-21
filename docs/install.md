@@ -55,7 +55,7 @@ effect classes: read, summarize, create
 source-influence footer: on
 self-check: ok
 note: doctor checks the mechanism, not the wiring. Whether the harness actually calls the hook is shown by /hooks in Claude Code and by /hooks panel in Gemini CLI
-warning: whether updatedInput applies without permissionDecision is not confirmed by the harness documentation: if the harness ignores such a response, argument quarantine does not fire in autonomous mode, while the control axis keeps working
+warning: argument quarantine in autonomous mode rests on updatedInput being applied without a permissionDecision: measured on Claude Code 2.1.236 that it is, not measured on Gemini CLI. Where it is ignored, quarantine does not fire and the control axis keeps working
 ```
 
 The line `self-check: ok` means that the hidden layer is stripped, a call outside the certificate is refused, and a call inside the certificate goes through. It does not mean that the harness calls the hook: those are different questions, and the second one is answered by `/hooks`. A hook that is never called is indistinguishable from the outside from a hook that had no reason to fire. All checks run in a temporary home directory with their own policy, so `doctor` does not change the state of live sessions and does not depend on whether the user's profile is wide or narrow. The exit code is non-zero only when `self-check: broken`; warnings do not change it, because a warning is a question about configuration, not about whether the thing works.
@@ -268,7 +268,9 @@ Only the footer is turned off. The control and data axes keep working: the foote
 
 **A hook that times out does not block the call.** Timeouts are set short explicitly: 5 seconds for `UserPromptSubmit`, `PreToolUse` and `MessageDisplay`, 10 for `PostToolUse`. A long timeout here is not a safety margin but a window in which the defence is off. For the same reason the hot path is synchronous: no network, no waiting.
 
-**Whether `updatedInput` applies without a permission decision is not confirmed by the harness documentation.** In autonomous mode argument quarantine is printed exactly that way, because there is nobody to ask and printing `allow` is not allowed. If the harness ignores such a response, the call goes out with the original arguments. The control axis keeps working regardless: quarantine is the second line, not the first.
+**Argument quarantine lands only on a call the harness was going to allow anyway.** In autonomous mode quarantine is printed as `updatedInput` with no permission decision, because there is nobody to ask and printing `allow` is not allowed. Claude Code 2.1.236 applies such a response — measured, see [live-run.md](live-run.md) — but only once the call has cleared the harness's own permissions: with the tool not pre-approved the write never happened at all and the quarantine never came into play. Cordon is not a second permission system and does not become one. On Gemini CLI this has not been measured; where the response is ignored, the call goes out with its original arguments and the control axis keeps working, quarantine being the second line rather than the first.
+
+**A quarantined call is reported by the model as though nothing was cut.** The model composes the arguments, the harness applies the substituted ones, and nothing tells the model what changed — so its account of the turn describes what it wrote, not what landed. This is why every rewrite goes into the journal: the journal and the file are the only two places the difference is visible.
 
 **Output of an unknown shape is not substituted.** The harness silently discards a substitution whose shape did not match the original and shows the model the original text. So Cordon does not touch an unfamiliar shape at all; it marks the session instead, and the next action more complex than reading escalates. The mark is lifted by a new user message.
 

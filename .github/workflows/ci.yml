@@ -55,7 +55,7 @@ jobs:
           # same reason: it opens by showing the reader a real hidden block.
           # The pull-request template is excluded because HTML comments are
           # what a template is made of.
-          for f in README.md README.ru.md docs/install.md docs/install-gemini.md SECURITY.md CONTRIBUTING.md PRIVACY_POLICY.md SUPPORT.md CODE_OF_CONDUCT.md AGENTS.md assets/README.md; do
+          for f in README.md README.ru.md docs/install.md docs/install-gemini.md docs/live-run.md SECURITY.md CONTRIBUTING.md PRIVACY_POLICY.md SUPPORT.md CODE_OF_CONDUCT.md AGENTS.md assets/README.md; do
             node dist/cli.js scan "$f" --json > /tmp/self-scan.json
             node -e "
               const r = require('/tmp/self-scan.json')

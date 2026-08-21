@@ -79,12 +79,17 @@ describe('cordon doctor: warnings', () => {
     expect(doctor(dir).warnings.some((w) => w.includes('notification'))).toBe(false)
   })
 
-  it('warns that quarantine without a decision is unverified', () => {
-    // Task 4b left the uncertainty declared rather than closed: the harness
-    // documentation does not say whether updatedInput applies without
-    // permissionDecision. Staying silent about it is not allowed, otherwise
-    // the user concludes that quarantine in autonomous mode is verified.
-    expect(doctor(home()).warnings.some((w) => w.includes('updatedInput'))).toBe(true)
+  it('says what quarantine in autonomous mode rests on, and where it was measured', () => {
+    // Claude Code 2.1.236 was measured to apply updatedInput without a
+    // permissionDecision, so the old wording — that nobody knows — is no
+    // longer true. Dropping the warning outright would be the other error:
+    // Cordon ships a second adapter where this has not been measured at all,
+    // and a reader of doctor's output has no way to tell which harness the
+    // silence covers.
+    const warning = doctor(home()).warnings.find((w) => w.includes('updatedInput'))
+    expect(warning).toBeDefined()
+    expect(warning).toContain('Claude Code')
+    expect(warning).toContain('Gemini CLI')
   })
 })
 

@@ -75,6 +75,35 @@ describe('Cordon: the scenario of replying to reviews automatically', () => {
     expect(cordon.certificate().effects).toEqual(['read', 'create'])
   })
 
+  // The entry the journal can least afford to be missing. A refusal announces
+  // itself — the call did not happen and the model says so. A rewrite goes
+  // through with a piece cut out, and the model reports having sent what it
+  // composed, because it is never told otherwise. Observed on Claude Code
+  // 2.1.236: the harness applied the substituted arguments, the file on disk
+  // came out missing the quarantined line, and the answer said the line was
+  // there.
+  it('a call that went through rewritten is written to the log', () => {
+    const { cordon, log } = make({
+      profile: { effects: ['read', 'create', 'update'], resources: { paths: [], hosts: [] } },
+    })
+    const review = 'The delivery was slower than promised and the packaging arrived slightly crushed on one corner.'
+    cordon.observe(review, { id: 'r1', kind: 'tool', label: 'wb_reviews', trust: 'untrusted' })
+    const decision = cordon.gate({
+      tool: 'Write',
+      args: {
+        file_path: join(tmpdir(), 'cordon-note.txt'),
+        content: ['A note about the customer feedback.', review, 'end of note'].join('\n'),
+      },
+    })
+
+    expect(decision.kind).toBe('rewrite')
+    expect(existsSync(log)).toBe(true)
+    const event = JSON.parse(readFileSync(log, 'utf8').trim().split('\n')[0]!)
+    expect(event.decision).toBe('rewrite')
+    expect(event.tool).toBe('Write')
+    expect(event.source).toBe('wb_reviews')
+  })
+
   it('a successful call is not written to the log', () => {
     const { cordon, log } = make()
     cordon.gate({ tool: 'wb_reply', args: { text: 'thank you' } })

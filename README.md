@@ -2,7 +2,7 @@
 
 # Cordon: a deterministic layer between untrusted text and agent actions
 
-> ⚠️ Early development. The core and two adapters are ready, for Claude Code and Gemini CLI: hidden-layer neutralization, provenance of untrusted data, an intent certificate, an action gate, a source-influence footer under the model's answer, and packaging that intercepts four harness events. 927 tests, a corpus of 18 pinned attack vectors and 7 legitimate documents, two runtime dependencies. Installation is described in [docs/install.md](docs/install.md) and [docs/install-gemini.md](docs/install-gemini.md). The wiring has not been exercised on a live harness yet, and one gap is named outright: whether `updatedInput` applies without a permission decision is not confirmed by the harness documentation.
+> ⚠️ Early development. The core and two adapters are ready, for Claude Code and Gemini CLI: hidden-layer neutralization, provenance of untrusted data, an intent certificate, an action gate, a source-influence footer under the model's answer, and packaging that intercepts four harness events. 929 tests, a corpus of 18 pinned attack vectors and 7 legitimate documents, two runtime dependencies. Installation is described in [docs/install.md](docs/install.md) and [docs/install-gemini.md](docs/install-gemini.md). The wiring has been exercised on a live Claude Code session, 2.1.236: all four events fire, the certificate refuses, provenance refuses, the footer is drawn, and argument quarantine is applied by the harness — the record is in [docs/live-run.md](docs/live-run.md). Gemini CLI has not been run live.
 
 > [Русская версия](README.ru.md)
 
@@ -137,7 +137,7 @@ Node 22 or newer is required. No keys, tokens or network access: there is not a 
 
 The most important section in this file. Cordon works on one narrow stretch, and it is more honest to name the boundaries of that stretch up front.
 
-**It has not been verified on a live harness.** The core, both adapters and both packagings are covered by tests, including launching a separate process from a directory without dependencies. There has been no run inside a real Claude Code or Gemini CLI session, so two behaviours remain declared rather than measured. First: whether `updatedInput` applies without a permission decision — if the harness ignores it, argument quarantine does not fire in autonomous mode, while the control axis keeps working. Second: the shape of the answer-display event the source-influence footer is drawn from.
+**It has been verified on one live harness, not two.** Claude Code 2.1.236 was run with the hooks in place and the whole path was watched from the outside: the four events fire, a call outside the certificate is refused, a link that came out of a read file is refused, the source-influence footer appears under the answer, and a quarantined argument is applied by the harness — the file came out with the untrusted line missing while the model's own account said it was there. The record, with the journal lines, is in [docs/live-run.md](docs/live-run.md). Gemini CLI has had no live run: its events, their names and the shape of a rewrite are all different, and nothing measured here transfers to it.
 
 **It does not protect against jailbreaking the model itself.** When the user breaks their own model, the victim and the attacker are the same person. That is the model vendor's job, not the job of a border layer between content and actions.
 

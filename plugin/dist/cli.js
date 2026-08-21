@@ -7691,6 +7691,14 @@ var BUILTIN = {
   NotebookRead: ["read"],
   WebFetch: ["read", "network-egress"],
   WebSearch: ["read", "network-egress"],
+  // Schema lookup for tools the harness defers. It touches nothing and
+  // returns nothing but declarations, so it is the smallest class there is.
+  // It is listed because leaving it out was not a safe default but a broken
+  // one: where the harness defers a tool, the model reaches that tool only
+  // through this call, so an undeclared ToolSearch escalates on every attempt
+  // to find Read. Escalation is not loosened by listing it — a schema is not
+  // a call, and the call it leads to is classified on its own merits.
+  ToolSearch: ["read"],
   Write: ["create", "update"],
   Edit: ["update"],
   NotebookEdit: ["update"],
@@ -11424,7 +11432,7 @@ var Cordon = class {
       turn: this.turn,
       unredacted: this.unredacted
     });
-    if (decision.kind === "deny" || decision.kind === "ask") {
+    if (decision.kind === "deny" || decision.kind === "ask" || decision.kind === "rewrite") {
       this.notifier.notify({
         at: (/* @__PURE__ */ new Date()).toISOString(),
         decision: decision.kind,
@@ -12764,7 +12772,7 @@ function doctor(home = cordonHome()) {
   }
   if (policy.mode === "autonomous") {
     warnings.push(
-      "whether updatedInput applies without permissionDecision is not confirmed by the harness documentation: if the harness ignores such a response, argument quarantine will not fire in autonomous mode, while the control axis keeps working"
+      "argument quarantine in autonomous mode rests on updatedInput being applied without a permissionDecision: measured on Claude Code 2.1.236 that it is, not measured on Gemini CLI. Where it is ignored, quarantine does not fire and the control axis keeps working"
     );
   }
   return {

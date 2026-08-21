@@ -176,7 +176,17 @@ export class Cordon {
       unredacted: this.unredacted,
     })
 
-    if (decision.kind === 'deny' || decision.kind === 'ask') {
+    // A rewrite is journaled alongside the refusals, and it is the entry the
+    // journal can least afford to be missing. A refusal leaves a mark on its
+    // own: the call did not happen, the model says so, the human sees it. A
+    // rewrite is the one outcome where the call goes through and the result
+    // is not what the model asked for — the file gets written with a piece
+    // cut out of it, and the model reports having written the whole thing,
+    // because it never learns otherwise. Measured on Claude Code 2.1.236: the
+    // harness applies the substituted arguments and the model's own account
+    // of the turn is wrong about what landed on disk. Without this line the
+    // only record of that is the file itself.
+    if (decision.kind === 'deny' || decision.kind === 'ask' || decision.kind === 'rewrite') {
       this.notifier.notify({
         at: new Date().toISOString(),
         decision: decision.kind,

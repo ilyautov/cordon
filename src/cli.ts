@@ -391,9 +391,9 @@ export function doctor(home: string = cordonHome()): DoctorReport {
 
   if (policy.mode === 'autonomous') {
     warnings.push(
-      'whether updatedInput applies without permissionDecision is not confirmed by the harness documentation: ' +
-        'if the harness ignores such a response, argument quarantine will not fire in autonomous mode, ' +
-        'while the control axis keeps working',
+      'argument quarantine in autonomous mode rests on updatedInput being applied without a ' +
+        'permissionDecision: measured on Claude Code 2.1.236 that it is, not measured on Gemini CLI. ' +
+        'Where it is ignored, quarantine does not fire and the control axis keeps working',
     )
   }
 
