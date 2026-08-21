@@ -1091,16 +1091,16 @@ var require_foldFlowLines = __commonJS({
         onFold();
       let res = text.slice(0, folds[0]);
       for (let i2 = 0; i2 < folds.length; ++i2) {
-        const fold7 = folds[i2];
+        const fold4 = folds[i2];
         const end2 = folds[i2 + 1] || text.length;
-        if (fold7 === 0)
+        if (fold4 === 0)
           res = `
 ${indent}${text.slice(0, end2)}`;
         else {
-          if (mode === FOLD_QUOTED && escapedFolds[fold7])
-            res += `${text[fold7]}\\`;
+          if (mode === FOLD_QUOTED && escapedFolds[fold4])
+            res += `${text[fold4]}\\`;
           res += `
-${indent}${text.slice(fold7 + 1, end2)}`;
+${indent}${text.slice(fold4 + 1, end2)}`;
         }
       }
       return res;
@@ -4738,8 +4738,8 @@ var require_resolve_flow_scalar = __commonJS({
         if (ch === "\r" && source[i + 1] === "\n")
           continue;
         if (ch === "\n") {
-          const { fold: fold7, offset } = foldNewline(source, i);
-          res += fold7;
+          const { fold: fold4, offset } = foldNewline(source, i);
+          res += fold4;
           i = offset;
         } else if (ch === "\\") {
           let next = source[++i];
@@ -4779,19 +4779,19 @@ var require_resolve_flow_scalar = __commonJS({
       return res;
     }
     function foldNewline(source, offset) {
-      let fold7 = "";
+      let fold4 = "";
       let ch = source[offset + 1];
       while (ch === " " || ch === "	" || ch === "\n" || ch === "\r") {
         if (ch === "\r" && source[offset + 2] !== "\n")
           break;
         if (ch === "\n")
-          fold7 += "\n";
+          fold4 += "\n";
         offset += 1;
         ch = source[offset + 1];
       }
-      if (!fold7)
-        fold7 = " ";
-      return { fold: fold7, offset };
+      if (!fold4)
+        fold4 = " ";
+      return { fold: fold4, offset };
     }
     var escapeCodes = {
       "0": "\0",
@@ -7908,19 +7908,21 @@ function introducesIdentity(before, after) {
   return atoms(after).some((atom) => !was.has(atom));
 }
 
-// src/gate/gate.ts
+// src/core/argument-keys.ts
 var PATH_KEYS = /* @__PURE__ */ new Set([
   "filepath",
   "filepaths",
   "path",
   "paths",
   "notebookpath",
+  "absolutepath",
   "targetpath",
   "destination",
   "dest",
-  "outputpath"
+  "outputpath",
+  "filename",
+  "filenames"
 ]);
-var COMMAND_KEYS = /* @__PURE__ */ new Set(["command", "cmd", "script", "shell"]);
 var URL_KEYS = /* @__PURE__ */ new Set([
   "url",
   "urls",
@@ -7934,6 +7936,12 @@ var URL_KEYS = /* @__PURE__ */ new Set([
   "baseurl",
   "callbackurl"
 ]);
+var COMMAND_KEYS = /* @__PURE__ */ new Set(["command", "cmd", "script", "shell"]);
+function fold3(name) {
+  return name.toLowerCase().replace(/[_-]/gu, "");
+}
+
+// src/gate/gate.ts
 var MAX_FIELDS = 2e3;
 var MAX_DEPTH = 8;
 function gate(call, ctx) {
@@ -8013,9 +8021,6 @@ function fields(args) {
   };
   for (const [key, value] of Object.entries(args)) visit2(key, value, 0);
   return out;
-}
-function fold3(name) {
-  return name.toLowerCase().replace(/[_-]/gu, "");
 }
 function selfProtection(parts, ctx) {
   for (const { key, value } of parts) {
@@ -11968,15 +11973,12 @@ function rebuild(node, key, depth, parts, cursor) {
   return node;
 }
 function roleOf(key, value) {
-  const folded = fold4(key);
+  const folded = fold3(key);
   if (TEXT_KEYS.has(folded)) return "text";
   if (LABEL_KEYS.has(folded)) return "label";
   if (OPAQUE_KEYS.has(folded)) return "opaque";
   if (value.length <= TOKEN_LIMIT && !/\s/u.test(value)) return "label";
   return "unknown";
-}
-function fold4(name) {
-  return name.toLowerCase().replace(/[_-]/gu, "");
 }
 
 // src/adapters/claude-code/protocol.ts
@@ -12185,27 +12187,15 @@ function sourceKind(tool) {
   if (tool === "Read" || tool === "Glob" || tool === "Grep" || tool === "NotebookRead") return "file";
   return "tool";
 }
-var URL_KEYS2 = /* @__PURE__ */ new Set(["url", "uri", "href", "link", "endpoint"]);
-var PATH_KEYS2 = /* @__PURE__ */ new Set([
-  "filepath",
-  "path",
-  "notebookpath",
-  "targetpath",
-  "dest",
-  "destination"
-]);
 function sourceLabel(call) {
   const args = Object.entries(call.args);
-  for (const set of [URL_KEYS2, PATH_KEYS2]) {
+  for (const set of [URL_KEYS, PATH_KEYS]) {
     for (const [key, value] of args) {
-      if (!set.has(fold5(key))) continue;
+      if (!set.has(fold3(key))) continue;
       if (typeof value === "string" && value !== "") return value;
     }
   }
   return call.tool;
-}
-function fold5(name) {
-  return name.toLowerCase().replace(/[_-]/gu, "");
 }
 function deny(reason) {
   return {
@@ -12508,27 +12498,15 @@ var FILE_TOOLS = /* @__PURE__ */ new Set([
   "glob",
   "search_file_content"
 ]);
-var URL_KEYS3 = /* @__PURE__ */ new Set(["url", "uri", "href", "link", "endpoint"]);
-var PATH_KEYS3 = /* @__PURE__ */ new Set([
-  "filepath",
-  "path",
-  "absolutepath",
-  "targetpath",
-  "dest",
-  "destination"
-]);
 function sourceLabel2(call) {
   const args = Object.entries(call.args);
-  for (const set of [URL_KEYS3, PATH_KEYS3]) {
+  for (const set of [URL_KEYS, PATH_KEYS]) {
     for (const [key, value] of args) {
-      if (!set.has(fold6(key))) continue;
+      if (!set.has(fold3(key))) continue;
       if (typeof value === "string" && value !== "") return value;
     }
   }
   return call.tool;
-}
-function fold6(name) {
-  return name.toLowerCase().replace(/[_-]/gu, "");
 }
 
 // src/adapters/gemini-cli/main.ts

@@ -346,3 +346,25 @@ describe('handle: the same quotation in another spelling', () => {
     expect(out).toEqual({})
   })
 })
+
+describe('handle: the names a source can be called', () => {
+  it('a trusted directory is recognized through a filename argument', () => {
+    // The adapter's own copy of the path names did not have `filename`, so
+    // the source was labelled with the tool name, the trusted prefix never
+    // matched, and a document the user had declared trusted tainted the
+    // session anyway.
+    const shared = env()
+    shared.policy.trustedSources = ['/srv/docs']
+    const ID = 'Item 1937461028 sells better than the rest of the range'
+    handle(
+      { kind: 'PostToolUse', sessionId: 'n1', call: { tool: 'Read', args: { filename: '/srv/docs/prices.md' } },
+        response: ID },
+      shared,
+    )
+    const out = handle(
+      { kind: 'PreToolUse', sessionId: 'n1', call: { tool: 'wb_reply', args: { text: `at our shop ${ID}` } } },
+      shared,
+    )
+    expect(out).toEqual({})
+  })
+})

@@ -10,6 +10,7 @@ import type { Finding } from '../../sanitize/types.js'
 import { classifySource } from '../../provenance/trust.js'
 import { extractText, replaceText } from './output.js'
 import { renderDecision, silentOnFailure, type HookEvent, type HookOutput } from './protocol.js'
+import { PATH_KEYS, URL_KEYS, fold } from '../../core/argument-keys.js'
 
 export interface AdapterEnv {
   policy: Policy
@@ -281,10 +282,6 @@ function sourceKind(tool: string): Source['kind'] {
  * The names are folded to one form: `file_path` and `filePath` are chosen by
  * the MCP server, and they mean the same thing.
  */
-const URL_KEYS: ReadonlySet<string> = new Set(['url', 'uri', 'href', 'link', 'endpoint'])
-const PATH_KEYS: ReadonlySet<string> = new Set([
-  'filepath', 'path', 'notebookpath', 'targetpath', 'dest', 'destination',
-])
 
 /**
  * The source's name: a link or a path from the call's arguments, and the tool
@@ -307,9 +304,6 @@ function sourceLabel(call: ToolCall): string {
   return call.tool
 }
 
-function fold(name: string): string {
-  return name.toLowerCase().replace(/[_-]/gu, '')
-}
 
 function deny(reason: string): HookOutput {
   return {

@@ -6,6 +6,7 @@ import type { TaintStore } from '../provenance/store.js'
 import { covers } from '../scope/certificate.js'
 import { classify } from '../scope/effects.js'
 import { quarantine } from './quarantine.js'
+import { COMMAND_KEYS, PATH_KEYS, URL_KEYS, fold } from '../core/argument-keys.js'
 
 export interface GateContext {
   policy: Policy
@@ -27,23 +28,6 @@ export interface GateContext {
  * Names are folded to one form: `file_path`, `filePath` and `FILE-PATH` are
  * chosen by the MCP server and all mean the same thing.
  */
-const PATH_KEYS: ReadonlySet<string> = new Set([
-  'filepath', 'filepaths', 'path', 'paths', 'notebookpath',
-  'targetpath', 'destination', 'dest', 'outputpath',
-])
-
-/** Arguments whose value is executed by a shell. */
-const COMMAND_KEYS: ReadonlySet<string> = new Set(['command', 'cmd', 'script', 'shell'])
-
-/**
- * Arguments whose value is a link. As with paths, the names are folded to one
- * form: the MCP server chooses them.
- */
-const URL_KEYS: ReadonlySet<string> = new Set([
-  'url', 'urls', 'uri', 'uris', 'href', 'link', 'links',
-  'endpoint', 'webhook', 'baseurl', 'callbackurl',
-])
-
 /** Limits on walking the arguments. Exceeding them is a refusal, not a truncated walk. */
 const MAX_FIELDS = 2000
 const MAX_DEPTH = 8
@@ -193,11 +177,6 @@ function fields(args: Record<string, unknown>): Field[] {
 
   for (const [key, value] of Object.entries(args)) visit(key, value, 0)
   return out
-}
-
-/** The argument name is chosen by the MCP server, so it is compared folded. */
-function fold(name: string): string {
-  return name.toLowerCase().replace(/[_-]/gu, '')
 }
 
 /**

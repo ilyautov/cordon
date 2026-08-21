@@ -1,3 +1,4 @@
+import { fold } from '../../core/argument-keys.js'
 /**
  * A piece of a tool's output that will be cleaned before the model reads it.
  *
@@ -231,7 +232,3 @@ function roleOf(key: string, value: string): Role {
   return 'unknown'
 }
 
-/** An MCP server chooses the field name, so it is compared folded. */
-function fold(name: string): string {
-  return name.toLowerCase().replace(/[_-]/gu, '')
-}

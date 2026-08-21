@@ -623,3 +623,37 @@ describe('gate: provenance that stopped remembering', () => {
     expect(gate({ tool: 'wb_reply', args: { text: 'hello' } }, ctx).kind).toBe('allow')
   })
 })
+
+/**
+ * The gate and both adapters used to keep their own copies of these names,
+ * and the copies had drifted: the gate knew `webhook`, the Gemini adapter
+ * knew `absolutepath`, neither knew the other's, and `filename` was in none
+ * of them. Three copies of a security rule means the next fix lands in one
+ * and the hole stays open in the other two.
+ */
+describe('gate: the names an argument can be called', () => {
+  it('a path under filename is a path', () => {
+    const decision = gate(
+      { tool: 'wb_reply', args: { filename: '/home/u/.cordon/policy.yaml' } },
+      setup({ mode: 'interactive' }),
+    )
+    expect(decision.kind).toBe('deny')
+    expect(decision.kind === 'deny' && decision.reason).toContain('self-protection')
+  })
+
+  it('a path under absolutePath is a path', () => {
+    const decision = gate(
+      { tool: 'wb_reply', args: { absolutePath: '/home/u/.cordon/policy.yaml' } },
+      setup({ mode: 'interactive' }),
+    )
+    expect(decision.kind).toBe('deny')
+  })
+
+  it('a path under outputPath is a path', () => {
+    const decision = gate(
+      { tool: 'wb_reply', args: { output_path: '/home/u/.cordon/sessions/a.json' } },
+      setup({ mode: 'interactive' }),
+    )
+    expect(decision.kind).toBe('deny')
+  })
+})
