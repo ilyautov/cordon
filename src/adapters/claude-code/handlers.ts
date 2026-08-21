@@ -179,10 +179,10 @@ function observe(
   let substitute = true
   const found: Finding[] = []
   const cleaned = extracted.parts.map((part) => {
-    const envelope = cordon.observe(part, source)
+    const envelope = cordon.observe(part.text, source, part.content ? 'content' : 'label')
     found.push(...envelope.findings)
     if (!envelope.substitute) substitute = false
-    if (envelope.text !== part) changed = true
+    if (envelope.text !== part.text) changed = true
     return envelope.text
   })
 

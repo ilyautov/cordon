@@ -11090,11 +11090,24 @@ var Cordon = class {
    * too much here is cheaper than not recording: what is not recorded is
    * never found.
    */
-  observe(text, source) {
+  /**
+   * Cleans a piece of a tool's result and remembers where it came from.
+   *
+   * `role` separates two questions that are not the same one. Everything the
+   * source put in front of the model is cleaned, without exception. Only what
+   * the source authored is recorded as provenance: a heading, a name or the
+   * query echoed back are the values the user hands over as arguments a moment
+   * later, and recording those would declare the user's own words untrusted.
+   * A miss in provenance costs one unmarked value; false taint there stops
+   * work that was never an attack, and stops it quietly.
+   */
+  observe(text, source, role = "content") {
     const { clean, findings } = sanitize(text);
     const substitute = humanSeesRendered(source);
-    this.taint.record(clean, source);
-    if (!substitute && clean !== text) this.taint.record(text, source);
+    if (role === "content") {
+      this.taint.record(clean, source);
+      if (!substitute && clean !== text) this.taint.record(text, source);
+    }
     if (source.trust === "untrusted") this.lastSource = source;
     this.persist();
     return { text: clean, source, findings, substitute };
@@ -11523,7 +11536,17 @@ var TEXT_KEYS = /* @__PURE__ */ new Set([
   "body",
   "error"
 ]);
-var STRUCTURAL_KEYS = /* @__PURE__ */ new Set([
+var LABEL_KEYS = /* @__PURE__ */ new Set([
+  "title",
+  "label",
+  "name",
+  "query",
+  "command",
+  "activeform",
+  "data",
+  "code"
+]);
+var OPAQUE_KEYS = /* @__PURE__ */ new Set([
   "type",
   "subtype",
   "kind",
@@ -11547,11 +11570,8 @@ var STRUCTURAL_KEYS = /* @__PURE__ */ new Set([
   "files",
   "filename",
   "filenames",
-  "name",
   "toolname",
   "tool",
-  "title",
-  "label",
   "id",
   "uuid",
   "sessionid",
@@ -11564,21 +11584,16 @@ var STRUCTURAL_KEYS = /* @__PURE__ */ new Set([
   "format",
   "extension",
   "ext",
-  "data",
   "sha",
   "hash",
   "key",
-  "code",
-  "codetext",
   "errorcode",
-  "query",
-  "command",
+  "codetext",
   "cwd",
   "model",
   "version",
   "timestamp",
   "date",
-  "activeform",
   "oldstring",
   "newstring"
 ]);
@@ -11587,7 +11602,7 @@ var MAX_NODES = 2e4;
 var MAX_TEXT = 8e6;
 var TOKEN_LIMIT = 64;
 function extractText(tool, response) {
-  if (typeof response === "string") return { known: true, parts: [response] };
+  if (typeof response === "string") return { known: true, parts: [{ text: response, content: true }] };
   if (TEXTLESS.has(tool)) return { known: true, parts: [] };
   const scan = { parts: [], known: true, nodes: 0, size: 0 };
   visit(response, "", 0, scan);
@@ -11612,13 +11627,13 @@ function visit(node, key, depth, scan) {
       scan.known = false;
       return;
     }
-    if (role === "text") {
+    if (role === "text" || role === "label") {
       scan.size += node.length;
       if (scan.size > MAX_TEXT) {
         scan.known = false;
         return;
       }
-      scan.parts.push(node);
+      scan.parts.push({ text: node, content: role === "text" });
     }
     return;
   }
@@ -11632,7 +11647,8 @@ function visit(node, key, depth, scan) {
 }
 function rebuild(node, key, depth, parts, cursor) {
   if (typeof node === "string") {
-    if (roleOf(key, node) !== "text") return node;
+    const role = roleOf(key, node);
+    if (role !== "text" && role !== "label") return node;
     const next = parts[cursor.at++];
     return next ?? node;
   }
@@ -11656,8 +11672,9 @@ function rebuild(node, key, depth, parts, cursor) {
 function roleOf(key, value) {
   const folded = fold4(key);
   if (TEXT_KEYS.has(folded)) return "text";
-  if (STRUCTURAL_KEYS.has(folded)) return "structural";
-  if (value.length <= TOKEN_LIMIT && !/\s/u.test(value)) return "structural";
+  if (LABEL_KEYS.has(folded)) return "label";
+  if (OPAQUE_KEYS.has(folded)) return "opaque";
+  if (value.length <= TOKEN_LIMIT && !/\s/u.test(value)) return "label";
   return "unknown";
 }
 function fold4(name) {
@@ -11823,10 +11840,10 @@ function observe(cordon, event, env) {
   let substitute = true;
   const found = [];
   const cleaned = extracted.parts.map((part) => {
-    const envelope = cordon.observe(part, source);
+    const envelope = cordon.observe(part.text, source, part.content ? "content" : "label");
     found.push(...envelope.findings);
     if (!envelope.substitute) substitute = false;
-    if (envelope.text !== part) changed = true;
+    if (envelope.text !== part.text) changed = true;
     return envelope.text;
   });
   if (!substitute) return report(cordon, event.call.tool, source, found);

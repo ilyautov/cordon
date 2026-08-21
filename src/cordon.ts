@@ -39,6 +39,12 @@ export interface CordonOptions {
  * The core's facade. Exactly three entries, matching the adapter contract of
  * three: trusted input, observing a tool result, deciding on a call.
  */
+/**
+ * What a piece of a tool's result is: something the source wrote, or something
+ * it merely labelled. Only the first goes into provenance.
+ */
+export type PieceRole = 'content' | 'label'
+
 export class Cordon {
   private readonly policy: Policy
   private readonly cordonHome: string
@@ -137,11 +143,24 @@ export class Cordon {
    * too much here is cheaper than not recording: what is not recorded is
    * never found.
    */
-  observe(text: string, source: Source): Envelope {
+  /**
+   * Cleans a piece of a tool's result and remembers where it came from.
+   *
+   * `role` separates two questions that are not the same one. Everything the
+   * source put in front of the model is cleaned, without exception. Only what
+   * the source authored is recorded as provenance: a heading, a name or the
+   * query echoed back are the values the user hands over as arguments a moment
+   * later, and recording those would declare the user's own words untrusted.
+   * A miss in provenance costs one unmarked value; false taint there stops
+   * work that was never an attack, and stops it quietly.
+   */
+  observe(text: string, source: Source, role: PieceRole = 'content'): Envelope {
     const { clean, findings } = sanitize(text)
     const substitute = humanSeesRendered(source)
-    this.taint.record(clean, source)
-    if (!substitute && clean !== text) this.taint.record(text, source)
+    if (role === 'content') {
+      this.taint.record(clean, source)
+      if (!substitute && clean !== text) this.taint.record(text, source)
+    }
     if (source.trust === 'untrusted') this.lastSource = source
     this.persist()
     return { text: clean, source, findings, substitute }

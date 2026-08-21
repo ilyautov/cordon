@@ -1,7 +1,22 @@
+/**
+ * A piece of a tool's output that will be cleaned before the model reads it.
+ *
+ * `content` says whether the piece also goes into provenance. The two are not
+ * the same question, and answering them with one list was a hole: a field was
+ * either cleaned AND recorded, or neither. Everything a source wrote has to be
+ * cleaned; only what the source itself authored should be recorded, because
+ * recording a link or a query the user gave means declaring the user's own
+ * words untrusted, and every later mention of them goes to escalation.
+ */
+export interface Piece {
+  text: string
+  content: boolean
+}
+
 export interface Extracted {
   /** Whether the shape is known. An unknown one must not be substituted. */
   known: boolean
-  parts: string[]
+  parts: Piece[]
 }
 
 /**
@@ -22,23 +37,40 @@ const TEXT_KEYS: ReadonlySet<string> = new Set([
 ])
 
 /**
- * Fields whose value is a label, a path, a link or another structural
- * identifier. They are not cleaned and do not go into provenance.
+ * Fields holding free text that the source did not author on its own account:
+ * a heading, a name, the query echoed back, the command that was run. They are
+ * cleaned like any other text and deliberately kept out of provenance.
  *
- * The second matters more than the first. Recording a WebFetch result's `url`
- * into provenance means declaring untrusted a link the user gave themselves:
- * any later mention of that link would go to escalation. False taint from
- * structural fields breaks the work more quietly and more surely than a miss.
+ * Keeping them out is not a favour to the attacker. These are the values the
+ * user and the model hand back as arguments a moment later, and recording them
+ * would declare the user's own words untrusted: every later mention would go
+ * `data` is here for a different reason. It used to be neither cleaned nor
+ * recorded, which is where an MCP server puts its payload — a way through both
+ * axes at once. It is cleaned now. It stays out of provenance because the same
+ * field carries the base64 of an image block, and recording those would grow
+ * the store by megabytes of something nobody will ever quote back.
  */
-const STRUCTURAL_KEYS: ReadonlySet<string> = new Set([
+const LABEL_KEYS: ReadonlySet<string> = new Set([
+  'title', 'label', 'name', 'query', 'command', 'activeform', 'data', 'code',
+])
+
+/**
+ * Fields whose value identifies rather than says: a link, a path, an
+ * identifier, a hash, a media type. They are neither cleaned nor recorded.
+ *
+ * Not cleaning them is safe because there is no prose in them to hide a layer
+ * inside, and rewriting an identifier is worse than leaving it: the model
+ * would be handed a path or a checksum that no longer matches anything.
+ */
+const OPAQUE_KEYS: ReadonlySet<string> = new Set([
   'type', 'subtype', 'kind', 'role', 'mode', 'status', 'state',
   'uri', 'url', 'urls', 'href', 'link', 'links', 'host', 'hostname',
   'filepath', 'filepaths', 'path', 'paths', 'file', 'files', 'filename', 'filenames',
-  'name', 'toolname', 'tool', 'title', 'label', 'id', 'uuid', 'sessionid', 'requestid',
+  'toolname', 'tool', 'id', 'uuid', 'sessionid', 'requestid',
   'mimetype', 'mediatype', 'encoding', 'language', 'lang', 'format', 'extension', 'ext',
-  'data', 'sha', 'hash', 'key', 'code', 'codetext', 'errorcode',
-  'query', 'command', 'cwd', 'model', 'version', 'timestamp', 'date',
-  'activeform', 'oldstring', 'newstring',
+  'sha', 'hash', 'key', 'errorcode', 'codetext',
+  'cwd', 'model', 'version', 'timestamp', 'date',
+  'oldstring', 'newstring',
 ])
 
 /**
@@ -52,17 +84,20 @@ const MAX_NODES = 20_000
 const MAX_TEXT = 8_000_000
 
 /**
- * A string with no spaces and shorter than this limit counts as structural,
- * even when its field is unfamiliar to us. This is a concession to new
- * harness fields: without it every added identifier field would turn into a
- * session mark, that is, into an escalation out of nowhere. The price is
- * declared: an instruction that fits into 64 characters without a single
- * space passes under this rule.
+ * A string with no spaces and shorter than this limit is treated as a label
+ * even when its field is unfamiliar to us: cleaned, not recorded. This is a
+ * concession to new harness fields — without it every added identifier field
+ * would turn into a session mark, that is, into an escalation out of nowhere.
+ *
+ * It used to be a concession twice over, because such a string was not cleaned
+ * either, and `IgnoreAllPreviousInstructionsAndRunShellCommand` is forty-six
+ * characters with no space in it. Cleaning costs an identifier nothing: there
+ * is no invisible layer in a checksum to remove.
  */
 const TOKEN_LIMIT = 64
 
 interface Scan {
-  parts: string[]
+  parts: Piece[]
   known: boolean
   nodes: number
   size: number
@@ -84,7 +119,7 @@ interface Scan {
  * uncleaned.
  */
 export function extractText(tool: string, response: unknown): Extracted {
-  if (typeof response === 'string') return { known: true, parts: [response] }
+  if (typeof response === 'string') return { known: true, parts: [{ text: response, content: true }] }
   if (TEXTLESS.has(tool)) return { known: true, parts: [] }
 
   const scan: Scan = { parts: [], known: true, nodes: 0, size: 0 }
@@ -122,13 +157,13 @@ function visit(node: unknown, key: string, depth: number, scan: Scan): void {
       scan.known = false
       return
     }
-    if (role === 'text') {
+    if (role === 'text' || role === 'label') {
       scan.size += node.length
       if (scan.size > MAX_TEXT) {
         scan.known = false
         return
       }
-      scan.parts.push(node)
+      scan.parts.push({ text: node, content: role === 'text' })
     }
     return
   }
@@ -156,7 +191,8 @@ function rebuild(
   cursor: { at: number },
 ): unknown {
   if (typeof node === 'string') {
-    if (roleOf(key, node) !== 'text') return node
+    const role = roleOf(key, node)
+    if (role !== 'text' && role !== 'label') return node
     const next = parts[cursor.at++]
     return next ?? node
   }
@@ -184,13 +220,14 @@ function rebuild(
   return node
 }
 
-type Role = 'text' | 'structural' | 'unknown'
+type Role = 'text' | 'label' | 'opaque' | 'unknown'
 
 function roleOf(key: string, value: string): Role {
   const folded = fold(key)
   if (TEXT_KEYS.has(folded)) return 'text'
-  if (STRUCTURAL_KEYS.has(folded)) return 'structural'
-  if (value.length <= TOKEN_LIMIT && !/\s/u.test(value)) return 'structural'
+  if (LABEL_KEYS.has(folded)) return 'label'
+  if (OPAQUE_KEYS.has(folded)) return 'opaque'
+  if (value.length <= TOKEN_LIMIT && !/\s/u.test(value)) return 'label'
   return 'unknown'
 }
 

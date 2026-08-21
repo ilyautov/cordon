@@ -259,3 +259,54 @@ describe('handle: the name of the source', () => {
     expect(String(out.hookSpecificOutput?.updatedToolOutput)).not.toContain('not visible')
   })
 })
+
+describe('handle: what is cleaned and what is remembered', () => {
+  const ID = 'Item 1937461028 sells better than the rest of the range'
+
+  it('the hidden layer is stripped out of an MCP payload field', () => {
+    // `rendered` is the one line of policy an MCP result needs before it is
+    // substituted at all; without it the result is treated as source text and
+    // the finding is only reported. What is being pinned here is the field:
+    // `data` used to be waved through whatever the policy said.
+    const out = handle(
+      { kind: 'PostToolUse', sessionId: 'd1', call: { tool: 'mcp__wb__reviews', args: {} },
+        response: { data: '<p>visible</p><div style="display:none">not visible</div>' } },
+      env({ mcp__wb__reviews: 'rendered' }),
+    )
+    const updated = JSON.stringify(out.hookSpecificOutput?.updatedToolOutput)
+    expect(updated).toContain('visible')
+    expect(updated).not.toContain('not visible')
+  })
+
+  it('free text in a payload field taints nothing, and that is the declared price', () => {
+    // `data` also carries the base64 of an image block. Recording it would
+    // grow the store by megabytes of something nobody will quote back, so the
+    // field is cleaned and not remembered. The miss is named here rather than
+    // left for somebody to discover.
+    const shared = env()
+    handle(
+      { kind: 'PostToolUse', sessionId: 'd2', call: { tool: 'mcp__wb__reviews', args: {} },
+        response: { data: ID } },
+      shared,
+    )
+    const out = handle(
+      { kind: 'PreToolUse', sessionId: 'd2', call: { tool: 'wb_reply', args: { text: `at our shop ${ID}` } } },
+      shared,
+    )
+    expect(out).toEqual({})
+  })
+
+  it('the same text in a content field still taints', () => {
+    const shared = env()
+    handle(
+      { kind: 'PostToolUse', sessionId: 'd3', call: { tool: 'mcp__wb__reviews', args: {} },
+        response: { text: ID } },
+      shared,
+    )
+    const out = handle(
+      { kind: 'PreToolUse', sessionId: 'd3', call: { tool: 'wb_reply', args: { text: `at our shop ${ID}` } } },
+      shared,
+    )
+    expect(out.hookSpecificOutput?.permissionDecision).toBe('deny')
+  })
+})
