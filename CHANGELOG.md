@@ -2,7 +2,7 @@
 
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versions follow [SemVer](https://semver.org/).
 
-## [Unreleased]
+## [0.1.1] - 2026-08-21
 
 A hook can no longer block forever on a directory it cannot create. `mkdirSync(path, { recursive: true })` does not always come back: under `/proc` on Linux it never returns and burns no CPU while not returning, where the same call without `recursive` gives ENOENT in twenty milliseconds. Cordon's home is a setting, `CORDON_HOME`, so that path is reachable from configuration, and it sits on the hot path in four places — both adapters, the session store and the notifier. By this project's own rule a hook that hangs is a hook that permits: both harnesses read a missing answer as leave to proceed. The levels are now created one at a time, which turns a silent block into a refusal with a reason.
 
