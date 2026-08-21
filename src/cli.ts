@@ -5,12 +5,13 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { cordonHome, runHook as runClaudeCodeHook } from './adapters/claude-code/main.js'
 import { runHook as runGeminiHook } from './adapters/gemini-cli/main.js'
+import { runGateway } from './adapters/mcp/gateway.js'
 import { humanSeesRendered, type SourceView } from './core/types.js'
 import { loadPolicy } from './policy/load.js'
 import { sanitize } from './sanitize/index.js'
 
 const USAGE =
-  'usage: cordon scan <file|-> [--json] | cordon hook [--harness claude-code|gemini] | cordon doctor'
+  'usage: cordon scan <file|-> [--json] | cordon hook [--harness claude-code|gemini] | cordon mcp -- <server command...> | cordon doctor'
 
 /**
  * Event parsing depends on the harness, so the harness is named explicitly.
@@ -36,10 +37,12 @@ function readInput(path: string | undefined): string {
  * design rejects: a finding is a risk signal, and the decision belongs to
  * the policy higher up the stack.
  */
-export function main(argv: string[]): number {
+export function main(argv: string[]): number | Promise<number> {
   const [command, ...rest] = argv
 
   if (command === 'hook') return hook(rest)
+
+  if (command === 'mcp') return mcp(rest)
 
   if (command === 'doctor') return printDoctor(cordonHome())
 
@@ -499,6 +502,40 @@ function printDoctor(home: string): number {
 }
 
 /**
+ * The MCP gateway subcommand: `cordon mcp -- <server command...>`.
+ *
+ * Unlike every other subcommand this one does not return at once — the
+ * gateway lives as long as the host keeps the pipe open — so it resolves its
+ * exit code instead. The `--` separator is mandatory rather than a courtesy:
+ * without it an upstream flag like `--port` would be read as Cordon's own,
+ * and the server would start with arguments it never saw.
+ *
+ * A broken policy is a startup refusal with code 1, not a default: the
+ * gateway would then run with rights the human never granted, and on this
+ * transport nothing would say so — the same argument loadPolicy itself is
+ * built on.
+ */
+function mcp(args: string[]): Promise<number> | number {
+  const at = args.indexOf('--')
+  const command = at === -1 ? [] : args.slice(at + 1)
+  if (command.length === 0 || command[0] === '') {
+    process.stderr.write(`mcp needs the upstream server command after --\n${USAGE}\n`)
+    return 2
+  }
+
+  const home = cordonHome()
+  let policy
+  try {
+    policy = loadPolicy(home)
+  } catch (error) {
+    process.stderr.write(`the policy cannot be read: ${(error as Error).message}\n`)
+    return 1
+  }
+
+  return runGateway({ command, policy, cordonHome: home })
+}
+
+/**
  * The subcommand the harness calls on every event.
  *
  * The exit code is always 0: the decision is delivered as printed JSON, not
@@ -562,5 +599,18 @@ function launchedDirectly(): boolean {
 }
 
 if (launchedDirectly()) {
-  process.exit(main(process.argv.slice(2)))
+  const code = main(process.argv.slice(2))
+  if (code instanceof Promise) {
+    // The MCP gateway lives as long as the host keeps the pipe open: exiting
+    // here would kill it the moment it started.
+    code.then(
+      (resolved) => process.exit(resolved),
+      (error: unknown) => {
+        process.stderr.write(`cordon: ${(error as Error).message}\n`)
+        process.exit(1)
+      },
+    )
+  } else {
+    process.exit(code)
+  }
 }

@@ -58,6 +58,22 @@ export interface Policy {
    * indistinguishable from a session that simply read nothing untrusted.
    */
   exposure: boolean
+  /**
+   * The task the whole run serves, in the human's own words.
+   *
+   * It exists for transports with no user turns — the MCP gateway: the
+   * certificate there is the profile for the whole run, and no message from
+   * the human ever arrives. The task text stands in for the human's naming:
+   * atoms are extracted from it by the same function that extracts them from
+   * user messages, and the exposure exemption compares a call's targets
+   * against them. The headless case — an operator's bot with a known
+   * assignment — is exactly this: the task is known at start.
+   *
+   * null means "no task was written down": under the exposure mark every
+   * consequential call then escalates, which is the honest default for a
+   * run nobody described.
+   */
+  task: string | null
   output: {
     /**
      * Whether to append a source-influence footer under the model's answer.
@@ -91,5 +107,6 @@ export const DEFAULT_POLICY: Policy = {
   toolsReturn: {},
   notify: { file: null },
   exposure: true,
+  task: null,
   output: { footer: true },
 }

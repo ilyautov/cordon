@@ -2,7 +2,7 @@
 
 # Cordon: a deterministic layer between untrusted text and agent actions
 
-> ⚠️ Early development. The core and two adapters are ready, for Claude Code and Gemini CLI: hidden-layer neutralization, provenance of untrusted data, an intent certificate, an action gate that also answers the fact of reading untrusted content, a source-influence footer under the model's answer, and packaging that intercepts four harness events. 964 tests, a corpus of 18 pinned attack vectors and 7 legitimate documents, two runtime dependencies. Installation is described in [docs/install.md](docs/install.md) and [docs/install-gemini.md](docs/install-gemini.md). The wiring has been exercised on a live Claude Code session, 2.1.236: all four events fire, the certificate refuses, provenance refuses, the footer is drawn, and argument quarantine is applied by the harness — the record is in [docs/live-run.md](docs/live-run.md). Gemini CLI has not been run live.
+> ⚠️ Early development. The core and two adapters are ready, for Claude Code and Gemini CLI, plus a gateway for MCP hosts: hidden-layer neutralization, provenance of untrusted data, an intent certificate, an action gate that also answers the fact of reading untrusted content, a source-influence footer under the model's answer, and packaging that intercepts four harness events. 989 tests, a corpus of 18 pinned attack vectors and 7 legitimate documents, two runtime dependencies. Installation is described in [docs/install.md](docs/install.md), [docs/install-gemini.md](docs/install-gemini.md) and [docs/install-mcp.md](docs/install-mcp.md). The wiring has been exercised on a live Claude Code session, 2.1.236: all four events fire, the certificate refuses, provenance refuses, the footer is drawn, and argument quarantine is applied by the harness — the record is in [docs/live-run.md](docs/live-run.md). Gemini CLI and the MCP gateway have not been run live.
 
 > [Русская версия](README.ru.md)
 
@@ -50,6 +50,8 @@ gemini extensions install https://github.com/ilyautov/cordon
 ```
 
 Cordon does not promise identical behaviour on the two harnesses, and the main difference fits in one line: here there is nothing to replace a tool result with, so a poisoned result is rejected whole and the cleaned text travels in the rejection reason. The remaining differences and their consequences are listed in [docs/install-gemini.md](docs/install-gemini.md) and in the output of `cordon doctor`.
+
+**A gateway for MCP hosts.** Claude Desktop, Cursor and any other MCP host get the same three axes without hooks at all: `cordon mcp -- npx server-x` is a stdio proxy that starts the server itself, cleans tool descriptions and results, and gates every `tools/call` — a refused call never reaches the server. The blind spots are named up front: the host's built-in tools go past MCP, the exposure mark is not lifted inside a session (there are no user turns over MCP, so the human's naming is written into the policy as `task:`), and one gateway process serves one upstream. The direction of failure is better than the hooks': a dead gateway is a dead server, not a silent pass. Configuration and the full list are in [docs/install-mcp.md](docs/install-mcp.md).
 
 **The source-influence footer.** A few lines appear under the model's answer when the answer contains text that matched a previously read untrusted page verbatim.
 

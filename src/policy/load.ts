@@ -120,6 +120,19 @@ function validate(parsed: unknown, path: string): Policy {
 
   // The field is read as an own property: the policy file is parsed from
   // outside, and `__proto__` inside it must not look like a setting.
+  if (Object.hasOwn(input, 'task')) {
+    const task = input['task']
+    // A silent default here would mean the human wrote the task, it was
+    // dropped, and every consequential call under the exposure mark escalated
+    // without a word why — the same argument as for exposure above.
+    if (typeof task !== 'string') {
+      throw new Error(`${path}: task must be a string, not ${String(task)}`)
+    }
+    policy.task = task
+  }
+
+  // The field is read as an own property: the policy file is parsed from
+  // outside, and `__proto__` inside it must not look like a setting.
   if (Object.hasOwn(input, 'output')) {
     const output = asObject(input['output'], `${path}: output`)
     if (Object.hasOwn(output, 'footer')) {

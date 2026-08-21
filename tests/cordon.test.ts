@@ -117,6 +117,27 @@ describe('Cordon: the scenario of replying to reviews automatically', () => {
     cordon.gate({ tool: 'wb_reply', args: { text: 'thank you' } })
     expect(existsSync(log)).toBe(false)
   })
+
+  it('declareTask names destinations without a turn and without lifting the mark', () => {
+    // The MCP transport has no user turns at all: the certificate is the
+    // profile for the whole run, and nothing the human says ever arrives.
+    // The task text from the policy stands in for the human's own naming —
+    // but it must not do the two other things onUserPrompt does: counting a
+    // turn that never happened, and lifting a mark nobody has checked.
+    const { cordon } = make()
+    cordon.observe(attack, { id: 'r1', kind: 'tool', label: 'wb_reviews', trust: 'untrusted' })
+    cordon.declareTask('reply to review 44556677 with a thank-you')
+
+    expect(cordon.certificate().issuedAtTurn).toBe(0)
+    const named = cordon.gate({ tool: 'wb_reply', args: { nmId: '44556677', text: 'thank you' } })
+    expect(named.kind).toBe('allow')
+
+    // The mark still stands: a target the task did not name escalates. Had
+    // declareTask gone through onUserPrompt, the mark would be gone and this
+    // call would pass.
+    const other = cordon.gate({ tool: 'wb_reply', args: { nmId: '99999999', text: 'thank you' } })
+    expect(other.kind).toBe('deny')
+  })
 })
 
 function makeWithHome(overrides: Partial<Policy> = {}) {

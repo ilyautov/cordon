@@ -244,6 +244,36 @@ export class Cordon {
   }
 
   /**
+   * Feeds the task text from the policy as a source of user atoms.
+   *
+   * It exists for transports with no user turns at all — the MCP gateway:
+   * the certificate there is the profile for the whole run, and nothing the
+   * human says ever arrives. The task text is trusted configuration, so atoms
+   * from it stand for the human's own naming, and the exposure exemption
+   * compares a call's targets against them exactly as it compares against
+   * user messages.
+   *
+   * onUserPrompt is deliberately NOT reused, on two counts. It increments the
+   * turn and reissues the certificate, and no turn has happened — nothing was
+   * said. And it lifts the exposure mark, on the argument that the user has
+   * seen the turn's outcome and could intervene; here nobody has seen
+   * anything, and on this transport nobody will — the mark stands until the
+   * process ends. What is shared is the atom extraction itself, so a link or
+   * an identifier means the same token on both sides of the comparison.
+   */
+  declareTask(text: string): void {
+    for (const atom of atoms(text)) {
+      if (!this.userAtoms.includes(atom)) this.userAtoms.push(atom)
+    }
+    // The same cap as for user messages, and the same order: the oldest
+    // names expire first.
+    if (this.userAtoms.length > MAX_USER_ATOMS) {
+      this.userAtoms = this.userAtoms.slice(-MAX_USER_ATOMS)
+    }
+    this.persist()
+  }
+
+  /**
    * Marks that the hidden layer could not be stripped from a tool result.
    *
    * Called by the adapter when the output's shape is unfamiliar: substituting

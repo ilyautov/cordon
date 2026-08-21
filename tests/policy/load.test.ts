@@ -98,6 +98,29 @@ describe('the policy: the exposure valve', () => {
   })
 })
 
+describe('the policy: the task text', () => {
+  it('there is no task by default', () => {
+    expect(loadPolicy(scratch()).task).toBeNull()
+  })
+
+  it('reads the task text', () => {
+    // The task is the user-atom source for transports with no user turns
+    // (the MCP gateway): what the human named here is what the exposure
+    // exemption compares a call's targets against.
+    const dir = scratch()
+    writeFileSync(join(dir, 'policy.yaml'), 'task: change the price of item 99887766\n')
+    expect(loadPolicy(dir).task).toBe('change the price of item 99887766')
+  })
+
+  it('a non-string task is a load error, not a silent default', () => {
+    // A silent default would mean the human wrote the task, it was dropped,
+    // and every call under the exposure mark escalated without a word why.
+    const dir = scratch()
+    writeFileSync(join(dir, 'policy.yaml'), 'task: [a, list]\n')
+    expect(() => loadPolicy(dir)).toThrow(/task/u)
+  })
+})
+
 describe('the policy: declaring the source view (toolsReturn)', () => {
   it('the table is empty when nothing is declared', () => {
     expect(loadPolicy(scratch()).toolsReturn).toEqual({})

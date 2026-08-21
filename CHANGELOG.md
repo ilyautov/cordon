@@ -2,6 +2,16 @@
 
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versions follow [SemVer](https://semver.org/).
 
+## [Unreleased]
+
+Cordon now stands in front of MCP servers, not only inside coding harnesses. `cordon mcp -- npx server-x` is a stdio proxy between an MCP host (Claude Desktop, Cursor, a hand-written agent) and one upstream server: JSON-RPC 2.0 over newline-delimited JSON, implemented by hand, so the dependency count does not move. Every intercepted decision is made by the same core the hooks use; the adapter holds no security logic of its own.
+
+The interceptions, verified end to end against a real child process. Tool descriptions from `tools/list` are observed as the untrusted content they are — tool poisoning hides the instruction exactly there, and the hidden layer is cut before the model sees the list. A `tools/call` goes through the gate before the server sees it: a refused call never reaches the upstream and the model reads the reason as a `CallToolResult` with `isError: true`; a rewritten one is forwarded with the untrusted fragment cut out of the arguments. Text blocks of results, `resources/read` and `prompts/get` answers are observed and substituted with the cleaned text; a block with no text in it — an image, audio — cannot be cleaned, so the session is marked and the next consequential call escalates, rather than silence pretending a check happened.
+
+The transport has no user turns, and two things follow honestly. The certificate is the policy profile for the whole run. And the exposure exemption — a consequential call after an untrusted read passes when the human named its destination — gets its naming from a new policy field, `task: "<the assignment>"`: atoms are extracted by the same function that reads user messages, fed through a new facade entry that counts no turn and lifts no mark. A non-string `task` is a load error, not a silent default. The exposure mark stands for the life of the gateway process; the recipe is a restart per task, and the blind spots — the host's built-in tools go past MCP, one upstream per process — are named in [docs/install-mcp.md](docs/install-mcp.md).
+
+The direction of failure is better than the hooks', by construction. A crashed hook reads as "let it through"; a dead gateway is a dead MCP server, and the host shows the error. A broken line from the upstream or a dead upstream stops the gateway loudly instead of degrading it into a proxy that no longer checks anything. The gateway has not been run against a live host yet; what is verified is the full message path against a real server process in the test suite.
+
 ## [0.3.0] - 2026-08-21
 
 The data axis now answers the fact of reading, not only a match. The adversarial battery had measured the working profile at 75% attack success rate, and almost the whole tail was attacks whose arguments share no recorded byte with the page that ordered them: a paraphrase, a fourth round of percent-encoding, base64, rot13, a `curl -d @file` with a clean command line, a fabricated "user: yes, I confirm". String matching cannot close that class in principle — judging by meaning is the model-in-the-loop the first invariant forbids.

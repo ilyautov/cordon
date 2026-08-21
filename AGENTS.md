@@ -28,8 +28,9 @@ src/output/       the source-influence footer under the model's answer
 src/session/      state between processes, and its expiry
 src/policy/       loading and defaults, plus protection of Cordon's own files
 src/notify/       the channel to the owner that the agent cannot reach
-src/adapters/     claude-code and gemini-cli: translate harness events, hold no security logic
-src/cordon.ts     wiring. src/cli.ts: scan, hook, doctor
+src/adapters/     claude-code and gemini-cli: translate harness events, hold no security logic;
+                  mcp: a stdio JSON-RPC gateway in front of one upstream server, same rule
+src/cordon.ts     wiring. src/cli.ts: scan, hook, mcp, doctor
 ```
 
 The adapters holding no logic is load-bearing rather than tidy: the same decision has to come out of both harnesses, and a rule that lives in an adapter is a rule the other harness does not have.
