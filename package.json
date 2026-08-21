@@ -43,9 +43,23 @@
     "htmlparser2": "^12.0.0",
     "yaml": "^2.9.0"
   },
+  "peerDependencies": {
+    "@langchain/core": "^1.2.9",
+    "langchain": "^1.5.0"
+  },
+  "peerDependenciesMeta": {
+    "@langchain/core": {
+      "optional": true
+    },
+    "langchain": {
+      "optional": true
+    }
+  },
   "devDependencies": {
+    "@langchain/core": "^1.2.9",
     "@types/node": "^26.2.0",
     "esbuild": "^0.28.2",
+    "langchain": "^1.5.10",
     "typescript": "^7.0.2",
     "vitest": "^4.1.11"
   }

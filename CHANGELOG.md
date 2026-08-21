@@ -2,6 +2,14 @@
 
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versions follow [SemVer](https://semver.org/).
 
+## [Unreleased]
+
+Cordon now runs inside a LangChain agent's own loop. `createCordonMiddleware(options)` — built on the v1 `createMiddleware` contract — wires the same core to two hooks, and the adapter holds no security logic, as everywhere else. `beforeModel` feeds the last user message to the core, so this transport keeps what the MCP gateway does not have: real user turns, with the certificate issued per turn, the exposure and unredacted marks lifted by a new message, and the user-named atoms feeding the exposure exemption. The hook fires on every agent step and the loop never appends human messages, so a turn is told from a repeated pass by position and text — object identity would not survive LangGraph rebuilding messages between steps, and the stateless identical-text case is named in the docs as the blind spot it is.
+
+`wrapToolCall` carries the other two entries. Before the handler, the call goes through the gate: `deny` and `ask` return an error `ToolMessage` with the reason and the tool never runs; `rewrite` calls the handler with the rewritten arguments, leaving the model's original request object untouched. After the handler, the result's text is observed — cleaned, recorded into provenance, substituted when the source's view allows it. A result that is not a `ToolMessage` (a `Command`) or a content block without text cannot be cleaned; the session is marked rather than silence pretending a check happened, and the next consequential call escalates.
+
+`langchain` and `@langchain/core` are peer dependencies — the first exception to the two-runtime-dependencies rule, made deliberately: the application's own agent framework is not a library Cordon chooses, and the plugin bundle (`plugin/dist/cli.js`) does not contain it. The tests run end to end against a real `createAgent` on a scripted model: the poisoned result is cleaned, the refused tool is never called, exposure escalates and is released by the user naming the destination. What a live agent run shows remains unmeasured. Usage and limits: [docs/install-langchain.md](docs/install-langchain.md).
+
 ## [0.4.0] - 2026-08-21
 
 Cordon now stands in front of MCP servers, not only inside coding harnesses. `cordon mcp -- npx server-x` is a stdio proxy between an MCP host (Claude Desktop, Cursor, a hand-written agent) and one upstream server: JSON-RPC 2.0 over newline-delimited JSON, implemented by hand, so the dependency count does not move. Every intercepted decision is made by the same core the hooks use; the adapter holds no security logic of its own.
