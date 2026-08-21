@@ -2,7 +2,7 @@
 
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versions follow [SemVer](https://semver.org/).
 
-## [Unreleased]
+## [0.4.0] - 2026-08-21
 
 Cordon now stands in front of MCP servers, not only inside coding harnesses. `cordon mcp -- npx server-x` is a stdio proxy between an MCP host (Claude Desktop, Cursor, a hand-written agent) and one upstream server: JSON-RPC 2.0 over newline-delimited JSON, implemented by hand, so the dependency count does not move. Every intercepted decision is made by the same core the hooks use; the adapter holds no security logic of its own.
 
