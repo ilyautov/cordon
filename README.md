@@ -2,7 +2,20 @@
 
 # Cordon: a deterministic layer between untrusted text and agent actions
 
-> ⚠️ Early development. The core and two adapters are ready, for Claude Code and Gemini CLI, plus a gateway for MCP hosts and a middleware for LangChain agents: hidden-layer neutralization, provenance of untrusted data, an intent certificate, an action gate that also answers the fact of reading untrusted content, a source-influence footer under the model's answer, and packaging that intercepts four harness events. 998 tests, a corpus of 18 pinned attack vectors and 7 legitimate documents, two runtime dependencies. Installation is described in [docs/install.md](docs/install.md), [docs/install-gemini.md](docs/install-gemini.md), [docs/install-mcp.md](docs/install-mcp.md) and [docs/install-langchain.md](docs/install-langchain.md). The wiring has been exercised on a live Claude Code session, 2.1.236: all four events fire, the certificate refuses, provenance refuses, the footer is drawn, and argument quarantine is applied by the harness — the record is in [docs/live-run.md](docs/live-run.md). Gemini CLI, the MCP gateway and the LangChain middleware have not been run live.
+> **Your agent reads a review. Inside it, invisible to a human, sits an instruction. Cordon stands between the two.**
+>
+> No model call anywhere on the hot path: whatever decides is verifiable by reading the code.
+
+**What is ready**
+
+- **Core** plus adapters for **Claude Code** and **Gemini CLI**, a gateway for **MCP hosts**, middleware for **LangChain** agents.
+- Hidden-layer neutralization, provenance of untrusted data, an intent certificate, an action gate that also answers the fact of reading untrusted content, a source-influence footer under the model's answer, and packaging that intercepts four harness events.
+
+**Measured:** 998 tests · 18 pinned attack vectors · 7 legitimate documents · 2 runtime dependencies.
+
+**Install:** [Claude Code](docs/install.md) · [Gemini CLI](docs/install-gemini.md) · [MCP hosts](docs/install-mcp.md) · [LangChain](docs/install-langchain.md)
+
+> ⚠️ **Early development, and here is exactly how far it has been proven.** The wiring has been exercised on a live Claude Code session, 2.1.236: all four events fire, the certificate refuses, provenance refuses, the footer is drawn, and argument quarantine is applied by the harness. The record is in [docs/live-run.md](docs/live-run.md). Gemini CLI, the MCP gateway and the LangChain middleware **have not been run live**.
 
 > [Русская версия](README.ru.md)
 
@@ -11,7 +24,7 @@
 [![Version](https://img.shields.io/badge/version-0.5.0-blueviolet)](CHANGELOG.md)
 [![Finding kinds](https://img.shields.io/badge/finding%20kinds-5-1F6F5C)](#what-gets-stripped)
 [![Attack vectors](https://img.shields.io/badge/attack%20vectors-18-1F6F5C)](#development)
-![node 22+](https://img.shields.io/badge/node-22%2B-1F6F5C)
+[![node 22+](https://img.shields.io/badge/node-22%2B-1F6F5C)](package.json)
 [![Stars](https://img.shields.io/github/stars/ilyautov/cordon?style=social)](https://github.com/ilyautov/cordon/stargazers)
 
 ## Why
