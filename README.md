@@ -229,4 +229,4 @@ MIT: use freely, fork, extend. Pull requests with new attack vectors are welcome
 - [**consilium-principis**](https://github.com/ilyautov/consilium-principis): a board of thinkers where every quote is checked word for word
 - [**hefest**](https://github.com/ilyautov/hefest): chemical safety for an industrial plant, kept inside the plant's own network
 
-Everything else: [github.com/ilyautov](https://github.com/ilyautov). Useful? Star it, that is how other people find it.
+Everything in one list, grouped by what it does: [ilyautov.github.io](https://ilyautov.github.io/). Source: [github.com/ilyautov](https://github.com/ilyautov). Useful? Star it, that is how other people find it.
