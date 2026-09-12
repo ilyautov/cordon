@@ -7,6 +7,7 @@
 > [English version](README.md)
 
 [![ci](https://github.com/ilyautov/cordon/actions/workflows/ci.yml/badge.svg)](https://github.com/ilyautov/cordon/actions/workflows/ci.yml)
+[![HOL Guard](https://github.com/ilyautov/cordon/actions/workflows/hol-scan.yml/badge.svg)](https://github.com/ilyautov/cordon/actions/workflows/hol-scan.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Видов находок](https://img.shields.io/badge/%D0%B2%D0%B8%D0%B4%D0%BE%D0%B2%20%D0%BD%D0%B0%D1%85%D0%BE%D0%B4%D0%BE%D0%BA-5-1F6F5C)](#что-вычищается)
 [![Вектора атак](https://img.shields.io/badge/%D0%B2%D0%B5%D0%BA%D1%82%D0%BE%D1%80%D0%B0%20%D0%B0%D1%82%D0%B0%D0%BA-18-1F6F5C)](#разработка)

@@ -20,6 +20,7 @@
 > [Русская версия](README.ru.md)
 
 [![ci](https://github.com/ilyautov/cordon/actions/workflows/ci.yml/badge.svg)](https://github.com/ilyautov/cordon/actions/workflows/ci.yml)
+[![HOL Guard](https://github.com/ilyautov/cordon/actions/workflows/hol-scan.yml/badge.svg)](https://github.com/ilyautov/cordon/actions/workflows/hol-scan.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Version](https://img.shields.io/badge/version-0.5.0-blueviolet)](CHANGELOG.md)
 [![Finding kinds](https://img.shields.io/badge/finding%20kinds-5-1F6F5C)](#what-gets-stripped)
