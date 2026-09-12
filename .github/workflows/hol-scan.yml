@@ -18,6 +18,5 @@ jobs:
       - uses: hashgraph-online/ai-plugin-scanner-action@588d157fed6e47942a2ca3c9251ff7bff4a48bc9 # v1.2.667
         with:
           plugin_dir: "."
-          config: ".plugin-scanner.toml"
           min_score: 80
           fail_on_severity: high
