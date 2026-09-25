@@ -10597,6 +10597,20 @@ var Parser = class {
 var HIDDEN_STYLE = /(display\s*:\s*none|visibility\s*:\s*hidden|font-size\s*:\s*0(?!\.[1-9])|opacity\s*:\s*0(?!\.[1-9]))/i;
 var OFFSCREEN_STYLE = /(text-indent\s*:\s*-\d{3,}|(?:left|top|right|bottom|margin-left|margin-top)\s*:\s*-\d{4,}|clip\s*:\s*rect\(\s*(?:[01](?:px)?[\s,]*){4}\)|clip-path\s*:\s*inset\(\s*(?:(?:[5-9]\d(?:\.\d+)?|100)%\s*){1,4}\))/i;
 var DROP_TAGS = /* @__PURE__ */ new Set(["SCRIPT", "STYLE", "META", "NOSCRIPT", "TEMPLATE"]);
+var SCREEN_READER_CLASSES = /* @__PURE__ */ new Set([
+  "sr-only",
+  "visually-hidden",
+  "visuallyhidden",
+  "screen-reader-text",
+  "screen-reader-only",
+  "element-invisible",
+  "a11y-hidden",
+  "assistive-text",
+  "hidden-visually",
+  "sr-only-focusable"
+]);
+var SCREEN_READER_WORDS = 12;
+var DESTINATION = /https?:\/\/|www\.|[\w.-]+@[\w-]+\.[a-z]{2,}|(?:^|\s)~?\/[\w.-]+\//iu;
 var RAW_TEXT_TAGS = /* @__PURE__ */ new Set(["SCRIPT", "STYLE", "NOSCRIPT", "TEMPLATE"]);
 function mentionMark(source) {
   for (let code = 57344; code <= 63743; code++) {
@@ -10765,6 +10779,61 @@ function cutOut(source, cuts) {
   parts.push(source.slice(at));
   return parts.join("");
 }
+function stylesheetHiddenClasses(source) {
+  const hidden = /* @__PURE__ */ new Set();
+  const conditional = /* @__PURE__ */ new Set();
+  for (const block of source.matchAll(/<style\b[^>]*>([\s\S]*?)<\/style\s*>/giu)) {
+    const css = (block[1] ?? "").replace(/\/\*[\s\S]*?\*\//gu, "");
+    for (const match of css.matchAll(/@[^{]+\{([\s\S]*?)\}\s*\}/gu)) {
+      for (const name of (match[1] ?? "").matchAll(/\.([\w-]+)/gu)) conditional.add((name[1] ?? "").toLowerCase());
+    }
+    for (const { selector, body } of topLevelRules(css)) {
+      const selectors = selector.split(",").map((part) => part.trim());
+      if (!selectors.every((one) => /^\.[\w-]+$/u.test(one))) continue;
+      if (!HIDDEN_STYLE.test(body) && !OFFSCREEN_STYLE.test(body)) continue;
+      for (const one of selectors) hidden.add(one.slice(1).toLowerCase());
+    }
+  }
+  for (const name of conditional) hidden.delete(name);
+  return hidden;
+}
+function topLevelRules(css) {
+  const rules = [];
+  let depth = 0;
+  let head = "";
+  let body = "";
+  let nested = false;
+  for (const char of css) {
+    if (char === "{") {
+      depth++;
+      if (depth > 1) nested = true;
+      else continue;
+    } else if (char === "}") {
+      depth = Math.max(0, depth - 1);
+      if (depth === 0) {
+        const selector = head.trim();
+        if (!nested && !selector.startsWith("@")) rules.push({ selector, body });
+        head = "";
+        body = "";
+        nested = false;
+        continue;
+      }
+    }
+    if (depth === 0) {
+      if (char === ";" && head.trim().startsWith("@")) head = "";
+      else head += char;
+    } else body += char;
+  }
+  return rules;
+}
+function classesOf(attrs) {
+  return (attrs["class"] ?? "").toLowerCase().split(/\s+/u).filter(Boolean);
+}
+function stylesheetProse(css) {
+  const comments = [...css.matchAll(/\/\*([\s\S]*?)\*\//gu)].map((match) => (match[1] ?? "").trim());
+  const prose = comments.filter((comment) => /\w\s+\w/u.test(comment));
+  return prose.length > 0 ? prose.join(" ") : null;
+}
 function stripHiddenHtml(input) {
   if (!input.includes("<")) return { clean: input, findings: [] };
   const findings = [];
@@ -10777,6 +10846,9 @@ function stripHiddenHtml(input) {
   const mark2 = mentionMark(withoutComments);
   const source = maskUnclosedRawTags(withoutComments, mark2);
   const pageHasBackground = BACKGROUND_DECLARED.test(input);
+  const classHidden = stylesheetHiddenClasses(source);
+  const screenReader = [];
+  let screenReaderDepth = 0;
   const cuts = [];
   const stack = [];
   const sinks = [];
@@ -10807,13 +10879,24 @@ function stripHiddenHtml(input) {
         return;
       }
       const style = attrs["style"] ?? "";
-      const hidden = attrs["hidden"] !== void 0 || attrs["aria-hidden"]?.trim().toLowerCase() === "true" || HIDDEN_STYLE.test(style) || OFFSCREEN_STYLE.test(style) || isInvisibleByColor(style, pageHasBackground);
+      const classes = classesOf(attrs);
+      const hidden = classes.some((name2) => classHidden.has(name2)) || attrs["hidden"] !== void 0 || attrs["aria-hidden"]?.trim().toLowerCase() === "true" || HIDDEN_STYLE.test(style) || OFFSCREEN_STYLE.test(style) || isInvisibleByColor(style, pageHasBackground);
       if (hidden) {
         frame.doomed = true;
         frame.text = [];
         sinks.push(frame);
         doomedDepth = 1;
         return;
+      }
+      const readerClass = classes.find((name2) => SCREEN_READER_CLASSES.has(name2));
+      if (readerClass !== void 0 && screenReaderDepth === 0) {
+        frame.screenReader = true;
+        frame.fallback = readerClass;
+        frame.text = [];
+        sinks.push(frame);
+        screenReaderDepth = 1;
+      } else if (screenReaderDepth > 0) {
+        screenReaderDepth++;
       }
       for (const attr of REPORT_ATTRS) {
         const value = attrs[attr];
@@ -10867,11 +10950,23 @@ function stripHiddenHtml(input) {
         doomedDepth--;
         return;
       }
+      if (screenReaderDepth > 0) {
+        screenReaderDepth--;
+        if (frame.screenReader) {
+          screenReader.push({ span, text: (frame.text ?? []).join(""), className: frame.fallback });
+        }
+      }
       if (!frame.candidate) return;
       const payload = payloadOf(frame);
       if (!payload.trim()) return;
       findings.length = frame.findingMark;
       cuts.length = frame.cutMark;
+      if (frame.tag === "STYLE") {
+        cuts.push(span);
+        const prose = stylesheetProse(payload);
+        if (prose !== null) findings.push({ kind: "hidden-html", detail: "tag:style", sample: sample(prose, 512) });
+        return;
+      }
       findings.push({
         kind: "hidden-html",
         detail: `tag:${frame.tag.toLowerCase()}`,
@@ -10889,6 +10984,21 @@ function stripHiddenHtml(input) {
   });
   parser.write(source);
   parser.end();
+  const labels = [];
+  for (const entry of screenReader) {
+    const text = entry.text.replace(/\s+/gu, " ").trim();
+    if (!text) continue;
+    const message = text.split(" ").length > SCREEN_READER_WORDS || DESTINATION.test(text);
+    if (!message) {
+      labels.push(text);
+      continue;
+    }
+    findings.push({ kind: "hidden-html", detail: `class:${entry.className}`, sample: sample(text, 512) });
+    cuts.push(entry.span);
+  }
+  if (labels.length > 0) {
+    findings.push({ kind: "annotation", detail: "class:screen-reader", sample: sample([...new Set(labels)].join(" | ")) });
+  }
   return {
     clean: unmask(cutOut(source, cuts), mark2),
     findings: findings.map((finding) => ({ ...finding, sample: unmask(finding.sample, mark2) }))

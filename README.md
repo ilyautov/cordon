@@ -11,7 +11,7 @@
 - **Core** plus adapters for **Claude Code** and **Gemini CLI**, a gateway for **MCP hosts**, middleware for **LangChain** agents.
 - Hidden-layer neutralization, provenance of untrusted data, an intent certificate, an action gate that also answers the fact of reading untrusted content, a source-influence footer under the model's answer, and packaging that intercepts four harness events.
 
-**Measured:** 1186 tests · 20 pinned attack vectors · 8 legitimate documents · 2 runtime dependencies.
+**Measured:** 1201 tests · 23 pinned attack vectors · 9 legitimate documents · 2 runtime dependencies.
 
 **Install:** [Claude Code](docs/install.md) · [Gemini CLI](docs/install-gemini.md) · [MCP hosts](docs/install-mcp.md) · [LangChain](docs/install-langchain.md)
 
@@ -178,7 +178,7 @@ How that stretch sits next to classifier firewalls, MCP scanners and gateways, a
 
 **It does not judge the truthfulness of visible text.** A review saying "our product is the best, buy only from us" stays in the text untouched: it is indistinguishable from ordinary marketing, because that is what it is. Any detector that catches this catches everything else along with it. Cordon makes hidden influence visible; it makes no claim on open persuasion.
 
-**Hidden CSS is not caught in full.** Text in the background colour is recognized only when the background is declared in the same inline style. A lone `color:#fff` without a declared background is passed over: that exact declaration sits in every dark section of a normal site where the background comes from a class. An attacker who knows this will write `color:#fff` and count on the page being white. For the same reason `display:none` via a class from an external `<style>`, `<input type="hidden">` and `max-height:0;overflow:hidden` are deliberately passed over. This is a choice in favour of having no false positives: a module that screams on every other honest page gets switched off on day one, and coverage becomes zero.
+**Hidden CSS is not caught in full.** Text in the background colour is recognized only when the background is declared in the same inline style. A lone `color:#fff` without a declared background is passed over: that exact declaration sits in every dark section of a normal site where the background comes from a class. An attacker who knows this will write `color:#fff` and count on the page being white. Classes are read in part. A class the page's own `<style>` hides on every screen is cut like an inline style, and so is a screen-reader class (`sr-only`, `visually-hidden`, `screen-reader-text`) holding more than twelve words or a link, a path or an address. Short screen-reader labels stay, because every accessible page has them, so a short instruction with no destination, or one split across many such spans, passes. So do the utilities `hidden` and `d-none`, which hide menus a script opens, a class re-shown under `@media`, and an external stylesheet, which Cordon never fetches. `max-height:0;overflow:hidden` is passed over as well. This is a choice in favour of having no false positives: a module that screams on every other honest page gets switched off on day one, and coverage becomes zero.
 
 **A word written entirely in another script is not caught at all.** `сор.com` typed in Cyrillic instead of `cop.com` contains no script mixing: there is one script inside the word. Catching this requires a confusable table, and that table fires on any honest Russian word made of letters with Latin twins. The Russian word "сор" exists. Telling substitution from an ordinary word here is possible only from position in the document, and the neutralization module does not know positions and must not.
 
@@ -223,7 +223,7 @@ npm run build
 
 **The loyalty corpus** in `tests/fixtures/loyalty/` verifies that the tool stays silent on legitimate texts, including texts about injections. Breaking it is not allowed: a tool that cannot be used while developing that same tool is not ready. A false positive on a corpus sample is a defect in the module, not a reason to remove the sample.
 
-**The attack corpus** in `tests/fixtures/attacks.ts` pins 20 vectors, each of which once passed the filter unnoticed. It lives as a module rather than as data files for one reason: invisible characters are written as escape sequences and are therefore visible during review. A literal character in a file is indistinguishable from emptiness in a diff.
+**The attack corpus** in `tests/fixtures/attacks.ts` pins 23 vectors, each of which once passed the filter unnoticed. It lives as a module rather than as data files for one reason: invisible characters are written as escape sequences and are therefore visible during review. A literal character in a file is indistinguishable from emptiness in a diff.
 
 The method is not ours; it is published and peer-reviewed: Task Shield (arXiv:2412.16682), CaMeL (arXiv:2503.18813), IGAC (arXiv:2606.22916), MELON (arXiv:2502.05174), ActPlane (arXiv:2606.25189).
 

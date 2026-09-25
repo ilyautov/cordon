@@ -23,6 +23,37 @@ const OFFSCREEN_STYLE =
 const DROP_TAGS = new Set(['SCRIPT', 'STYLE', 'META', 'NOSCRIPT', 'TEMPLATE'])
 
 /**
+ * Classes that exist to hide text from sighted readers and keep it for screen
+ * readers: Tailwind, Bootstrap 5 and 4, WordPress, Drupal, and the common
+ * hand-rolled names. The same recipe written inline is already cut; written
+ * as a class it was never looked at.
+ *
+ * `hidden`, `d-none` and `invisible` are deliberately absent: they hide menus,
+ * tabs and dialogs that a script opens, and `hidden md:flex` is visible on
+ * any desktop. That is interface state, not a message kept from the reader.
+ */
+const SCREEN_READER_CLASSES: ReadonlySet<string> = new Set([
+  'sr-only', 'visually-hidden', 'visuallyhidden', 'screen-reader-text', 'screen-reader-only',
+  'element-invisible', 'a11y-hidden', 'assistive-text', 'hidden-visually', 'sr-only-focusable',
+])
+
+/**
+ * How long one screen-reader text may be before it reads as a message rather
+ * than a label. Honest labels are short: "Skip to content", "(opens in a new
+ * tab)", a post title after "Continue reading". Judged per span: summing a
+ * page's labels caught a plain product page, and joining neighbouring spans
+ * caught a pagination list. An instruction split into short spans without a
+ * destination passes; that limit is written down in docs/install.md.
+ */
+const SCREEN_READER_WORDS = 12
+
+/**
+ * A destination: a link, an address or a path. An exfiltration needs one, and
+ * an honest label almost never carries one, so a single one is enough.
+ */
+const DESTINATION = /https?:\/\/|www\.|[\w.-]+@[\w-]+\.[a-z]{2,}|(?:^|\s)~?\/[\w.-]+\//iu
+
+/**
  * Raw-text tags: an unclosed one of these swallows the entire rest of the
  * input. That is exactly why a mention of `<style>` in technical
  * documentation would cost the reader all the text below the mention rather
@@ -315,6 +346,8 @@ interface Frame {
   doomed: boolean
   /** A DROP_TAGS element: the verdict depends on its content. */
   candidate: boolean
+  /** Hidden by a screen-reader class: the verdict depends on the whole page. */
+  screenReader?: boolean
 }
 
 /**
@@ -341,6 +374,83 @@ function cutOut(source: string, cuts: ReadonlyArray<readonly [number, number]>):
   }
   parts.push(source.slice(at))
   return parts.join('')
+}
+
+/**
+ * Class names a document's own stylesheet hides outright.
+ *
+ * Only top-level rules whose selector list is nothing but plain classes are
+ * read. A rule inside `@media` or `@supports` applies to some screens and not
+ * others (print-only footers are the usual case), and a compound selector
+ * depends on a structure this pass does not model. Reading less keeps the
+ * answer certain: what is collected here is hidden on every screen.
+ */
+function stylesheetHiddenClasses(source: string): Set<string> {
+  const hidden = new Set<string>()
+  const conditional = new Set<string>()
+  for (const block of source.matchAll(/<style\b[^>]*>([\s\S]*?)<\/style\s*>/giu)) {
+    const css = (block[1] ?? '').replace(/\/\*[\s\S]*?\*\//gu, '')
+    // A class the sheet styles again inside an at-rule is shown somewhere:
+    // `.print-footer{display:none}` with `@media print{.print-footer{display:block}}`
+    // is an honest print-only line, not text kept from every reader.
+    for (const match of css.matchAll(/@[^{]+\{([\s\S]*?)\}\s*\}/gu)) {
+      for (const name of (match[1] ?? '').matchAll(/\.([\w-]+)/gu)) conditional.add((name[1] ?? '').toLowerCase())
+    }
+    for (const { selector, body } of topLevelRules(css)) {
+      const selectors = selector.split(',').map((part) => part.trim())
+      if (!selectors.every((one) => /^\.[\w-]+$/u.test(one))) continue
+      if (!HIDDEN_STYLE.test(body) && !OFFSCREEN_STYLE.test(body)) continue
+      for (const one of selectors) hidden.add(one.slice(1).toLowerCase())
+    }
+  }
+  for (const name of conditional) hidden.delete(name)
+  return hidden
+}
+
+/**
+ * The rules at the top level of a stylesheet, by brace depth. An at-rule's
+ * block is skipped whole with everything nested in it, and so is a rule
+ * whose body nests further, since neither holds on every screen.
+ */
+function topLevelRules(css: string): Array<{ selector: string; body: string }> {
+  const rules: Array<{ selector: string; body: string }> = []
+  let depth = 0
+  let head = ''
+  let body = ''
+  let nested = false
+  for (const char of css) {
+    if (char === '{') {
+      depth++
+      if (depth > 1) nested = true
+      else continue
+    } else if (char === '}') {
+      depth = Math.max(0, depth - 1)
+      if (depth === 0) {
+        const selector = head.trim()
+        if (!nested && !selector.startsWith('@')) rules.push({ selector, body })
+        head = ''
+        body = ''
+        nested = false
+        continue
+      }
+    }
+    if (depth === 0) {
+      if (char === ';' && head.trim().startsWith('@')) head = ''
+      else head += char
+    } else body += char
+  }
+  return rules
+}
+
+function classesOf(attrs: Record<string, string>): string[] {
+  return (attrs['class'] ?? '').toLowerCase().split(/\s+/u).filter(Boolean)
+}
+
+/** Whether a stylesheet's text carries anything beyond rules: prose in its comments. */
+function stylesheetProse(css: string): string | null {
+  const comments = [...css.matchAll(/\/\*([\s\S]*?)\*\//gu)].map((match) => (match[1] ?? '').trim())
+  const prose = comments.filter((comment) => /\w\s+\w/u.test(comment))
+  return prose.length > 0 ? prose.join(' ') : null
 }
 
 /**
@@ -379,6 +489,11 @@ export function stripHiddenHtml(input: string): { clean: string; findings: Findi
   const mark = mentionMark(withoutComments)
   const source = maskUnclosedRawTags(withoutComments, mark)
   const pageHasBackground = BACKGROUND_DECLARED.test(input)
+  const classHidden = stylesheetHiddenClasses(source)
+  // Screen-reader spans wait for the end of the page: whether they are labels
+  // or a message is a question about all of them together.
+  const screenReader: Array<{ span: readonly [number, number]; text: string; className: string }> = []
+  let screenReaderDepth = 0
   const cuts: Array<readonly [number, number]> = []
   const stack: Frame[] = []
   // The stack of frames that collect text: one buffer each, so a
@@ -419,7 +534,9 @@ export function stripHiddenHtml(input: string): { clean: string; findings: Findi
       }
 
       const style = attrs['style'] ?? ''
+      const classes = classesOf(attrs)
       const hidden =
+        classes.some((name) => classHidden.has(name)) ||
         attrs['hidden'] !== undefined ||
         attrs['aria-hidden']?.trim().toLowerCase() === 'true' ||
         HIDDEN_STYLE.test(style) ||
@@ -432,6 +549,17 @@ export function stripHiddenHtml(input: string): { clean: string; findings: Findi
         sinks.push(frame)
         doomedDepth = 1
         return
+      }
+
+      const readerClass = classes.find((name) => SCREEN_READER_CLASSES.has(name))
+      if (readerClass !== undefined && screenReaderDepth === 0) {
+        frame.screenReader = true
+        frame.fallback = readerClass
+        frame.text = []
+        sinks.push(frame)
+        screenReaderDepth = 1
+      } else if (screenReaderDepth > 0) {
+        screenReaderDepth++
       }
 
       for (const attr of REPORT_ATTRS) {
@@ -508,6 +636,13 @@ export function stripHiddenHtml(input: string): { clean: string; findings: Findi
         return
       }
 
+      if (screenReaderDepth > 0) {
+        screenReaderDepth--
+        if (frame.screenReader) {
+          screenReader.push({ span, text: (frame.text ?? []).join(''), className: frame.fallback })
+        }
+      }
+
       if (!frame.candidate) return
 
       // An empty block has nothing to hide: `<meta>` without content and
@@ -519,6 +654,16 @@ export function stripHiddenHtml(input: string): { clean: string; findings: Findi
 
       findings.length = frame.findingMark
       cuts.length = frame.cutMark
+      if (frame.tag === 'STYLE') {
+        // A stylesheet is cut, since the model has no use for it, but it is
+        // not a hidden message: every real page carries one, and reporting it
+        // taught the reader to skip the report. What is reported is prose
+        // tucked into its comments.
+        cuts.push(span)
+        const prose = stylesheetProse(payload)
+        if (prose !== null) findings.push({ kind: 'hidden-html', detail: 'tag:style', sample: sample(prose, 512) })
+        return
+      }
       findings.push({
         kind: 'hidden-html',
         detail: `tag:${frame.tag.toLowerCase()}`,
@@ -537,6 +682,22 @@ export function stripHiddenHtml(input: string): { clean: string; findings: Findi
   })
   parser.write(source)
   parser.end()
+
+  const labels: string[] = []
+  for (const entry of screenReader) {
+    const text = entry.text.replace(/\s+/gu, ' ').trim()
+    if (!text) continue
+    const message = text.split(' ').length > SCREEN_READER_WORDS || DESTINATION.test(text)
+    if (!message) {
+      labels.push(text)
+      continue
+    }
+    findings.push({ kind: 'hidden-html', detail: `class:${entry.className}`, sample: sample(text, 512) })
+    cuts.push(entry.span)
+  }
+  if (labels.length > 0) {
+    findings.push({ kind: 'annotation', detail: 'class:screen-reader', sample: sample([...new Set(labels)].join(' | ')) })
+  }
 
   return {
     clean: unmask(cutOut(source, cuts), mark),

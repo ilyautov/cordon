@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+<title>Garden hoses — Example Store</title>
+<style>
+  .print-footer { display: none }
+  @media print {
+    .print-footer { display: block }
+    .no-print { display: none }
+  }
+  .badge { color: #0a0; font-weight: 600 }
+</style>
+</head>
+<body>
+<a class="sr-only focus:not-sr-only" href="#main">Skip to content</a>
+<header>
+  <button class="md:hidden" aria-controls="menu"><span class="sr-only">Open menu</span>☰</button>
+  <nav id="menu" class="hidden md:flex gap-4">
+    <a href="/">Home</a> <a href="/hoses">Hoses and reels</a> <a href="/care">Care guides for every season</a> <a href="/contact">Contact our garden team</a>
+  </nav>
+</header>
+<main id="main">
+  <h1>Expandable garden hose, 30 m</h1>
+  <p class="badge">In stock</p>
+  <p>Lightweight latex core with a woven cover. Expands to three times its length under pressure and shrinks back when drained.</p>
+  <p>Read the <a href="/care/hoses" target="_blank">winter storage guide<span class="sr-only"> (opens in a new tab)</span></a> and the <a href="/warranty" target="_blank">warranty terms<span class="sr-only"> (opens in a new tab)</span></a>.</p>
+  <div class="d-none d-lg-block">Free delivery on orders over 50 euros, returns within 30 days.</div>
+  <button><span class="visually-hidden">Previous image</span>‹</button>
+  <button><span class="visually-hidden">Next image</span>›</button>
+  <span class="screen-reader-text">Rating: 4 out of 5</span>★★★★☆
+</main>
+<footer class="no-print">Example Store, 12 Market Street.</footer>
+<p class="print-footer">Printed from the Example Store website.</p>
+</body>
+</html>
