@@ -4,6 +4,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versions follo
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-09-26
+
+The release for teams: `cordon audit` before deployment, MCP tool pinning at run time, `cordon init` profiles, `cordon log`, a managed-settings deployment guide, and npm provenance on the published package. Refusals on Claude Code now also leave with exit code 2.
+
 A refusal on Claude Code now leaves with exit code 2, the reason on stderr, alongside the JSON on stdout. Exit 2 blocks the call whatever the harness makes of the output; before, the deny rested on the JSON alone, and a harness that could not read it — a version change, a truncated pipe — would have treated the hook as a non-blocking error and let the call through. `ask` and every other answer keep exit 0, and Gemini CLI is unchanged: its protocol reads a non-zero exit differently.
 
 `cordon log [--last N] [--json]` reads the decision journal back for a human: each refusal, question, rewrite, memory write and MCP drift with its source, and a count by decision. Source labels come from pages, so control characters in them are printed as escapes; an escape sequence in a URL cannot clear or retitle the terminal of whoever reads the log. A line that does not parse is counted aloud. The test helper for the CLI now captures stderr.
