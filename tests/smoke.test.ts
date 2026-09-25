@@ -9,4 +9,12 @@ describe('the package', () => {
     const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as { version: string }
     expect(VERSION).toBe(pkg.version)
   })
+
+  it('declares the cordon command in the form npm keeps on publish', () => {
+    // npm 11 drops a bin entry spelled "./dist/cli.js" at publish time, with
+    // only a warning: the package goes out without its command, and
+    // `npx cordon` stops working for everyone who installs it.
+    const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as { bin: Record<string, string> }
+    expect(pkg.bin).toEqual({ cordon: 'dist/cli.js' })
+  })
 })

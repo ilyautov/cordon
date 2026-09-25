@@ -37,7 +37,7 @@
     "access": "public"
   },
   "bin": {
-    "cordon": "./dist/cli.js"
+    "cordon": "dist/cli.js"
   },
   "engines": {
     "node": ">=22"
