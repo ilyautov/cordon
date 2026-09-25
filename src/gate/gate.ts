@@ -126,7 +126,7 @@ function decide(call: ToolCall, ctx: GateContext): Decision {
     return escalate(ctx, outside)
   }
 
-  const scan = scanTaint(parts, ctx.taint)
+  const scan = scanTaint(parts, ctx.taint, ctx.userAtoms ?? [])
   if (!scan.tainted) {
     const exposed = exposedCall(verdict.effects, parts, ctx)
     if (exposed) return escalate(ctx, exposed, ctx.exposure?.source)
@@ -389,7 +389,8 @@ interface Scan {
   sources: Source[]
 }
 
-function scanTaint(parts: readonly Field[], taint: TaintStore): Scan {
+function scanTaint(parts: readonly Field[], taint: TaintStore, userAtoms: readonly string[]): Scan {
+  const named = new Set(userAtoms)
   const spans: Record<string, Array<[number, number]>> = {}
   const targets = new Set<string>()
   const sources = new Map<string, Source>()
@@ -398,6 +399,12 @@ function scanTaint(parts: readonly Field[], taint: TaintStore): Scan {
 
   for (const { key, value, depth } of parts) {
     if (typeof value !== 'string') continue
+    // A value that is, whole, what the user named in their own message aims
+    // nothing the user did not ask for, even when a page repeats it. AgentDojo
+    // measured the cost: "refund GB29…" was refused because the same IBAN sat
+    // in the transaction history. Only the whole value: a longer text around
+    // the named value is still checked as usual.
+    if (named.has(value.trim().toLowerCase())) continue
     const match = taint.check(value)
     if (!match.tainted) continue
 

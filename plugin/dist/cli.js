@@ -8221,7 +8221,7 @@ function decide(call, ctx) {
   if (outside) {
     return escalate(ctx, outside);
   }
-  const scan = scanTaint(parts, ctx.taint);
+  const scan = scanTaint(parts, ctx.taint, ctx.userAtoms ?? []);
   if (!scan.tainted) {
     const exposed = exposedCall(verdict.effects, parts, ctx);
     if (exposed) return escalate(ctx, exposed, ctx.exposure?.source);
@@ -8335,7 +8335,8 @@ var IRREVERSIBLE = /* @__PURE__ */ new Set([
   "exec"
 ]);
 var EXPOSURE_SENSITIVE = /* @__PURE__ */ new Set([...IRREVERSIBLE, "create"]);
-function scanTaint(parts, taint) {
+function scanTaint(parts, taint, userAtoms) {
+  const named = new Set(userAtoms);
   const spans = {};
   const targets = /* @__PURE__ */ new Set();
   const sources = /* @__PURE__ */ new Map();
@@ -8343,6 +8344,7 @@ function scanTaint(parts, taint) {
   let nested = false;
   for (const { key, value, depth } of parts) {
     if (typeof value !== "string") continue;
+    if (named.has(value.trim().toLowerCase())) continue;
     const match = taint.check(value);
     if (!match.tainted) continue;
     tainted = true;
