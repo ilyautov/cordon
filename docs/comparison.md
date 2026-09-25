@@ -16,7 +16,7 @@ Cordon decides without reading for meaning. It strips what a human cannot see, r
 | Model or network in the decision path | no | yes | Snyk: descriptions go to Snyk's API; Cisco: offline mode available | varies; Lasso's injection filter is a cloud API |
 | Runtime or pre-deploy | both (`audit` before, hooks and gateway at run time) | runtime | pre-deploy (Snyk added a proxy mode in 2026) | runtime |
 | Catches a plain-language injection | no, by design; the exposure rule escalates what such an injection orders | yes, until adapted around | partly, by rules | partly |
-| Paraphrased or encoded payload after an untrusted read | escalated by the exposure rule (battery: 74% → 6%) | depends on the judge | n/a | n/a |
+| Paraphrased or encoded payload after an untrusted read | escalated by the exposure rule (battery: 68% → 6%); base64, hex and percent forms are also decoded and matched | depends on the judge | n/a | n/a |
 | Poisoned memory that acts in a later session | memory ledger | not addressed in the open tools we found | n/a | n/a |
 | Rug pull (a tool description changes after approval) | pinned on first sight, held until approved | n/a | Snyk: yes, by scan | Deconvolute: pinned |
 | Hidden layer (invisible characters, hidden HTML) | stripped before the model reads it | model-dependent | flagged in descriptions and skills | some |

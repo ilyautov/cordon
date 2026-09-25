@@ -11181,6 +11181,37 @@ import { join as join5 } from "node:path";
 // src/provenance/decode.ts
 var MAX_ROUNDS = 3;
 function decodings(value) {
+  const out = percentDecodings(value);
+  for (const text of binaryToText(value)) if (text !== value && !out.includes(text)) out.push(text);
+  return out;
+}
+var BASE64_RUN = /[A-Za-z0-9+/_-]{32,}={0,2}/gu;
+var HEX_RUN = /(?:[0-9a-fA-F]{2}){24,}/gu;
+function binaryToText(value) {
+  if (value.length < 32) return [];
+  const out = [];
+  for (const match of value.matchAll(BASE64_RUN)) {
+    const candidates = /* @__PURE__ */ new Set([match[0], ...match[0].split("/").filter((part) => part.length >= 32)]);
+    for (const candidate of candidates) {
+      const text = asText(Buffer.from(candidate.replace(/-/gu, "+").replace(/_/gu, "/"), "base64"));
+      if (text !== null) out.push(text);
+    }
+  }
+  for (const match of value.matchAll(HEX_RUN)) {
+    const text = asText(Buffer.from(match[0], "hex"));
+    if (text !== null) out.push(text);
+  }
+  return out;
+}
+function asText(bytes) {
+  if (bytes.length < 16) return null;
+  const text = bytes.toString("utf8");
+  if (text.includes("\uFFFD")) return null;
+  if (/[\u0000-\u0008\u000E-\u001F\u007F]/u.test(text)) return null;
+  const letters = text.match(/[\p{L}\p{N}\s]/gu)?.length ?? 0;
+  return letters / [...text].length >= 0.7 ? text : null;
+}
+function percentDecodings(value) {
   if (!value.includes("%") && !value.includes("+")) return [];
   const seen = /* @__PURE__ */ new Set([value]);
   const out = [];

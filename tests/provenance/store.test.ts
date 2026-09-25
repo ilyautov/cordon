@@ -243,10 +243,14 @@ describe('the attack corpus: escaping the match', () => {
     expect(dirty(INJECTION.slice(half))).toBe(true)
   })
 
-  it("6. base64 passes: unwrapping encodings is sanitize's job, before observe", () => {
+  it('6. base64 in the argument is decoded before matching', () => {
+    // This test once pinned the opposite, on the argument that unwrapping is
+    // sanitize's job. Sanitize unwraps what a source carries; here the source
+    // is plain and the call carries it encoded — the direction sanitize never
+    // sees, and the one the battery measured walking past provenance.
     const encoded = Buffer.from(INJECTION, 'utf8').toString('base64')
-    expect(dirty(encoded)).toBe(false)
-    expect(dirty(Buffer.from(encoded, 'base64').toString('utf8'))).toBe(true)
+    expect(dirty(encoded)).toBe(true)
+    expect(dirty(Buffer.from(INJECTION, 'utf8').toString('hex'))).toBe(true)
   })
 
   it('7. the item number spelled out in words in the source: matching does not restore it', () => {
