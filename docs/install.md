@@ -86,7 +86,7 @@ Every hook event is a separate process, so memory between them lives as files in
 | Session state: provenance of what was read, certificate narrowing | `~/.cordon/sessions/` | a day after the session's last event |
 | Accumulated text of the displayed answer | `~/.cordon/drafts/` | an hour after the last delta |
 | Timestamp of the last sweep | `~/.cordon/last-sweep` | overwritten |
-| Memory written after untrusted content was read: path, source label, time | `~/.cordon/memory/ledger.json` | thirty days after the write, or until `cordon: trust memory` |
+| Memory written after untrusted content was read: path, source label, time | `~/.cordon/memory/` | thirty days after the write, or until `cordon: trust memory` |
 
 Session state and drafts hold content that came from untrusted sources: hashes of what was read, source labels, fragments of answer text. There is no reason for it to sit there indefinitely, so expired files are deleted automatically.
 

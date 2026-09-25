@@ -1,3 +1,6 @@
+import { mkdtempSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs'
+import { homedir, tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { memoryTarget } from '../../src/gate/memory.js'
 import { DEFAULT_POLICY, type Policy } from '../../src/policy/defaults.js'
@@ -55,5 +58,33 @@ describe('memoryTarget: which calls write into memory an agent reloads', () => {
 
   it('a tool named like a prototype member is not a memory tool', () => {
     expect(memoryTarget({ tool: 'toString', args: {} }, policy())).toBeNull()
+  })
+
+  it('a trailing dot or space does not hide the name', () => {
+    // macOS and Windows open CLAUDE.md for "CLAUDE.md." and "CLAUDE.md " —
+    // the same spelling trick selfprotect already folds away.
+    expect(memoryTarget({ tool: 'Write', args: { file_path: '/srv/p/CLAUDE.md ' } }, policy())).not.toBeNull()
+    expect(memoryTarget({ tool: 'Write', args: { file_path: '/srv/p/CLAUDE.md.' } }, policy())).not.toBeNull()
+  })
+
+  it('a path nested inside the arguments is seen', () => {
+    // An MCP tool wraps its path one level down as often as not; the gate
+    // walks the whole tree, and so must this.
+    const declared = { ...policy(), tools: { doc_write: ['update' as const] } }
+    expect(memoryTarget({ tool: 'doc_write', args: { document: { path: '/srv/p/AGENTS.md' } } }, declared))
+      .not.toBeNull()
+  })
+
+  it('a link to a memory file is a write into it', () => {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), 'cordon-memory-link-')))
+    writeFileSync(join(dir, 'CLAUDE.md'), 'notes')
+    symlinkSync(join(dir, 'CLAUDE.md'), join(dir, 'notes.md'))
+    expect(memoryTarget({ tool: 'Write', args: { file_path: join(dir, 'notes.md') } }, policy()))
+      .toBe(join(dir, 'CLAUDE.md'))
+  })
+
+  it('a tilde path is reported as the file it names', () => {
+    expect(memoryTarget({ tool: 'Write', args: { file_path: '~/proj/CLAUDE.md' } }, policy()))
+      .toBe(join(homedir(), 'proj', 'CLAUDE.md'))
   })
 })

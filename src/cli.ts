@@ -392,7 +392,7 @@ export function doctor(home: string = cordonHome()): DoctorReport {
   } catch (error) {
     ledgerBroken = true
     warnings.push(
-      `${(error as Error).message}: every hook event will be refused until ${join(home, 'memory', 'ledger.json')} ` +
+      `${(error as Error).message}: every hook event will be refused until the damaged piece in ${join(home, 'memory')} ` +
         'is repaired or removed by hand',
     )
   }

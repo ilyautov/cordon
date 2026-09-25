@@ -167,7 +167,7 @@ function decide(call: ToolCall, ctx: GateContext): Decision {
   }
 }
 
-interface Field {
+export interface Field {
   /** Name of the nearest object field. An array element inherits its field's name. */
   key: string
   value: unknown
@@ -182,7 +182,7 @@ interface Field {
  * sits one level down. MCP tools accept nested objects all the time, so this
  * is not exotic but an ordinary call.
  */
-function fields(args: Record<string, unknown>): Field[] {
+export function fields(args: Record<string, unknown>): Field[] {
   const out: Field[] = []
 
   const visit = (key: string, node: unknown, depth: number): void => {

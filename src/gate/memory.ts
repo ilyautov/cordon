@@ -1,7 +1,10 @@
+import { basename } from 'node:path'
 import type { ToolCall } from '../core/types.js'
 import { PATH_KEYS, fold } from '../core/argument-keys.js'
 import type { Policy } from '../policy/defaults.js'
+import { canonicalForms, fold as foldSegment } from '../policy/selfprotect.js'
 import { classify } from '../scope/effects.js'
+import { fields } from './gate.js'
 
 /**
  * Instruction files the harnesses reload into every new session, by base name.
@@ -39,22 +42,30 @@ export function memoryTarget(call: ToolCall, policy: Policy): string | null {
   const verdict = classify(call, policy.tools)
   if (!verdict.effects.some((effect) => effect === 'create' || effect === 'update')) return null
 
+  // The same walk the gate does, nested objects and arrays included: a path
+  // one level down is an ordinary MCP call, and the gate already judged it.
   const extra = declaredFiles(policy)
-  for (const [key, value] of Object.entries(call.args ?? {})) {
-    if (!PATH_KEYS.has(fold(key))) continue
-    for (const path of Array.isArray(value) ? value : [value]) {
-      if (typeof path !== 'string') continue
-      const name = baseName(path).toLowerCase()
-      if (MEMORY_FILES.has(name) || extra.has(name)) return path
+  for (const { key, value } of fields(call.args ?? {})) {
+    if (typeof value !== 'string' || !PATH_KEYS.has(fold(key))) continue
+    // Every spelling that opens the same file: tilde expanded, links
+    // resolved. A link named notes.md that points at CLAUDE.md is a write into
+    // CLAUDE.md, and the form reported is the one the harness will reload.
+    for (const form of canonicalForms(value).reverse()) {
+      const name = memoryName(form)
+      if (MEMORY_FILES.has(name) || extra.has(name)) return form
     }
   }
   return null
 }
 
-/** Both separators: a Windows path from a Gemini CLI event must not slip through. */
-function baseName(path: string): string {
-  const parts = path.split(/[/\\]/u)
-  return parts[parts.length - 1] ?? ''
+/**
+ * The base name folded the way the file system folds it: case, and trailing
+ * dots and spaces, which macOS and Windows drop when opening — the same
+ * spelling trick selfprotect folds away. Both separators, so a Windows path
+ * from a Gemini CLI event does not keep its directory in the name.
+ */
+function memoryName(path: string): string {
+  return foldSegment(basename(path.replace(/\\/gu, '/')))
 }
 
 /**
@@ -69,5 +80,5 @@ function declaredTools(policy: Policy): string[] {
 function declaredFiles(policy: Policy): ReadonlySet<string> {
   const files: unknown = policy.memory?.files
   if (!Array.isArray(files)) return new Set()
-  return new Set(files.filter((file): file is string => typeof file === 'string').map((file) => file.toLowerCase()))
+  return new Set(files.filter((file): file is string => typeof file === 'string').map((file) => foldSegment(file)))
 }

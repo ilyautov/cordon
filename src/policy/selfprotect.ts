@@ -22,7 +22,7 @@ const HARNESS_SEGMENTS: readonly (readonly string[])[] = HARNESS_CONFIG.map((mar
  * for a directory with an odd name — a false positive here is cheaper than a
  * miss.
  */
-function fold(segment: string): string {
+export function fold(segment: string): string {
   return segment.toLowerCase().replace(/[. ]+$/, '')
 }
 

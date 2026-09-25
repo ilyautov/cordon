@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -65,5 +65,29 @@ describe('MemoryLedger', () => {
     mkdirSync(join(dir, 'memory'), { recursive: true })
     writeFileSync(join(dir, 'memory', 'ledger.json'), JSON.stringify({ version: 1, entries: 'x' }))
     expect(() => new MemoryLedger(dir).live()).toThrow(/memory ledger/)
+  })
+
+  it('a write never rewrites what another writer recorded', () => {
+    // Hook processes run in parallel. A read-modify-write of one shared file
+    // lets the later writer erase the earlier one's entry without a word —
+    // the race SessionStore measured losing twelve times out of twelve. An
+    // erased entry is a poisoned memory carried into later sessions unmarked.
+    const dir = home()
+    new MemoryLedger(dir).record(entry)
+    const before = new Map(readdirSync(join(dir, 'memory')).map((name) => [name, readFileSync(join(dir, 'memory', name), 'utf8')]))
+
+    new MemoryLedger(dir).record({ ...entry, target: '/srv/other/AGENTS.md' })
+    for (const [name, body] of before) {
+      expect(readFileSync(join(dir, 'memory', name), 'utf8')).toBe(body)
+    }
+    expect(new MemoryLedger(dir).live().map((e) => e.target).sort())
+      .toEqual(['/srv/other/AGENTS.md', '/srv/project/CLAUDE.md'])
+  })
+
+  it('expired pieces are removed when something new is written', () => {
+    const dir = home()
+    new MemoryLedger(dir, () => 0).record(entry)
+    new MemoryLedger(dir, () => MEMORY_TTL_MS + 10).record({ ...entry, target: '/srv/other/AGENTS.md' })
+    expect(readdirSync(join(dir, 'memory'))).toHaveLength(1)
   })
 })

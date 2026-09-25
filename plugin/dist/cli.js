@@ -7367,7 +7367,7 @@ var require_dist = __commonJS({
 });
 
 // src/cli.ts
-import { accessSync as accessSync4, constants as constants4, existsSync, mkdtempSync, readFileSync as readFileSync4, realpathSync as realpathSync2, rmSync as rmSync3, writeFileSync as writeFileSync4 } from "node:fs";
+import { accessSync as accessSync4, constants as constants4, existsSync, mkdtempSync, readFileSync as readFileSync4, realpathSync as realpathSync2, rmSync as rmSync4, writeFileSync as writeFileSync4 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join as join10 } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -8292,6 +8292,7 @@ function hostAllowed(raw, hosts) {
 }
 
 // src/gate/memory.ts
+import { basename as basename2 } from "node:path";
 var MEMORY_FILES = /* @__PURE__ */ new Set([
   "claude.md",
   "claude.local.md",
@@ -8310,19 +8311,17 @@ function memoryTarget(call, policy) {
   const verdict = classify(call, policy.tools);
   if (!verdict.effects.some((effect) => effect === "create" || effect === "update")) return null;
   const extra = declaredFiles(policy);
-  for (const [key, value] of Object.entries(call.args ?? {})) {
-    if (!PATH_KEYS.has(fold3(key))) continue;
-    for (const path of Array.isArray(value) ? value : [value]) {
-      if (typeof path !== "string") continue;
-      const name = baseName(path).toLowerCase();
-      if (MEMORY_FILES.has(name) || extra.has(name)) return path;
+  for (const { key, value } of fields(call.args ?? {})) {
+    if (typeof value !== "string" || !PATH_KEYS.has(fold3(key))) continue;
+    for (const form of canonicalForms(value).reverse()) {
+      const name = memoryName(form);
+      if (MEMORY_FILES.has(name) || extra.has(name)) return form;
     }
   }
   return null;
 }
-function baseName(path) {
-  const parts = path.split(/[/\\]/u);
-  return parts[parts.length - 1] ?? "";
+function memoryName(path) {
+  return fold(basename2(path.replace(/\\/gu, "/")));
 }
 function declaredTools(policy) {
   const tools = policy.memory?.tools;
@@ -8331,7 +8330,7 @@ function declaredTools(policy) {
 function declaredFiles(policy) {
   const files = policy.memory?.files;
   if (!Array.isArray(files)) return /* @__PURE__ */ new Set();
-  return new Set(files.filter((file) => typeof file === "string").map((file) => file.toLowerCase()));
+  return new Set(files.filter((file) => typeof file === "string").map((file) => fold(file)));
 }
 
 // src/notify/notifier.ts
@@ -10827,7 +10826,8 @@ ${removed}` : html.clean;
 }
 
 // src/session/memory.ts
-import { readFileSync as readFileSync2, renameSync, writeFileSync } from "node:fs";
+import { randomBytes } from "node:crypto";
+import { readdirSync, readFileSync as readFileSync2, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join as join3 } from "node:path";
 var MEMORY_TTL_MS = 30 * 24 * 60 * 60 * 1e3;
 var MAX_ENTRIES = 200;
@@ -10835,57 +10835,87 @@ var MemoryLedger = class {
   constructor(cordonHome2, now = Date.now) {
     this.now = now;
     this.dir = join3(cordonHome2, "memory");
-    this.path = join3(this.dir, "ledger.json");
   }
   now;
   dir;
-  path;
+  /** The latest live entry per target. */
   live() {
     const cutoff = this.now() - MEMORY_TTL_MS;
-    return this.read().filter((entry) => entry.at > cutoff);
+    const latest = /* @__PURE__ */ new Map();
+    for (const { entry } of this.pieces()) {
+      if (entry.at <= cutoff) continue;
+      const seen = latest.get(entry.target);
+      if (seen === void 0 || seen.at < entry.at) latest.set(entry.target, entry);
+    }
+    return [...latest.values()].sort((a, b) => a.at - b.at);
   }
   record(entry) {
-    const kept = this.live().filter((existing) => existing.target !== entry.target);
-    kept.push({ ...entry, at: this.now() });
-    this.write(kept.slice(-MAX_ENTRIES));
-  }
-  clear() {
-    this.write([]);
+    const at = this.now();
+    makeDirectory(this.dir);
+    const name = `${at}-${randomBytes(8).toString("hex")}.json`;
+    const path = join3(this.dir, name);
+    const temp = `${path}.${process.pid}.tmp`;
+    writeFileSync(temp, JSON.stringify({ version: 1, entry: { ...entry, at } }), { encoding: "utf8", mode: 384 });
+    renameSync(temp, path);
+    this.prune(name);
   }
   /**
-   * A missing file is an empty ledger; anything unreadable is an exception.
-   *
-   * Empty is the most permissive state there is, so a damaged ledger must not
-   * read as one: that would be a poisoned memory carried into every later
-   * session with nobody told. The exception travels up to the adapter, where
-   * a failed PreToolUse is a deny.
+   * Forgets every piece this process can see. A piece another process writes
+   * after the listing survives, and that is right: it is a newer write than
+   * the one the user just reviewed.
    */
-  read() {
-    let raw;
+  clear() {
+    for (const { path } of this.pieces()) rmSync(path, { force: true });
+  }
+  /** Drops expired pieces and the oldest past the cap, never the one just written. */
+  prune(own2) {
+    const cutoff = this.now() - MEMORY_TTL_MS;
+    const all = this.pieces();
+    const excess = all.length - MAX_ENTRIES;
+    all.forEach(({ path, name, entry }, index) => {
+      if (name === own2) return;
+      if (entry.at <= cutoff || index < excess) rmSync(path, { force: true });
+    });
+  }
+  /**
+   * Every piece on disk, oldest first. A missing directory is an empty
+   * ledger; anything unreadable is an exception.
+   *
+   * Empty is the most permissive state there is, so a damaged piece must not
+   * read as absent: that would be a poisoned memory carried into every later
+   * session with nobody told. The exception travels up to the adapter, where
+   * a failed PreToolUse is a deny. A piece vanishing between the listing and
+   * the read is another process pruning or clearing it, not damage.
+   */
+  pieces() {
+    let names;
     try {
-      raw = readFileSync2(this.path, "utf8");
+      names = readdirSync(this.dir).filter((name) => name.endsWith(".json")).sort();
     } catch (error) {
       if (error.code === "ENOENT") return [];
       throw new Error(`the memory ledger is unreadable: ${error.message}`);
     }
-    let parsed;
-    try {
-      parsed = JSON.parse(raw);
-    } catch (error) {
-      throw new Error(`the memory ledger is corrupted: ${error.message}`);
+    const out = [];
+    for (const name of names) {
+      const path = join3(this.dir, name);
+      let raw;
+      try {
+        raw = readFileSync2(path, "utf8");
+      } catch (error) {
+        if (error.code === "ENOENT") continue;
+        throw new Error(`the memory ledger is unreadable: ${error.message}`);
+      }
+      let parsed;
+      try {
+        parsed = JSON.parse(raw);
+      } catch (error) {
+        throw new Error(`the memory ledger is corrupted (${name}): ${error.message}`);
+      }
+      const entry = typeof parsed === "object" && parsed !== null && Object.hasOwn(parsed, "entry") ? parsed["entry"] : void 0;
+      if (!isEntry(entry)) throw new Error(`the memory ledger is incompatible (${name})`);
+      out.push({ name, path, entry });
     }
-    const entries = typeof parsed === "object" && parsed !== null && Object.hasOwn(parsed, "entries") ? parsed["entries"] : void 0;
-    if (!Array.isArray(entries) || !entries.every(isEntry)) {
-      throw new Error("the memory ledger is incompatible");
-    }
-    return entries;
-  }
-  /** Through a temporary file and a rename, as the session state: see atomicWrite there. */
-  write(entries) {
-    makeDirectory(this.dir);
-    const temp = `${this.path}.${process.pid}.tmp`;
-    writeFileSync(temp, JSON.stringify({ version: 1, entries }), { encoding: "utf8", mode: 384 });
-    renameSync(temp, this.path);
+    return out.sort((a, b) => a.entry.at - b.entry.at);
   }
 };
 function isEntry(value) {
@@ -10895,8 +10925,8 @@ function isEntry(value) {
 }
 
 // src/session/store.ts
-import { createHash, randomBytes } from "node:crypto";
-import { readFileSync as readFileSync3, readdirSync, renameSync as renameSync2, rmSync, writeFileSync as writeFileSync2 } from "node:fs";
+import { createHash, randomBytes as randomBytes2 } from "node:crypto";
+import { readFileSync as readFileSync3, readdirSync as readdirSync2, renameSync as renameSync2, rmSync as rmSync2, writeFileSync as writeFileSync2 } from "node:fs";
 import { join as join4 } from "node:path";
 
 // src/provenance/decode.ts
@@ -11321,7 +11351,7 @@ var SessionStore = class {
    * without starting processes: two stores in one test behave exactly like
    * two hooks on a harness.
    */
-  piece = randomBytes(8).toString("hex");
+  piece = randomBytes2(8).toString("hex");
   /**
    * The session's state, assembled from every piece of it on disk.
    *
@@ -11357,7 +11387,7 @@ var SessionStore = class {
     const prefix = safeName(sessionId);
     let names;
     try {
-      names = readdirSync(dir);
+      names = readdirSync2(dir);
     } catch (error) {
       if (error.code === "ENOENT") return [];
       throw new Error(`the session state ${shown(sessionId)} is unreadable: ${error.message}`);
@@ -11439,7 +11469,7 @@ var SessionStore = class {
     for (const piece of this.read.get(sessionId) ?? []) {
       if (piece === path) continue;
       try {
-        rmSync(piece, { force: true });
+        rmSync2(piece, { force: true });
       } catch {
       }
     }
@@ -11480,7 +11510,7 @@ var SessionStore = class {
    */
   clearDraft(sessionId) {
     try {
-      rmSync(this.draftPathFor(sessionId), { force: true });
+      rmSync2(this.draftPathFor(sessionId), { force: true });
     } catch {
     }
   }
@@ -12057,7 +12087,7 @@ function renderFooter(marks) {
 }
 
 // src/session/sweep.ts
-import { lstatSync, readdirSync as readdirSync2, rmSync as rmSync2, writeFileSync as writeFileSync3 } from "node:fs";
+import { lstatSync, readdirSync as readdirSync3, rmSync as rmSync3, writeFileSync as writeFileSync3 } from "node:fs";
 import { join as join6 } from "node:path";
 var SESSION_TTL_MS = 24 * 60 * 60 * 1e3;
 var DRAFT_TTL_MS = 60 * 60 * 1e3;
@@ -12093,7 +12123,7 @@ function sweepDir(dir, ttl, keep, now) {
   let entries;
   try {
     if (!lstatSync(dir).isDirectory()) return;
-    entries = readdirSync2(dir, { withFileTypes: true });
+    entries = readdirSync3(dir, { withFileTypes: true });
   } catch {
     return;
   }
@@ -12109,7 +12139,7 @@ function sweepDir(dir, ttl, keep, now) {
       const stat = lstatSync(path);
       if (!stat.isFile()) continue;
       if (now - stat.mtimeMs < ttl) continue;
-      rmSync2(path, { force: true });
+      rmSync3(path, { force: true });
     } catch {
     }
   }
@@ -13323,7 +13353,7 @@ function selfCheck() {
   } catch {
     return "broken";
   } finally {
-    rmSync3(home, { recursive: true, force: true });
+    rmSync4(home, { recursive: true, force: true });
   }
 }
 function geminiSelfCheck(home) {
@@ -13403,7 +13433,7 @@ function doctor(home = cordonHome()) {
   } catch (error) {
     ledgerBroken = true;
     warnings.push(
-      `${error.message}: every hook event will be refused until ${join10(home, "memory", "ledger.json")} is repaired or removed by hand`
+      `${error.message}: every hook event will be refused until the damaged piece in ${join10(home, "memory")} is repaired or removed by hand`
     );
   }
   if (memory.length > 0 && policy.exposure) {
