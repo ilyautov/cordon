@@ -258,3 +258,40 @@ describe('the policy: memory declarations', () => {
     expect(() => loadPolicy(dir)).toThrow(/memory\.files/u)
   })
 })
+
+describe('a key the loader does not know', () => {
+  // Every field of the policy defaults to something, so a misspelled key
+  // would drop to that default without a word: `exposur: false` leaves the
+  // rule on, `memory: {fils: [...]}` leaves a declared store unwatched, a
+  // misspelled `notify.file` leaves the owner without the journal they rely
+  // on. The policy would not say what its author believes it says.
+  const cases: Array<[string, string]> = [
+    ['exposur: false\n', 'exposur'],
+    ['profile:\n  efects: [read]\n', 'profile.efects'],
+    ['profile:\n  resources:\n    host: [example.com]\n', 'profile.resources.host'],
+    ['notify:\n  fle: /tmp/events.jsonl\n', 'notify.fle'],
+    ['memory:\n  fils: [NOTES.md]\n', 'memory.fils'],
+    ['output:\n  foter: false\n', 'output.foter'],
+  ]
+
+  for (const [yaml, key] of cases) {
+    it(`stops the load on ${key}`, () => {
+      const home = scratch()
+      writeFileSync(join(home, 'policy.yaml'), yaml)
+      expect(() => loadPolicy(home)).toThrow(new RegExp(`unknown key ${key.replaceAll('.', '\\.')}\\b`))
+    })
+  }
+
+  it('names the keys it does know', () => {
+    const home = scratch()
+    writeFileSync(join(home, 'policy.yaml'), 'exposur: false\n')
+    expect(() => loadPolicy(home)).toThrow(/exposure/)
+  })
+
+  it('does not take a tool name under tools for a misspelled field', () => {
+    // The keys under tools and toolsReturn are names the owner chooses.
+    const home = scratch()
+    writeFileSync(join(home, 'policy.yaml'), 'tools:\n  anything_at_all: [read]\ntoolsReturn:\n  whatever: source\n')
+    expect(loadPolicy(home).tools['anything_at_all']).toEqual(['read'])
+  })
+})

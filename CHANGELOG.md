@@ -6,6 +6,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versions follo
 
 A refusal on Claude Code now leaves with exit code 2, the reason on stderr, alongside the JSON on stdout. Exit 2 blocks the call whatever the harness makes of the output; before, the deny rested on the JSON alone, and a harness that could not read it — a version change, a truncated pipe — would have treated the hook as a non-blocking error and let the call through. `ask` and every other answer keep exit 0, and Gemini CLI is unchanged: its protocol reads a non-zero exit differently.
 
+A policy key the loader does not know stops the load, at the top level and inside `profile`, `profile.resources`, `notify`, `memory` and `output`. Every field has a default, so a misspelled `exposur: false` or `memory: {fils: [...]}` used to fall to it without a word: the policy did not say what its author believed. Like any broken policy, this is a refusal on every hook event until it is fixed, and `cordon doctor` names the key.
+
 A write into memory that quarantine would rewrite is put to the human instead. On a live Claude Code a summary written into `CLAUDE.md` came out of quarantine mangled while the model reported the whole sentence; a note the harness reloads into every later session is where a silent cut costs most.
 
 ## [0.6.1] - 2026-09-26

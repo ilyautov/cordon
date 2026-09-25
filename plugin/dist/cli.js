@@ -7454,6 +7454,7 @@ function validate(parsed, path) {
     throw new Error(`${path}: expected an object`);
   }
   const input = parsed;
+  onlyKnown(input, TOP_LEVEL, path, "");
   if ("mode" in input) {
     if (typeof input.mode !== "string" || !MODES.has(input.mode)) {
       throw new Error(`${path}: mode must be interactive or autonomous, not ${String(input.mode)}`);
@@ -7462,11 +7463,13 @@ function validate(parsed, path) {
   }
   if ("profile" in input) {
     const profile = asObject(input.profile, `${path}: profile`);
+    onlyKnown(profile, ["effects", "resources"], path, "profile.");
     if ("effects" in profile) {
       policy.profile.effects = asEffects(profile.effects, `${path}: profile.effects`);
     }
     if ("resources" in profile) {
       const resources = asObject(profile.resources, `${path}: profile.resources`);
+      onlyKnown(resources, ["paths", "hosts"], path, "profile.resources.");
       policy.profile.resources = {
         paths: asStrings(resources.paths ?? [], `${path}: profile.resources.paths`),
         hosts: asStrings(resources.hosts ?? [], `${path}: profile.resources.hosts`)
@@ -7493,6 +7496,7 @@ function validate(parsed, path) {
         `${path}: notify.webhook is not delivered anywhere and never was; there is no network in the core by design. Write notify.file and deliver from that file if a webhook is wanted`
       );
     }
+    onlyKnown(notify, ["file"], path, "notify.");
     policy.notify = {
       file: typeof notify.file === "string" ? notify.file : null
     };
@@ -7513,6 +7517,7 @@ function validate(parsed, path) {
   }
   if (Object.hasOwn(input, "memory")) {
     const memory = asObject(input["memory"], `${path}: memory`);
+    onlyKnown(memory, ["files", "tools"], path, "memory.");
     policy.memory = {
       files: asNames(Object.hasOwn(memory, "files") ? memory["files"] : [], `${path}: memory.files`),
       tools: asNames(Object.hasOwn(memory, "tools") ? memory["tools"] : [], `${path}: memory.tools`)
@@ -7520,6 +7525,7 @@ function validate(parsed, path) {
   }
   if (Object.hasOwn(input, "output")) {
     const output = asObject(input["output"], `${path}: output`);
+    onlyKnown(output, ["footer"], path, "output.");
     if (Object.hasOwn(output, "footer")) {
       const footer2 = output["footer"];
       if (typeof footer2 !== "boolean") {
@@ -7529,6 +7535,26 @@ function validate(parsed, path) {
     }
   }
   return policy;
+}
+var TOP_LEVEL = [
+  "mode",
+  "profile",
+  "tools",
+  "trustedSources",
+  "toolsReturn",
+  "notify",
+  "exposure",
+  "task",
+  "memory",
+  "output"
+];
+function onlyKnown(object, known, path, prefix) {
+  for (const key of Object.keys(object)) {
+    if (prefix === "notify." && key === "webhook") continue;
+    if (!known.includes(key)) {
+      throw new Error(`${path}: unknown key ${prefix}${key}; the keys here are ${known.join(", ")}`);
+    }
+  }
 }
 function asObject(value, where) {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {

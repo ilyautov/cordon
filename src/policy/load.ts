@@ -48,6 +48,7 @@ function validate(parsed: unknown, path: string): Policy {
     throw new Error(`${path}: expected an object`)
   }
   const input = parsed as Record<string, unknown>
+  onlyKnown(input, TOP_LEVEL, path, '')
 
   if ('mode' in input) {
     if (typeof input.mode !== 'string' || !MODES.has(input.mode)) {
@@ -58,11 +59,13 @@ function validate(parsed: unknown, path: string): Policy {
 
   if ('profile' in input) {
     const profile = asObject(input.profile, `${path}: profile`)
+    onlyKnown(profile, ['effects', 'resources'], path, 'profile.')
     if ('effects' in profile) {
       policy.profile.effects = asEffects(profile.effects, `${path}: profile.effects`)
     }
     if ('resources' in profile) {
       const resources = asObject(profile.resources, `${path}: profile.resources`)
+      onlyKnown(resources, ['paths', 'hosts'], path, 'profile.resources.')
       policy.profile.resources = {
         paths: asStrings(resources.paths ?? [], `${path}: profile.resources.paths`),
         hosts: asStrings(resources.hosts ?? [], `${path}: profile.resources.hosts`),
@@ -100,6 +103,7 @@ function validate(parsed: unknown, path: string): Policy {
           'the core by design. Write notify.file and deliver from that file if a webhook is wanted',
       )
     }
+    onlyKnown(notify, ['file'], path, 'notify.')
     policy.notify = {
       file: typeof notify.file === 'string' ? notify.file : null,
     }
@@ -135,6 +139,7 @@ function validate(parsed: unknown, path: string): Policy {
   // outside, and `__proto__` inside it must not look like a setting.
   if (Object.hasOwn(input, 'memory')) {
     const memory = asObject(input['memory'], `${path}: memory`)
+    onlyKnown(memory, ['files', 'tools'], path, 'memory.')
     // A silent default here would mean the human declared a memory store and
     // writes into it were never noticed — the same argument as for exposure.
     policy.memory = {
@@ -147,6 +152,7 @@ function validate(parsed: unknown, path: string): Policy {
   // outside, and `__proto__` inside it must not look like a setting.
   if (Object.hasOwn(input, 'output')) {
     const output = asObject(input['output'], `${path}: output`)
+    onlyKnown(output, ['footer'], path, 'output.')
     if (Object.hasOwn(output, 'footer')) {
       const footer = output['footer']
       // A silent default here would mean the human switched the footer off,
@@ -159,6 +165,32 @@ function validate(parsed: unknown, path: string): Policy {
   }
 
   return policy
+}
+
+const TOP_LEVEL = [
+  'mode', 'profile', 'tools', 'trustedSources', 'toolsReturn',
+  'notify', 'exposure', 'task', 'memory', 'output',
+]
+
+/**
+ * A key the loader does not know stops the load.
+ *
+ * Every field has a default, so a misspelled key would fall to it without a
+ * word: `exposur: false` leaves the rule on, `memory: {fils: [...]}` leaves a
+ * declared store unwatched, a misspelled `notify.file` leaves the owner
+ * without the journal they read in the morning. The policy would not say what
+ * its author believes, and nothing would show it — the same argument as for
+ * notify.webhook. The keys under `tools` and `toolsReturn` are names the owner
+ * chooses and are not checked here.
+ */
+function onlyKnown(object: Record<string, unknown>, known: readonly string[], path: string, prefix: string): void {
+  for (const key of Object.keys(object)) {
+    // notify.webhook has a refusal of its own that says more than this one.
+    if (prefix === 'notify.' && key === 'webhook') continue
+    if (!known.includes(key)) {
+      throw new Error(`${path}: unknown key ${prefix}${key}; the keys here are ${known.join(', ')}`)
+    }
+  }
 }
 
 function asObject(value: unknown, where: string): Record<string, unknown> {
