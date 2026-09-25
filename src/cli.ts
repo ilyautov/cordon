@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { accessSync, constants, existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { accessSync, constants, existsSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -8,12 +8,13 @@ import { exitFor } from './adapters/claude-code/protocol.js'
 import { runHook as runGeminiHook } from './adapters/gemini-cli/main.js'
 import { runGateway } from './adapters/mcp/gateway.js'
 import { humanSeesRendered, type SourceView } from './core/types.js'
+import { Cordon } from './cordon.js'
 import { loadPolicy } from './policy/load.js'
 import { sanitize } from './sanitize/index.js'
 import { MemoryLedger } from './session/memory.js'
 
 const USAGE =
-  'usage: cordon scan <file|-> [--json] | cordon hook [--harness claude-code|gemini] | cordon mcp -- <server command...> | cordon doctor'
+  'usage: cordon scan <file|-> [--json] | cordon hook [--harness claude-code|gemini] | cordon mcp -- <server command...> | cordon mcp approve -- <server command...> | cordon doctor'
 
 /**
  * Event parsing depends on the harness, so the harness is named explicitly.
@@ -143,6 +144,11 @@ export interface DoctorReport {
    * nothing escalates.
    */
   exposure: boolean
+  /**
+   * Whether the MCP gateway pins servers' tools, and how many servers are
+   * pinned. Named for the same reason as exposure: off is silent otherwise.
+   */
+  mcpPin: { on: boolean; servers: number }
   /**
    * The effective default for an MCP tool result.
    *
@@ -376,6 +382,7 @@ export function doctor(home: string = cordonHome()): DoctorReport {
       warnings,
       footer: false,
       exposure: false,
+      mcpPin: { on: false, servers: 0 },
       mcpView: MCP_VIEW,
       declaredViews: [],
       harnesses: HARNESS_LIMITS,
@@ -461,11 +468,22 @@ export function doctor(home: string = cordonHome()): DoctorReport {
     warnings,
     footer: policy.output.footer,
     exposure: policy.exposure,
+    mcpPin: { on: policy.mcp.pin, servers: pinnedServers(home) },
     mcpView: MCP_VIEW,
     declaredViews: declaredViews(policy.toolsReturn),
     harnesses: HARNESS_LIMITS,
     memory,
     selfCheck: ledgerBroken ? 'broken' : selfCheck(),
+  }
+}
+
+function pinnedServers(home: string): number {
+  try {
+    return readdirSync(join(home, 'mcp-pins')).filter((name) => name.endsWith('.json')).length
+  } catch {
+    // No directory is no pinned server; anything else surfaces when the
+    // gateway reads the pins and stops on them.
+    return 0
   }
 }
 
@@ -492,6 +510,9 @@ function printDoctor(home: string): number {
   // so the state is printed either way, and the price is in the warnings.
   process.stdout.write(
     `exposure (escalation after reading untrusted content): ${report.exposure ? 'on' : 'off in the policy'}\n`,
+  )
+  process.stdout.write(
+    `MCP tool pinning: ${report.mcpPin.on ? `on, ${report.mcpPin.servers} server(s) pinned` : 'off in the policy'}\n`,
   )
   // The default is always named out loud. Whether the hidden layer is
   // stripped from an MCP server's result depends on it, and the human should
@@ -549,6 +570,7 @@ function printDoctor(home: string): number {
  * built on.
  */
 function mcp(args: string[]): Promise<number> | number {
+  if (args[0] === 'approve') return approve(args.slice(1))
   const at = args.indexOf('--')
   const command = at === -1 ? [] : args.slice(at + 1)
   if (command.length === 0 || command[0] === '') {
@@ -569,12 +591,36 @@ function mcp(args: string[]): Promise<number> | number {
 }
 
 /**
+ * `cordon mcp approve -- <server command...>`: the owner has looked at a
+ * server whose tools changed, and its next start pins them afresh.
+ *
+ * The command must be spelled exactly as the host starts it, because that is
+ * what the pins are keyed by. It is a human's command: the gateway never
+ * runs it, and an agent that could run it through a shell is under the
+ * exposure rule like any other exec.
+ */
+function approve(args: string[]): number {
+  const command = args[0] === '--' ? args.slice(1) : []
+  if (command.length === 0 || command[0] === '') {
+    process.stderr.write(`mcp approve needs the server command after --\n${USAGE}\n`)
+    return 2
+  }
+  const server = command.join(' ')
+  if (!Cordon.approveServer(cordonHome(), command)) {
+    process.stdout.write(`no pins for ${server}; spell the command exactly as the host starts it\n`)
+    return 1
+  }
+  process.stdout.write(`approved: ${server} will pin its tools afresh on its next start\n`)
+  return 0
+}
+
+/**
  * The subcommand the harness calls on every event.
  *
- * The exit code is always 0: the decision is delivered as printed JSON, not
- * as a code. The harness would interpret a non-zero code its own way, and the
- * decision we printed would never reach it. Code 2 is reserved for the case
- * where printing JSON failed entirely.
+ * The decision is delivered as printed JSON. On Claude Code a refusal also
+ * leaves with exit 2, which blocks whatever the harness makes of the JSON;
+ * every other answer exits 0. Gemini CLI reads a non-zero code its own way,
+ * so there the code stays 0.
  *
  * Unreadable stdin turns into empty input rather than an exception: runHook
  * answers empty input with a refusal, so the error runs in the right

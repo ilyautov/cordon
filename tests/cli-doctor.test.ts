@@ -294,3 +294,15 @@ describe('doctor: memory written under exposure', () => {
     expect(report.selfCheck).toBe('broken')
   })
 })
+
+describe('doctor: MCP pinning', () => {
+  it('names the pinning state and how many servers are pinned', () => {
+    const dir = home()
+    expect(doctor(dir).mcpPin).toEqual({ on: true, servers: 0 })
+    mkdirSync(join(dir, 'mcp-pins'))
+    writeFileSync(join(dir, 'mcp-pins', 'abc.json'), '{}')
+    expect(doctor(dir).mcpPin).toEqual({ on: true, servers: 1 })
+    writeFileSync(join(dir, 'policy.yaml'), 'mcp:\n  pin: false\n')
+    expect(doctor(dir).mcpPin.on).toBe(false)
+  })
+})

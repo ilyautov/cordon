@@ -197,7 +197,7 @@ export function runGateway(options: GatewayOptions): Promise<number> {
       }
 
       if (entry.method === 'tools/list') {
-        sendToHost(observeToolList(message.value, cordon, options.policy))
+        sendToHost(observeToolList(message.value, cordon, options.policy, options.command))
         return
       }
       if (entry.method === 'tools/call' && entry.call !== undefined) {
@@ -289,9 +289,23 @@ function observeToolList(
   value: Record<string, unknown>,
   cordon: Cordon,
   policy: Policy,
+  command: readonly string[],
 ): Record<string, unknown> {
-  const tools = asRecord(value['result'])?.['tools']
-  if (!Array.isArray(tools)) return value
+  const result = asRecord(value['result'])
+  const listed = result?.['tools']
+  if (result === null || !Array.isArray(listed)) return value
+
+  // Pinned before cleaning: the raw description is what the pin is of. A
+  // held tool leaves the list the host receives, so the model never reads
+  // the changed text; the core refuses a call to it by name. A damaged pin
+  // file throws here, and the gateway stops loudly.
+  const named = listed
+    .map((tool) => asRecord(tool))
+    .filter((tool): tool is Record<string, unknown> => tool !== null && typeof tool['name'] === 'string')
+    .map((tool) => ({ name: tool['name'] as string, description: tool['description'], inputSchema: tool['inputSchema'] }))
+  const held = new Set(cordon.admitTools(command, named).map((tool) => tool.name))
+  const tools = listed.filter((tool) => !held.has(String(asRecord(tool)?.['name'])))
+  value = { ...value, result: { ...result, tools } }
 
   for (const tool of tools) {
     const entry = asRecord(tool)

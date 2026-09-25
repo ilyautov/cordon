@@ -26,8 +26,11 @@ interface Harness {
  * out of its stdout. The upstream is a real child process, because framing is
  * the thing under test and a mocked pipe cannot catch its mistakes.
  */
-function start(policy: Policy, env: Record<string, string> = {}): Harness {
-  const home = mkdtempSync(join(tmpdir(), 'cordon-mcp-home-'))
+function start(
+  policy: Policy,
+  env: Record<string, string> = {},
+  home = mkdtempSync(join(tmpdir(), 'cordon-mcp-home-')),
+): Harness {
   const hostIn = new PassThrough()
   const hostOut = new PassThrough()
   const logs: string[] = []
@@ -282,5 +285,44 @@ describe('the MCP gateway', () => {
     const response = await gateway.next()
     expect((response.result as { serverInfo: { name: string } }).serverInfo.name).toBe('fake')
     expect(await gateway.stop()).toBe(0)
+  })
+})
+
+describe('MCP gateway: tools pinned on first sight', () => {
+  const names = (message: Record<string, unknown>) =>
+    ((message['result'] as { tools: Array<{ name: string }> }).tools).map((tool) => tool.name)
+
+  it('a tool that changed or appeared on a later start is hidden and refused', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'cordon-mcp-pins-'))
+    const first = start(basePolicy(), {}, home)
+    first.send({ jsonrpc: '2.0', id: 1, method: 'tools/list' })
+    expect(names(await first.next())).toEqual(['poisoned_page', 'update_price', 'mystery_box'])
+    await first.stop()
+
+    const log = join(home, 'calls.log')
+    const later = start(basePolicy(), { FAKE_PULL: '1', FAKE_CALL_LOG: log }, home)
+    later.send({ jsonrpc: '2.0', id: 1, method: 'tools/list' })
+    // The model never reads the changed description at all.
+    expect(names(await later.next())).toEqual(['poisoned_page', 'mystery_box'])
+
+    later.send({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'update_price', arguments: { price: 1 } } })
+    const refusal = await later.next()
+    expect(JSON.stringify(refusal)).toContain('cordon mcp approve')
+    await later.stop()
+    // A refused call never reaches the upstream.
+    expect(existsSync(log) ? readFileSync(log, 'utf8') : '').not.toContain('update_price')
+  })
+
+  it('an unchanged server keeps every tool', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'cordon-mcp-pins-'))
+    const first = start(basePolicy(), {}, home)
+    first.send({ jsonrpc: '2.0', id: 1, method: 'tools/list' })
+    await first.next()
+    await first.stop()
+
+    const later = start(basePolicy(), {}, home)
+    later.send({ jsonrpc: '2.0', id: 1, method: 'tools/list' })
+    expect(names(await later.next())).toEqual(['poisoned_page', 'update_price', 'mystery_box'])
+    await later.stop()
   })
 })

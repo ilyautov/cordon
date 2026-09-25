@@ -150,6 +150,20 @@ function validate(parsed: unknown, path: string): Policy {
 
   // The field is read as an own property: the policy file is parsed from
   // outside, and `__proto__` inside it must not look like a setting.
+  if (Object.hasOwn(input, 'mcp')) {
+    const mcp = asObject(input['mcp'], `${path}: mcp`)
+    onlyKnown(mcp, ['pin'], path, 'mcp.')
+    if (Object.hasOwn(mcp, 'pin')) {
+      const pin = mcp['pin']
+      // A silent default here would mean the owner switched pinning off, it
+      // stayed on, and held tools went unexplained — as for exposure.
+      if (typeof pin !== 'boolean') throw new Error(`${path}: mcp.pin must be true or false, not ${String(pin)}`)
+      policy.mcp = { pin }
+    }
+  }
+
+  // The field is read as an own property: the policy file is parsed from
+  // outside, and `__proto__` inside it must not look like a setting.
   if (Object.hasOwn(input, 'output')) {
     const output = asObject(input['output'], `${path}: output`)
     onlyKnown(output, ['footer'], path, 'output.')
@@ -169,7 +183,7 @@ function validate(parsed: unknown, path: string): Policy {
 
 const TOP_LEVEL = [
   'mode', 'profile', 'tools', 'trustedSources', 'toolsReturn',
-  'notify', 'exposure', 'task', 'memory', 'output',
+  'notify', 'exposure', 'task', 'memory', 'mcp', 'output',
 ]
 
 /**

@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll } from 'vitest'
 import { ensureBuiltCli } from './support/built-cli.js'
+import { PinStore } from '../src/session/pins.js'
 import { execFileSync } from 'node:child_process'
 import { writeFileSync, mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -119,5 +120,28 @@ describe('cordon hook', () => {
     const { stdout, status } = run(['hook'], '', homeEnv())
     expect(status).toBe(2)
     expect(JSON.parse(stdout).hookSpecificOutput.permissionDecision).toBe('deny')
+  })
+})
+
+describe('cordon mcp approve', () => {
+  beforeAll(() => {
+    ensureBuiltCli()
+  }, 60_000)
+
+  it('forgets the pins of the named server', () => {
+    const home = mkdtempSync(join(tmpdir(), 'cordon-approve-'))
+    new PinStore(home).save(['npx', 'server-x'], { a: 'h' })
+
+    const { stdout, status } = run(['mcp', 'approve', '--', 'npx', 'server-x'], '', { CORDON_HOME: home })
+    expect(status).toBe(0)
+    expect(stdout).toContain('npx server-x')
+    expect(new PinStore(home).load(['npx', 'server-x'])).toBeNull()
+  })
+
+  it('says so when the server had no pins', () => {
+    const home = mkdtempSync(join(tmpdir(), 'cordon-approve-'))
+    const { stdout, status } = run(['mcp', 'approve', '--', 'npx', 'nothing'], '', { CORDON_HOME: home })
+    expect(status).toBe(1)
+    expect(stdout).toContain('no pins')
   })
 })

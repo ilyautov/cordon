@@ -295,3 +295,21 @@ describe('a key the loader does not know', () => {
     expect(loadPolicy(home).tools['anything_at_all']).toEqual(['read'])
   })
 })
+
+describe('mcp.pin', () => {
+  it('is on by default', () => {
+    expect(loadPolicy(scratch()).mcp.pin).toBe(true)
+  })
+
+  it('can be switched off', () => {
+    const home = scratch()
+    writeFileSync(join(home, 'policy.yaml'), 'mcp:\n  pin: false\n')
+    expect(loadPolicy(home).mcp.pin).toBe(false)
+  })
+
+  it('a value that is not a boolean stops the load', () => {
+    const home = scratch()
+    writeFileSync(join(home, 'policy.yaml'), 'mcp:\n  pin: "no"\n')
+    expect(() => loadPolicy(home)).toThrow(/mcp\.pin must be true or false/u)
+  })
+})

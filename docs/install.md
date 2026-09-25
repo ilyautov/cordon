@@ -128,6 +128,10 @@ memory:
   tools: [mem0_add]
 ```
 
+**`mcp.pin`**: `true` or `false`, default `true`. When it is on, the MCP gateway pins each server's tools the first time it sees them, then hides and refuses any tool that changed or appeared since. See [install-mcp.md](install-mcp.md#tool-pinning).
+
+A key the loader does not know stops the load, whether at the top level or inside `profile`, `notify`, `memory`, `mcp` or `output`. Every field has a default, so a misspelled key used to fall silently to that default. `exposur: false` would have left the rule on, and nothing would have shown it.
+
 ### Example: interactive work on code
 
 ```yaml

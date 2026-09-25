@@ -91,6 +91,15 @@ export interface Policy {
     files: string[]
     tools: string[]
   }
+  mcp: {
+    /**
+     * Whether the MCP gateway pins each server's tools on first sight and
+     * holds back a tool that changed or appeared since. On by default: the
+     * rug pull it answers needs no mistake from the owner at all. A server
+     * whose tools legitimately change is approved with `cordon mcp approve`.
+     */
+    pin: boolean
+  }
   output: {
     /**
      * Whether to append a source-influence footer under the model's answer.
@@ -126,5 +135,6 @@ export const DEFAULT_POLICY: Policy = {
   exposure: true,
   task: null,
   memory: { files: [], tools: [] },
+  mcp: { pin: true },
   output: { footer: true },
 }

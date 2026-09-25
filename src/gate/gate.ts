@@ -36,6 +36,11 @@ export interface GateContext {
    * content vouches for nothing, however it is phrased.
    */
   userAtoms?: readonly string[]
+  /**
+   * MCP tools held back because they changed or appeared after the owner
+   * approved the server. Optional: only the MCP gateway lists tools.
+   */
+  heldTools?: ReadonlyMap<string, { why: 'changed' | 'new'; server: string }>
 }
 
 /**
@@ -64,6 +69,18 @@ function decide(call: ToolCall, ctx: GateContext): Decision {
     return { kind: 'deny', reason: `the arguments of call ${call.tool} did not arrive as an object` }
   }
   const own = args as Record<string, unknown>
+
+  // Before everything else: the model was never shown this tool, so a call
+  // to it came from a description it read elsewhere or a name it guessed.
+  const held = ctx.heldTools?.get(call.tool)
+  if (held !== undefined) {
+    return {
+      kind: 'deny',
+      reason: `the MCP tool ${call.tool} ${held.why === 'new' ? 'appeared' : 'changed'} after the server was approved ` +
+        `(${held.server}); review the server, then run "cordon mcp approve -- ${held.server}"`,
+    }
+  }
+
   const parts = fields(own)
 
   const selfHit = selfProtection(parts, ctx)

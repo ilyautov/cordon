@@ -1,6 +1,7 @@
 import { humanSeesRendered, type Certificate, type ExposureMark, type Decision, type EffectClass, type Source, type ToolCall } from './core/types.js'
 import { gate as decide } from './gate/gate.js'
 import { memoryTarget } from './gate/memory.js'
+import { comparePins, type HeldTool, type ListedTool } from './gate/pins.js'
 import { FileNotifier, SILENT, type Notifier } from './notify/notifier.js'
 import type { Policy } from './policy/defaults.js'
 import { atoms } from './provenance/normalize.js'
@@ -9,6 +10,7 @@ import { sanitize } from './sanitize/index.js'
 import type { Finding } from './sanitize/types.js'
 import { issue, narrow, parseDirective, parseTrustMemory } from './scope/certificate.js'
 import { MemoryLedger, type MemoryEntry } from './session/memory.js'
+import { PinStore } from './session/pins.js'
 import { MAX_USER_ATOMS, SessionStore } from './session/store.js'
 
 export interface Envelope {
@@ -74,6 +76,11 @@ export class Cordon {
    * came from the human, not from the page.
    */
   private userAtoms: string[] = []
+  /**
+   * MCP tools held back in this process. Not persisted: the pins on disk are
+   * the state, and every start of the gateway compares against them afresh.
+   */
+  private heldTools = new Map<string, { why: 'changed' | 'new'; server: string }>()
 
   /** The state key on disk. It comes from the harness, that is, from outside. */
   readonly sessionId: string
@@ -229,6 +236,39 @@ export class Cordon {
     return { text: clean, source, findings, substitute }
   }
 
+  /**
+   * An MCP server's tool list, against the tools its owner approved. Returns
+   * the tools to hold back from the model; calls to them are refused.
+   *
+   * The first listing of a server is pinned as it is. A damaged pin file
+   * throws: read as empty, it would approve whatever the server lists now.
+   */
+  admitTools(command: readonly string[], listed: readonly ListedTool[]): HeldTool[] {
+    if (this.policy.mcp?.pin === false) return []
+    const store = new PinStore(this.cordonHome)
+    const result = comparePins(store.load(command), listed)
+    if (result.firstSight) store.save(command, result.pins)
+
+    const server = command.join(' ')
+    this.heldTools = new Map(result.held.map((tool) => [tool.name, { why: tool.why, server }]))
+    for (const tool of result.held) {
+      this.notifier.notify({
+        at: new Date().toISOString(),
+        decision: 'mcp-drift',
+        tool: tool.name,
+        reason: `the tool ${tool.why === 'new' ? 'appeared' : 'changed'} after ${server} was approved; ` +
+          'it is hidden from the model and refused until "cordon mcp approve"',
+        source: null,
+      })
+    }
+    return result.held
+  }
+
+  /** The owner's approval: the server's next start pins its tools afresh. */
+  static approveServer(cordonHome: string, command: readonly string[]): boolean {
+    return new PinStore(cordonHome).forget(command)
+  }
+
   gate(call: ToolCall): Decision {
     const decision = decide(call, {
       policy: this.policy,
@@ -239,6 +279,7 @@ export class Cordon {
       unredacted: this.unredacted,
       exposure: this.exposure,
       userAtoms: this.userAtoms,
+      heldTools: this.heldTools,
     })
 
     // A rewrite is journaled alongside the refusals, and it is the entry the
