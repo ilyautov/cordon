@@ -4,6 +4,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versions follo
 
 ## [Unreleased]
 
+A read aimed at a record by an identifier an untrusted source supplied now passes while the exposure mark stands. On AgentDojo's slack suite a tool listed channels, the model read `External_0` from the list, and the read was refused as a tainted target. Honest utility with Cordon fell from 96% to 23% there, and this was a large part of it. The relaxation is narrow on purpose. It covers identifiers only: a path, a link or an address can name something the user trusts, a key file, whose content comes back untainted, so those still escalate. The mark must be live, not restored from memory, and `exposure: false` switches the relaxation off along with the rule it leans on. The design was reviewed with an outside model before it was written, and the review is what narrowed it from every target to identifiers.
+
 ## [0.7.0] - 2026-09-26
 
 The release for teams: `cordon audit` before deployment, MCP tool pinning at run time, `cordon init` profiles, `cordon log`, a managed-settings deployment guide, and npm provenance on the published package. Refusals on Claude Code now also leave with exit code 2.

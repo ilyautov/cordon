@@ -150,7 +150,7 @@ function decide(call: ToolCall, ctx: GateContext): Decision {
   // that is, to whatever the attacker uses to aim the action.
   if (!verdict.effects.some((effect) => IRREVERSIBLE.has(effect))) {
     const targets = scan.targets.filter((atom) => !isDate(atom))
-    if (targets.length === 0) {
+    if (targets.length === 0 || identifierReadUnderMark(verdict.effects, targets, ctx)) {
       const exposed = exposedCall(verdict.effects, parts, ctx)
       if (exposed) return escalate(ctx, exposed, ctx.exposure?.source)
       return { kind: 'allow' }
@@ -517,6 +517,46 @@ function normalizePath(path: string): string {
  */
 function samePath(label: string, target: string): boolean {
   return normalizePath(label) === target
+}
+
+/**
+ * A read aimed at a record by an identifier the untrusted source supplied,
+ * while the exposure mark stands.
+ *
+ * AgentDojo's slack suite measured the cost of refusing it: a tool lists
+ * channels, the model reads `External_0` from the list, and the read was
+ * refused as a tainted target — honest utility fell from 96% to 23%.
+ *
+ * Why an identifier and nothing wider: what an identifier names is a record
+ * the same kind of tool serves, and what comes back is untrusted too, so it
+ * is recorded and any later egress of it answers to provenance. A path, a
+ * link or an address can name something the user trusts — `~/.ssh/id_rsa` —
+ * whose content comes back untainted; after the user's next message lifts
+ * the mark, nothing would stop it leaving. Those keep escalating.
+ *
+ * Why only under a live mark: while it stands, every call that could carry
+ * what was read outward escalates anyway. A mark restored from memory is not
+ * a live read in this session, and exposure: false removes the backstop the
+ * argument rests on. Reviewed with an outside model before it was written.
+ */
+function identifierReadUnderMark(
+  effects: readonly EffectClass[],
+  targets: readonly string[],
+  ctx: GateContext,
+): boolean {
+  if (ctx.policy.exposure === false) return false
+  if (ctx.exposure === undefined || ctx.exposure === null || ctx.exposure.memory === true) return false
+  if (!effects.every((effect) => effect === 'read' || effect === 'summarize')) return false
+  return targets.every(isIdentifier)
+}
+
+/**
+ * The identifier class of the atom extractor, and only it: a token of
+ * letters, digits, `_` and `-` with a digit in it. Anything with a slash, a
+ * tilde, a scheme or an `@` is a path, a link or an address.
+ */
+function isIdentifier(atom: string): boolean {
+  return /^[a-z0-9][a-z0-9_-]{7,}$/u.test(atom) && /\d/u.test(atom)
 }
 
 /**

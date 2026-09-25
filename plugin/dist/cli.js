@@ -8230,7 +8230,7 @@ function decide(call, ctx) {
   const blamed = scan.sources.map((source) => source.label).join(", ") || void 0;
   if (!verdict.effects.some((effect) => IRREVERSIBLE.has(effect))) {
     const targets = scan.targets.filter((atom) => !isDate(atom));
-    if (targets.length === 0) {
+    if (targets.length === 0 || identifierReadUnderMark(verdict.effects, targets, ctx)) {
       const exposed = exposedCall(verdict.effects, parts, ctx);
       if (exposed) return escalate(ctx, exposed, ctx.exposure?.source);
       return { kind: "allow" };
@@ -8397,6 +8397,15 @@ function normalizePath(path) {
 }
 function samePath(label, target) {
   return normalizePath(label) === target;
+}
+function identifierReadUnderMark(effects, targets, ctx) {
+  if (ctx.policy.exposure === false) return false;
+  if (ctx.exposure === void 0 || ctx.exposure === null || ctx.exposure.memory === true) return false;
+  if (!effects.every((effect) => effect === "read" || effect === "summarize")) return false;
+  return targets.every(isIdentifier);
+}
+function isIdentifier(atom) {
+  return /^[a-z0-9][a-z0-9_-]{7,}$/u.test(atom) && /\d/u.test(atom);
 }
 function isDate(atom) {
   return /^\d{4}-\d{2}-\d{2}$/u.test(atom) || /^\d{2}[./]\d{2}[./]\d{4}$/u.test(atom);
