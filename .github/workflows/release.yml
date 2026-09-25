@@ -1,0 +1,62 @@
+name: release
+
+# Publishes @ilyautov/cordon to npm when a v* tag is pushed, with a
+# provenance attestation: a signed statement, checkable by anyone with
+# `npm audit signatures`, that the tarball was built from this repository at
+# this commit by this workflow.
+#
+# Cordon sits between an agent and untrusted content, so a compromised
+# release is a silent bypass of the defence for everyone who installs it. A
+# tarball published from a laptop carries no evidence of where it came from;
+# one published here does.
+#
+# One-time setup, before the first tag:
+#   npmjs.com -> @ilyautov/cordon -> Settings -> Trusted publishing ->
+#   GitHub Actions, repository ilyautov/cordon, workflow release.yml.
+# With trusted publishing no token is stored anywhere. Until it is set up,
+# an NPM_TOKEN secret (an automation token) works as well.
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+  # The OIDC token that trusted publishing and provenance are signed with.
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+      # Trusted publishing needs npm 11.5.1 or later.
+      - run: npm install -g npm@11
+      - run: npm ci
+
+      - name: the tag is the version being published
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "tag $GITHUB_REF_NAME does not match package.json version $version" >&2
+            exit 1
+          fi
+
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      - name: the committed bundle is the one the sources build
+        # The plugin runs plugin/dist/cli.js straight from the repository. A
+        # tag whose bundle differs from its sources would ship code nobody
+        # reviewed, so the release stops here instead.
+        run: git diff --exit-code -- plugin/dist/cli.js
+      - run: node scripts/no-invisible.mjs
+
+      - name: publish with provenance
+        run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

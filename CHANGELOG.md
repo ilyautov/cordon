@@ -6,6 +6,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versions follo
 
 A refusal on Claude Code now leaves with exit code 2, the reason on stderr, alongside the JSON on stdout. Exit 2 blocks the call whatever the harness makes of the output; before, the deny rested on the JSON alone, and a harness that could not read it — a version change, a truncated pipe — would have treated the hook as a non-blocking error and let the call through. `ask` and every other answer keep exit 0, and Gemini CLI is unchanged: its protocol reads a non-zero exit differently.
 
+Releases are published from CI with npm provenance (`.github/workflows/release.yml`, triggered by a `v*` tag). The workflow checks that the tag matches the version, runs the four checks, and refuses to publish if the committed bundle differs from what the sources build. CI also runs the suite on Linux and macOS under Node 22 and 24. SECURITY.md explains how to verify an install.
+
 The MCP gateway now also cleans the `description` and `title` strings inside a tool's `inputSchema`, including nested ones. Before, only the top-level description was observed. A property description is read by the model just as much as the tool's own, and scanners that watch only the top level miss it.
 
 A private-use character in the input no longer turns off the guard against mentions of unclosed tags. The stand-in mark used to be fixed, and an input that already contained it was left unmasked. Review found the result: one `\uE000` ahead of an unclosed `<style>` let the raw block swallow everything below it without a word, for example the rest of an email thread. The mark is now chosen per input, from the private-use characters the input does not contain.

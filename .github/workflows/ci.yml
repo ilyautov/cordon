@@ -5,6 +5,27 @@ on:
   pull_request:
 
 jobs:
+  # The hooks run on the developer's machine, so the suite runs where they do:
+  # both supported Node lines on Linux, and macOS, where /tmp is a symbolic
+  # link and path canonicalization has already bitten once.
+  portability:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        node: [22, 24]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: ${{ matrix.node }}
+      - run: npm ci
+      - run: npm run build:lib
+      - name: test
+        timeout-minutes: 8
+        run: npx vitest run
+
   test:
     runs-on: ubuntu-latest
     steps:

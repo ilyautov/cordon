@@ -31,6 +31,13 @@ The full list lives in ["What Cordon does not do"](docs/install.md#what-cordon-d
 * **A false positive.** Unpleasant, but it is an issue, not a vulnerability: the system is designed to refuse in the doubtful case.
 * **An attack on the harness that goes around Cordon.** If the harness allows a tool to be invoked bypassing the interceptor, that is an integration defect. Report it anyway: most likely we have described the coverage level incorrectly.
 
+## Verifying what you installed
+
+A compromised release of a defence mechanism is a silent bypass of it, so the release path is itself part of the attack surface.
+
+* **npm.** Releases are published by [`.github/workflows/release.yml`](.github/workflows/release.yml) with a provenance attestation, which ties the tarball to this repository, the tagged commit and that workflow. Check it with `npm audit signatures` after installing. A version published without an attestation was not built by CI, so treat it as suspect.
+* **The plugin.** Claude Code and Gemini CLI run `plugin/dist/cli.js` straight from the repository. It is committed rather than built at install time, and CI rebuilds it from the sources and fails when the result differs, on every push and before every release. Reviewing a tag therefore means reviewing its sources: the bundle cannot say something they do not.
+
 ## Safe harbour
 
 Good-faith research is welcome. Do not touch other people's data or accounts, do not run load attacks, work on your own copy. Do that and we will have no complaints.
