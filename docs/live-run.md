@@ -89,3 +89,33 @@ Where the harness defers a tool, the schema is fetched through `ToolSearch`, and
 It was one harness, one version, one machine. Gemini CLI has not been run live, and nothing here transfers to it: the events, their names and the shape of a rewrite are all different there. The `MessageDisplay` footer was seen in `--output-format json`; an interactive session renders the same field but that was not separately checked.
 
 Nothing here measures how often the defence is right. It measures that it is wired.
+
+## The MCP gateway, against a real server
+
+Cordon 0.6.0, macOS, 25 September 2026. The gateway ran from the bundled file as `cordon mcp -- npx -y @modelcontextprotocol/server-everything` (the reference server, `mcp-servers/everything 2.0.0`), with its own `CORDON_HOME`. The host was a short script speaking newline-delimited JSON-RPC, not a model: this run measures what the gateway does to real traffic from a real server, not what a model does with the answers.
+
+The policy, autonomous:
+
+```yaml
+profile:
+  effects: [read, summarize, create, network-egress]
+tools:
+  echo: [read]
+  get-sum: [read]
+  gzip-file-as-resource: [create, network-egress]
+toolsReturn:
+  echo: rendered
+```
+
+What came back, in order:
+
+| Call | Result |
+|---|---|
+| `get-env` (undeclared; it prints the server's environment) | `isError: true`, "tool get-env is not declared in the policy". The gateway answered itself; the call never reached the server |
+| `get-sum {a: 2, b: 3}` | passed through, "The sum of 2 and 3 is 5." |
+| `echo` with an HTML comment ordering a call and a `display:none` block | `Echo: <p>Great pan.</p>` — both hidden pieces cut from the server's result before the host saw it |
+| `get-sum {a: 4, b: 5}` after that | passed through: reading stays open under the mark |
+| `gzip-file-as-resource` with an outside URL | `isError: true`, refused by the exposure rule; the journal recorded both refusals |
+
+One thing the run showed that the tests did not: the journal's `source` for the `get-env` refusal named `simulate-research-query`, the last tool description observed in `tools/list`, not anything that had a hand in the call. Tool descriptions are untrusted content and are observed as such, so the label is technically the last untrusted read — and misleading to a human reading the journal. Recorded here rather than silently accepted.
+
