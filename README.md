@@ -15,7 +15,7 @@
 
 **Install:** [Claude Code](docs/install.md) · [Gemini CLI](docs/install-gemini.md) · [MCP hosts](docs/install-mcp.md) · [LangChain](docs/install-langchain.md)
 
-> ⚠️ **Early development, and here is exactly how far it has been proven.** The wiring has been exercised on a live Claude Code session, 2.1.236: all four events fire, the certificate refuses, provenance refuses, the footer is drawn, and argument quarantine is applied by the harness. The record is in [docs/live-run.md](docs/live-run.md). The MCP gateway has been run against a real server (the reference `server-everything`) with a scripted host; the record is in the same file. Gemini CLI and the LangChain middleware **have not been run live**.
+> ⚠️ **Early development, and here is exactly how far it has been proven.** The wiring has been exercised on a live Claude Code session, 2.1.236: all four events fire, the certificate refuses, provenance refuses, the footer is drawn, and argument quarantine is applied by the harness. The record is in [docs/live-run.md](docs/live-run.md). The MCP gateway has been run against a real server (the reference `server-everything`) with a scripted host; the record is in the same file. The LangChain middleware has been run live in a `createAgent` loop on Claude Haiku 4.5, recorded in the same file. Gemini CLI **has not been run live**.
 
 > [Русская версия](README.ru.md)
 

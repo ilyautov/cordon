@@ -123,6 +123,10 @@ describe('gate', () => {
     const decision = gate({ tool: 'wb_edit_card', args: { text: injection } }, ctx)
     expect(decision.kind).toBe('deny')
     expect(decision.kind === 'deny' && decision.reason).toContain('quarantine is impossible')
+    // Measured twice live: a bare "quarantine is impossible" was retold to
+    // the user as "an invalid IBAN" and "a technical issue". The reason says
+    // where the value came from, so the model can say it truthfully.
+    expect(decision.kind === 'deny' && decision.reason).toContain('came from https://evil.example, not from you')
   })
 
   it('the same text passes whole with a reversible class', () => {

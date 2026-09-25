@@ -171,7 +171,7 @@ function decide(call: ToolCall, ctx: GateContext): Decision {
   // works on a whole string argument, and we cannot parse somebody else's
   // argument schema. Hence escalation.
   if (scan.nested) {
-    return escalate(ctx, 'quarantine is impossible: the untrusted fragment sits inside a nested argument', blamed)
+    return escalate(ctx, `quarantine is impossible: the untrusted fragment sits inside a nested argument${origin(blamed)}`, blamed)
   }
 
   // A memory file is the one place a silent cut costs most: the harness
@@ -191,7 +191,7 @@ function decide(call: ToolCall, ctx: GateContext): Decision {
 
   const cleaned = quarantine(own, scan.spans)
   if (!cleaned.possible) {
-    return escalate(ctx, `quarantine is impossible: ${cleaned.reason}`, blamed)
+    return escalate(ctx, `quarantine is impossible: ${cleaned.reason}${origin(blamed)}`, blamed)
   }
 
   return {
@@ -524,6 +524,15 @@ function normalizePath(path: string): string {
  */
 function samePath(label: string, target: string): boolean {
   return normalizePath(label) === target
+}
+
+/**
+ * Where a refused value came from, in words the model can repeat to the user.
+ * Measured twice live: a bare "quarantine is impossible" was retold as "an
+ * invalid IBAN" and as "a technical issue", and the user learned nothing.
+ */
+function origin(blamed: string | undefined): string {
+  return blamed === undefined ? '' : `; the value came from ${blamed}, not from you`
 }
 
 /**

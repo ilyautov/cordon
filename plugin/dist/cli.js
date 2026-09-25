@@ -8239,7 +8239,7 @@ function decide(call, ctx) {
   }
   if (returnsToOrigin(scan.sources, parts, verdict.effects)) return { kind: "allow" };
   if (scan.nested) {
-    return escalate(ctx, "quarantine is impossible: the untrusted fragment sits inside a nested argument", blamed);
+    return escalate(ctx, `quarantine is impossible: the untrusted fragment sits inside a nested argument${origin(blamed)}`, blamed);
   }
   const memory = memoryTarget(call, ctx.policy);
   if (memory !== null) {
@@ -8251,7 +8251,7 @@ function decide(call, ctx) {
   }
   const cleaned = quarantine(own2, scan.spans);
   if (!cleaned.possible) {
-    return escalate(ctx, `quarantine is impossible: ${cleaned.reason}`, blamed);
+    return escalate(ctx, `quarantine is impossible: ${cleaned.reason}${origin(blamed)}`, blamed);
   }
   return {
     kind: "rewrite",
@@ -8399,6 +8399,9 @@ function normalizePath(path) {
 }
 function samePath(label, target) {
   return normalizePath(label) === target;
+}
+function origin(blamed) {
+  return blamed === void 0 ? "" : `; the value came from ${blamed}, not from you`;
 }
 function identifierReadUnderMark(effects, targets, ctx) {
   if (ctx.policy.exposure === false) return false;
@@ -12613,17 +12616,17 @@ function forHuman(text) {
 }
 
 // src/provenance/trust.ts
-function classifySource(origin, policy) {
-  const declared = declaredView(origin.tool, policy);
+function classifySource(origin2, policy) {
+  const declared = declaredView(origin2.tool, policy);
   return {
     // The identifier is computed from the kind and the label and does NOT
     // depend on the declaration: otherwise one and the same source would look
     // like two different ones before and after a policy edit, and the
     // previous turn's provenance would not be found.
-    id: hash(`${origin.kind}|${origin.label}`),
-    kind: origin.kind,
-    label: origin.label,
-    trust: isTrusted(origin, policy) ? "trusted" : "untrusted",
+    id: hash(`${origin2.kind}|${origin2.label}`),
+    kind: origin2.kind,
+    label: origin2.label,
+    trust: isTrusted(origin2, policy) ? "trusted" : "untrusted",
     ...declared === void 0 ? {} : { declaredView: declared }
   };
 }
@@ -12635,9 +12638,9 @@ function declaredView(tool, policy) {
   const declared = table[tool];
   return declared === "rendered" || declared === "source" ? declared : void 0;
 }
-function isTrusted(origin, policy) {
-  if (origin.kind === "user" || origin.kind === "system") return true;
-  const label = origin.label;
+function isTrusted(origin2, policy) {
+  if (origin2.kind === "user" || origin2.kind === "system") return true;
+  const label = origin2.label;
   if (typeof label !== "string" || label === "") return false;
   if (climbs(label)) return false;
   const declared = Array.isArray(policy.trustedSources) ? policy.trustedSources : [];
