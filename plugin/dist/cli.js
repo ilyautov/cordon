@@ -13387,17 +13387,43 @@ function observeToolList(value, cordon, policy, command) {
   value = { ...value, result: { ...result, tools } };
   for (const tool of tools) {
     const entry = asRecord(tool);
-    if (entry === null || typeof entry["description"] !== "string") continue;
+    if (entry === null) continue;
     const name = typeof entry["name"] === "string" ? entry["name"] : "";
     const source = classifySource({ kind: "mcp-description", label: name, tool: name }, policy);
-    const envelope = cordon.observe(entry["description"], source);
-    if (envelope.substitute) {
-      entry["description"] = envelope.text;
-    } else if (envelope.findings.length > 0) {
-      cordon.notice(name, `a hidden layer was found in the description of ${name}; it was not substituted`, source);
-    }
+    if (typeof entry["description"] === "string") observeDescription(entry, "description", name, source, cordon);
+    const schema = asRecord(entry["inputSchema"]);
+    if (schema !== null) observeSchema(schema, name, source, cordon, 0);
   }
   return value;
+}
+var MAX_SCHEMA_DEPTH = 16;
+function observeSchema(node, tool, source, cordon, depth) {
+  if (depth > MAX_SCHEMA_DEPTH) {
+    cordon.markUnredacted();
+    return;
+  }
+  for (const key of Object.keys(node)) {
+    const value = node[key];
+    if ((key === "description" || key === "title") && typeof value === "string") {
+      observeDescription(node, key, tool, source, cordon);
+    } else if (Array.isArray(value)) {
+      for (const item of value) {
+        const child = asRecord(item);
+        if (child !== null) observeSchema(child, tool, source, cordon, depth + 1);
+      }
+    } else {
+      const child = asRecord(value);
+      if (child !== null) observeSchema(child, tool, source, cordon, depth + 1);
+    }
+  }
+}
+function observeDescription(entry, key, tool, source, cordon) {
+  const envelope = cordon.observe(entry[key], source);
+  if (envelope.substitute) {
+    entry[key] = envelope.text;
+  } else if (envelope.findings.length > 0) {
+    cordon.notice(tool, `a hidden layer was found in the description of ${tool}; it was not substituted`, source);
+  }
 }
 function observeToolResult(value, call, cordon, policy) {
   const result = asRecord(value["result"]);

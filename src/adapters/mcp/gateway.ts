@@ -309,17 +309,55 @@ function observeToolList(
 
   for (const tool of tools) {
     const entry = asRecord(tool)
-    if (entry === null || typeof entry['description'] !== 'string') continue
+    if (entry === null) continue
     const name = typeof entry['name'] === 'string' ? entry['name'] : ''
     const source = classifySource({ kind: 'mcp-description', label: name, tool: name }, policy)
-    const envelope = cordon.observe(entry['description'], source)
-    if (envelope.substitute) {
-      entry['description'] = envelope.text
-    } else if (envelope.findings.length > 0) {
-      cordon.notice(name, `a hidden layer was found in the description of ${name}; it was not substituted`, source)
-    }
+    if (typeof entry['description'] === 'string') observeDescription(entry, 'description', name, source, cordon)
+    // Property descriptions are read by the model as much as the tool's own,
+    // and a scanner that looks only at the top level misses them: the
+    // classic place to put the poisoned line once the top level is watched.
+    const schema = asRecord(entry['inputSchema'])
+    if (schema !== null) observeSchema(schema, name, source, cordon, 0)
   }
   return value
+}
+
+/** How deep a schema is walked. Deeper than any real schema, bounded against a hostile one. */
+const MAX_SCHEMA_DEPTH = 16
+
+/**
+ * Every `description` and `title` string inside a JSON Schema, at any depth
+ * up to the bound. A schema deeper than the bound is not trusted to be
+ * clean: the session is marked, as for any content that could not be read.
+ */
+function observeSchema(node: Record<string, unknown>, tool: string, source: Source, cordon: Cordon, depth: number): void {
+  if (depth > MAX_SCHEMA_DEPTH) {
+    cordon.markUnredacted()
+    return
+  }
+  for (const key of Object.keys(node)) {
+    const value = node[key]
+    if ((key === 'description' || key === 'title') && typeof value === 'string') {
+      observeDescription(node, key, tool, source, cordon)
+    } else if (Array.isArray(value)) {
+      for (const item of value) {
+        const child = asRecord(item)
+        if (child !== null) observeSchema(child, tool, source, cordon, depth + 1)
+      }
+    } else {
+      const child = asRecord(value)
+      if (child !== null) observeSchema(child, tool, source, cordon, depth + 1)
+    }
+  }
+}
+
+function observeDescription(entry: Record<string, unknown>, key: string, tool: string, source: Source, cordon: Cordon): void {
+  const envelope = cordon.observe(entry[key] as string, source)
+  if (envelope.substitute) {
+    entry[key] = envelope.text
+  } else if (envelope.findings.length > 0) {
+    cordon.notice(tool, `a hidden layer was found in the description of ${tool}; it was not substituted`, source)
+  }
 }
 
 /**

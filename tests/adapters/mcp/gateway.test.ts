@@ -288,6 +288,22 @@ describe('the MCP gateway', () => {
   })
 })
 
+describe('MCP gateway: descriptions inside the input schema', () => {
+  it('cleans a hidden layer out of property descriptions, nested ones included', async () => {
+    const gateway = start(basePolicy())
+    gateway.send({ jsonrpc: '2.0', id: 1, method: 'tools/list' })
+    const response = await gateway.next()
+    const tools = (response.result as { tools: Array<{ name: string; inputSchema: unknown }> }).tools
+    const schema = JSON.stringify(tools.find((tool) => tool.name === 'mystery_box')!.inputSchema)
+    expect(schema).not.toContain(HIDDEN)
+    expect(schema).not.toContain('\\u200B')
+    expect(schema).not.toContain('\u200B')
+    expect(schema).toContain('What to look for.')
+    expect(schema).toContain('Any word.')
+    expect(await gateway.stop()).toBe(0)
+  })
+})
+
 describe('MCP gateway: tools pinned on first sight', () => {
   const names = (message: Record<string, unknown>) =>
     ((message['result'] as { tools: Array<{ name: string }> }).tools).map((tool) => tool.name)

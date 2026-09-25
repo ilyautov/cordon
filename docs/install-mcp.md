@@ -36,7 +36,7 @@ The `--` separator is mandatory: without it the server's flags would be read as 
 
 | MCP message | What the gateway does |
 |---|---|
-| `tools/list` (response) | tools are compared against the pins for this server (below), and a changed or new tool is removed from the list; every remaining description is observed as untrusted content, and the hidden layer is cut before the model sees the list (tool poisoning lives exactly there) |
+| `tools/list` (response) | tools are compared against the pins for this server (below), and a changed or new tool is removed from the list; every remaining description is observed as untrusted content, and so is every `description` and `title` inside the tool's `inputSchema`, at any depth up to 16 levels (a deeper schema marks the session). Strings in `default`, `enum` and `examples` are not observed. and the hidden layer is cut before the model sees the list (tool poisoning lives exactly there) |
 | `tools/call` (request) | the call goes through the gate: allow passes it to the server, rewrite forwards it with the untrusted fragment cut out of the arguments, deny never reaches the server at all — the model gets a `CallToolResult` with `isError: true` and the reason |
 | `tools/call` (response) | text blocks are observed and substituted with the cleaned text; a block without text (an image, audio) cannot be cleaned, so the session is marked and the next consequential call escalates |
 | `resources/read`, `prompts/get` (responses) | the text is observed the same way; `prompts/get` is the classic vector — the server writes what lands in the conversation as if it were the user's own words |

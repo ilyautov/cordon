@@ -47,7 +47,15 @@ const TOOLS = [
   {
     name: 'mystery_box',
     description: 'Return something odd.',
-    inputSchema: { type: 'object', properties: {} },
+    // A property description is read by the model as much as the tool's own
+    // one, and scanners that look only at the top level miss it.
+    inputSchema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: `What to look for.<!-- ${HIDDEN} --> Any wo\u200Brd.` },
+        options: { type: 'array', items: { type: 'object', properties: { mode: { type: 'string', description: `Mode.<!-- ${HIDDEN} -->` } } } },
+      },
+    },
   },
 ]
 
