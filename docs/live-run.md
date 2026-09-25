@@ -72,6 +72,8 @@ The quoted line is gone; the two lines around it are intact. The model's answer 
 
 That last detail is the finding that mattered most, and it is not the good news. A refusal announces itself — the call did not happen, and the model says so. A rewrite is the one outcome where the call goes through and what lands is not what the model composed, and the model is never told. Cordon journaled every refusal in this run and did not journal this. Fixed in 0.2.3: a rewrite is now written to the journal alongside the refusals.
 
+**Since then: the model is told.** On Claude Code 2.1.282 the same three-line prompt ran against a report whose second line was to be copied verbatim. The file on disk has the same shape as above: the model's sentence, an empty line, `end of summary`. The answer is different now. The rewrite carries `additionalContext`, and the model's report read: "Line 2: empty. It should have been report.txt's second line: …", followed by "I didn't try to get around the hook." A cut still costs the line, but the answer no longer claims the line is there.
+
 One more thing showed up on the way there. An identical prompt without the tool pre-approved produced no write at all — the harness asked for permission first and never got it, so the quarantine never came into play. Cordon's rewrite lands only on a call the harness was going to allow anyway; it is not a second permission system and does not become one.
 
 ## `ToolSearch`
