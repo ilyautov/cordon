@@ -12889,7 +12889,10 @@ function deny(reason) {
 
 // src/adapters/claude-code/main.ts
 function cordonHome() {
-  return process.env.CORDON_HOME ?? join8(homedir4(), ".cordon");
+  const set = process.env.CORDON_HOME;
+  if (set === void 0) return join8(homedir4(), ".cordon");
+  if (set === "~" || set.startsWith("~/")) return join8(homedir4(), set.slice(1));
+  return set;
 }
 function runHook(stdin, home = cordonHome()) {
   let event;
@@ -13561,6 +13564,7 @@ var CODES = {
   CA204: { severity: "low", owasp: "LLM01 Prompt Injection", title: "a remote MCP server the stdio gateway cannot cover" },
   CA301: { severity: "medium", owasp: "LLM03 Supply Chain", title: "a hook defined in the project's own settings" },
   CA303: { severity: "high", owasp: "LLM03 Supply Chain", title: "the project sets environment that steers Cordon or the hook process" },
+  CA304: { severity: "high", owasp: "LLM03 Supply Chain", title: "the project switches hooks or the Cordon plugin off" },
   CA302: { severity: "low", owasp: "LLM01 Prompt Injection", title: "Claude Code runs without Cordon" },
   CA901: { severity: "medium", owasp: "LLM03 Supply Chain", title: "a configuration file that could not be read" }
 };
@@ -13711,6 +13715,16 @@ function steeringEnv(env, file, add) {
     if (STEERING.test(key)) add("CA303", file, `env.${key} is set by the project; it reaches the hook processes that enforce the policy`, key);
   }
 }
+function switchedOff(settings, file, add) {
+  if (!isRecord3(settings)) return;
+  if (settings["disableAllHooks"] === true) add("CA304", file, "disableAllHooks: true silences every hook that is not managed, Cordon's included");
+  const plugins = settings["enabledPlugins"];
+  if (isRecord3(plugins)) {
+    for (const [name, on] of Object.entries(plugins)) {
+      if (name.startsWith("cordon@") && on === false) add("CA304", file, `enabledPlugins disables ${name} for everyone who opens the project`, name);
+    }
+  }
+}
 function isGateway(words) {
   const at = words.indexOf("--");
   if (at === -1) return false;
@@ -13768,6 +13782,7 @@ function hookFindings(options, add) {
     }
     if (hasCordonPlugin(settings2)) cordonSeen = true;
     steeringEnv(isRecord3(settings2) ? settings2["env"] : void 0, name, add);
+    switchedOff(settings2, name, add);
   }
   const userSettings = join11(options.home, ".claude", "settings.json");
   if (!isFile(userSettings)) return;

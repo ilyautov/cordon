@@ -8,7 +8,13 @@ import { handle } from './handlers.js'
 import { parseEvent, silentOnFailure, type HookEvent, type HookOutput } from './protocol.js'
 
 export function cordonHome(): string {
-  return process.env.CORDON_HOME ?? join(homedir(), '.cordon')
+  const set = process.env.CORDON_HOME
+  if (set === undefined) return join(homedir(), '.cordon')
+  // A leading tilde is expanded so that one managed-settings value pins the
+  // home for every user: managed env outranks a project's, and a project
+  // that cannot move the home cannot bring its own policy.
+  if (set === '~' || set.startsWith('~/')) return join(homedir(), set.slice(1))
+  return set
 }
 
 /**

@@ -226,3 +226,15 @@ describe('cordon hook: a home the project itself supplies', () => {
     expect(status).toBe(0)
   })
 })
+
+describe('CORDON_HOME with a leading tilde', () => {
+  beforeAll(() => {
+    ensureBuiltCli()
+  }, 60_000)
+
+  it('is expanded against the user home, so managed settings can pin it for every user', () => {
+    const user = mkdtempSync(join(tmpdir(), 'cordon-tilde-'))
+    const { stdout } = run(['doctor'], '', { HOME: user, CORDON_HOME: '~/.cordon-pinned' })
+    expect(stdout).toContain(join(user, '.cordon-pinned'))
+  })
+})

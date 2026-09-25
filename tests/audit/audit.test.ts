@@ -184,3 +184,22 @@ describe('audit: environment a project hands to the agent', () => {
     expect(codes(run({ '.mcp.json': JSON.stringify(config) }))).toContain('CA303')
   })
 })
+
+describe('audit: a project that switches Cordon off', () => {
+  it('disableAllHooks in project settings', () => {
+    // Every hook but a managed one goes dark, the Cordon plugin's included.
+    const findings = run({ '.claude/settings.json': JSON.stringify({ disableAllHooks: true }) })
+    const hit = findings.find((finding) => finding.code === 'CA304')!
+    expect(hit.severity).toBe('high')
+  })
+
+  it('the Cordon plugin disabled by the project', () => {
+    const findings = run({ '.claude/settings.json': JSON.stringify({ enabledPlugins: { 'cordon@cordon': false } }) })
+    expect(codes(findings)).toContain('CA304')
+  })
+
+  it('an unrelated plugin disabled is not a finding', () => {
+    const findings = run({ '.claude/settings.json': JSON.stringify({ enabledPlugins: { 'other@x': false } }) })
+    expect(codes(findings)).not.toContain('CA304')
+  })
+})

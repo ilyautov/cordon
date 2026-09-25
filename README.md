@@ -11,7 +11,7 @@
 - **Core** plus adapters for **Claude Code** and **Gemini CLI**, a gateway for **MCP hosts**, middleware for **LangChain** agents.
 - Hidden-layer neutralization, provenance of untrusted data, an intent certificate, an action gate that also answers the fact of reading untrusted content, a source-influence footer under the model's answer, and packaging that intercepts four harness events.
 
-**Measured:** 1139 tests · 18 pinned attack vectors · 7 legitimate documents · 2 runtime dependencies.
+**Measured:** 1143 tests · 18 pinned attack vectors · 7 legitimate documents · 2 runtime dependencies.
 
 **Install:** [Claude Code](docs/install.md) · [Gemini CLI](docs/install-gemini.md) · [MCP hosts](docs/install-mcp.md) · [LangChain](docs/install-langchain.md)
 
@@ -163,6 +163,8 @@ node dist/cli.js scan README.md
 ```
 
 Node 22 or newer is required. No keys, tokens or network access: there is not a single network request and not a single model call in the hot path, by construction.
+
+For a whole organization, deploy the hooks through Claude Code managed settings, so a repository cannot switch them off. The page is [docs/enterprise.md](docs/enterprise.md). It covers the managed settings file, pinning the environment, verification, shipping the audit log to a SIEM, and measured hook latency.
 
 ## What this is NOT
 
