@@ -10582,7 +10582,7 @@ var Parser = class {
 
 // src/sanitize/hidden-html.ts
 var HIDDEN_STYLE = /(display\s*:\s*none|visibility\s*:\s*hidden|font-size\s*:\s*0(?!\.[1-9])|opacity\s*:\s*0(?!\.[1-9]))/i;
-var OFFSCREEN_STYLE = /(text-indent\s*:\s*-\d{3,}|(?:left|top|right|bottom|margin-left|margin-top)\s*:\s*-\d{4,}|clip\s*:\s*rect\(\s*0|clip-path\s*:\s*inset\(\s*100%)/i;
+var OFFSCREEN_STYLE = /(text-indent\s*:\s*-\d{3,}|(?:left|top|right|bottom|margin-left|margin-top)\s*:\s*-\d{4,}|clip\s*:\s*rect\(\s*(?:[01](?:px)?[\s,]*){4}\)|clip-path\s*:\s*inset\(\s*(?:(?:[5-9]\d(?:\.\d+)?|100)%\s*){1,4}\))/i;
 var DROP_TAGS = /* @__PURE__ */ new Set(["SCRIPT", "STYLE", "META", "NOSCRIPT", "TEMPLATE"]);
 var RAW_TEXT_TAGS = /* @__PURE__ */ new Set(["SCRIPT", "STYLE", "NOSCRIPT", "TEMPLATE"]);
 function mentionMark(source) {

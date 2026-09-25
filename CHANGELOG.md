@@ -6,6 +6,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versions follo
 
 A refusal on Claude Code now leaves with exit code 2, the reason on stderr, alongside the JSON on stdout. Exit 2 blocks the call whatever the harness makes of the output; before, the deny rested on the JSON alone, and a harness that could not read it — a version change, a truncated pipe — would have treated the hook as a non-blocking error and let the call through. `ask` and every other answer keep exit 0, and Gemini CLI is unchanged: its protocol reads a non-zero exit differently.
 
+The clip patterns in the hidden-layer module now require a box that leaves nothing visible. The old `clip:rect(0…` pattern ate a banner cropped in plain view, `rect(0px, 640px, 360px, 0px)`, and missed the classic `rect(1px,1px,1px,1px)` screen-reader recipe. `clip-path:inset()` used to match only at 100%, and the battery measured 99% walking through. Now a rectangle with every side at 0 or 1px and an inset of 50% or more on every value count as hidden. Both samples are pinned in the attack corpus, which grows from 18 to 20. The loyalty corpus gains a page of visible crops, growing from 7 to 8. The battery's profile without the exposure rule drops from 81% to 74%, because sanitize now strips both rows.
+
 `cordon init --profile locked|research|documents|coding` writes a commented starting policy. No profile grants the irreversible classes, the widened profiles are interactive, and an existing policy is never overwritten without `--force`.
 
 `notify.file` now expands a leading `~` and refuses a relative path. The quickstart's own `~/.cordon/events.jsonl` used to land in a directory literally named `~` inside whatever project the agent ran in. The owner found no journal where they looked, and the journal was one `git add .` away from the repository.
@@ -28,7 +30,7 @@ A shell command that names a memory file is recorded in the memory ledger. Revie
 
 On Claude Code in autonomous mode, an argument quarantine is no longer silent. The model gets `additionalContext` saying what was cut and that the result is incomplete, and the human gets a `systemMessage` in the transcript. On a live run, a page summary was written with a sentence missing while the model reported the whole text saved. The cut was right, but the silence left a damaged file behind a confident answer. The text is Cordon's own: the reason and the argument names, never the fragment.
 
-The adversarial battery now fails the suite when an attack its spec expects to be stopped gets through. Before, the battery was green whatever the rate did, so a closed attack could reopen with CI still green. The report's main chart is computed from the run instead of quoted by hand. It had drifted to 79% → 7% under a table reading 80% → 6%. A third memory scenario, a note appended through the shell, brings the working profile to 81% → 6% over 33 attacks.
+The adversarial battery now fails the suite when an attack its spec expects to be stopped gets through. Before, the battery was green whatever the rate did, so a closed attack could reopen with CI still green. The report's main chart is computed from the run instead of quoted by hand. It had drifted to 79% → 7% under a table reading 80% → 6%. A third memory scenario, a note appended through the shell, brings the working profile to 81% → 6% over 33 attacks (74% → 6% after the clip fix below).
 
 The README states what the certificate is: the policy profile, narrowed by an explicit `cordon: scope` line. The meaning of a free-form request is not interpreted.
 

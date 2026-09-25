@@ -5,13 +5,20 @@ const HIDDEN_STYLE =
   /(display\s*:\s*none|visibility\s*:\s*hidden|font-size\s*:\s*0(?!\.[1-9])|opacity\s*:\s*0(?!\.[1-9]))/i
 
 /**
- * Moving off-screen and clipping to zero: the .sr-only recipe rewritten as an
- * inline style. The thresholds are deliberately large (hundreds for text
+ * Moving off-screen and clipping to nothing: the .sr-only recipe rewritten as
+ * an inline style. The thresholds are deliberately large (hundreds for text
  * indent, thousands for offsets): small negative shifts like margin-left:-2px
  * are ordinary layout and must not be caught.
+ *
+ * A clip counts only when it leaves nothing visible. `rect()` with every side
+ * at 0 or 1px — the pattern once matched any rect starting at 0, and so ate
+ * `rect(0px, 640px, 360px, 0px)`, a banner cropped in plain view, while
+ * missing the classic `rect(1px,1px,1px,1px)`. `inset()` with every value at
+ * 50% or more, which meets in the middle — the pattern once knew only 100%,
+ * and the battery measured 99% walking through.
  */
 const OFFSCREEN_STYLE =
-  /(text-indent\s*:\s*-\d{3,}|(?:left|top|right|bottom|margin-left|margin-top)\s*:\s*-\d{4,}|clip\s*:\s*rect\(\s*0|clip-path\s*:\s*inset\(\s*100%)/i
+  /(text-indent\s*:\s*-\d{3,}|(?:left|top|right|bottom|margin-left|margin-top)\s*:\s*-\d{4,}|clip\s*:\s*rect\(\s*(?:[01](?:px)?[\s,]*){4}\)|clip-path\s*:\s*inset\(\s*(?:(?:[5-9]\d(?:\.\d+)?|100)%\s*){1,4}\))/i
 
 const DROP_TAGS = new Set(['SCRIPT', 'STYLE', 'META', 'NOSCRIPT', 'TEMPLATE'])
 

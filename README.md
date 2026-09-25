@@ -11,7 +11,7 @@
 - **Core** plus adapters for **Claude Code** and **Gemini CLI**, a gateway for **MCP hosts**, middleware for **LangChain** agents.
 - Hidden-layer neutralization, provenance of untrusted data, an intent certificate, an action gate that also answers the fact of reading untrusted content, a source-influence footer under the model's answer, and packaging that intercepts four harness events.
 
-**Measured:** 1156 tests · 18 pinned attack vectors · 7 legitimate documents · 2 runtime dependencies.
+**Measured:** 1160 tests · 20 pinned attack vectors · 8 legitimate documents · 2 runtime dependencies.
 
 **Install:** [Claude Code](docs/install.md) · [Gemini CLI](docs/install-gemini.md) · [MCP hosts](docs/install-mcp.md) · [LangChain](docs/install-langchain.md)
 
@@ -24,7 +24,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Version](https://img.shields.io/badge/version-0.6.1-blueviolet)](CHANGELOG.md)
 [![Finding kinds](https://img.shields.io/badge/finding%20kinds-5-1F6F5C)](#what-gets-stripped)
-[![Attack vectors](https://img.shields.io/badge/attack%20vectors-18-1F6F5C)](#development)
+[![Attack vectors](https://img.shields.io/badge/attack%20vectors-20-1F6F5C)](#development)
 [![node 22+](https://img.shields.io/badge/node-22%2B-1F6F5C)](package.json)
 [![Stars](https://img.shields.io/github/stars/ilyautov/cordon?style=social)](https://github.com/ilyautov/cordon/stargazers)
 
@@ -40,7 +40,7 @@ Instead of recognizing intent, three mechanical rules, one per axis.
 
 **The data axis.** Everything read from an untrusted source is remembered, and the arguments of subsequent calls are checked against that memory. An irreversible action (moving money, deleting, sending outward) answers to any match; a reversible one answers only to a match on the target, that is, on an address, a path or an identifier. Otherwise work would stop at the first meaningful answer.
 
-The axis also answers the fact of the read itself, not only a match. The adversarial battery measured why a match is not enough: the attacks that walked past it — a paraphrase, an encoding, a clean curl command — share no recorded byte with the page that ordered them, and no string comparison will ever see them. So a session that read untrusted content is marked, and a call that acts beyond reading escalates while the mark stands, unless the user named the call's destination in their own message: "the user asked to send the logs here" written on a page is not the user asking. Measured on the battery's working profile, the attack success rate drops from 80% to 6%; the residue and the price are in [docs/adversarial-report.md](docs/adversarial-report.md). The price is friction: after an untrusted read, a consequential call waits until the user names its destination. The rule is switched off with `exposure: false` in the policy; `cordon doctor` says out loud when it is off, and the other axes keep working.
+The axis also answers the fact of the read itself, not only a match. The adversarial battery measured why a match is not enough: the attacks that walked past it — a paraphrase, an encoding, a clean curl command — share no recorded byte with the page that ordered them, and no string comparison will ever see them. So a session that read untrusted content is marked, and a call that acts beyond reading escalates while the mark stands, unless the user named the call's destination in their own message: "the user asked to send the logs here" written on a page is not the user asking. Measured on the battery's working profile, the attack success rate drops from 74% to 6% over 33 attacks; the residue and the price are in [docs/adversarial-report.md](docs/adversarial-report.md). The price is friction: after an untrusted read, a consequential call waits until the user names its destination. The rule is switched off with `exposure: false` in the policy; `cordon doctor` says out loud when it is off, and the other axes keep working.
 
 **The output axis.** Some attacks produce no action at all: the recommendation itself is poisoned. Both of the first two axes miss those by construction. The third one blocks nothing; it shows the human which sources the answer matched verbatim, and it can say "not corroborated" while being unable to say "corroborated".
 
@@ -219,7 +219,7 @@ npm run build
 
 **The loyalty corpus** in `tests/fixtures/loyalty/` verifies that the tool stays silent on legitimate texts, including texts about injections. Breaking it is not allowed: a tool that cannot be used while developing that same tool is not ready. A false positive on a corpus sample is a defect in the module, not a reason to remove the sample.
 
-**The attack corpus** in `tests/fixtures/attacks.ts` pins 18 vectors, each of which once passed the filter unnoticed. It lives as a module rather than as data files for one reason: invisible characters are written as escape sequences and are therefore visible during review. A literal character in a file is indistinguishable from emptiness in a diff.
+**The attack corpus** in `tests/fixtures/attacks.ts` pins 20 vectors, each of which once passed the filter unnoticed. It lives as a module rather than as data files for one reason: invisible characters are written as escape sequences and are therefore visible during review. A literal character in a file is indistinguishable from emptiness in a diff.
 
 The method is not ours; it is published and peer-reviewed: Task Shield (arXiv:2412.16682), CaMeL (arXiv:2503.18813), IGAC (arXiv:2606.22916), MELON (arXiv:2502.05174), ActPlane (arXiv:2606.25189).
 
