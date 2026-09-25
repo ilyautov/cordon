@@ -36,7 +36,7 @@ The `--` separator is mandatory: without it the server's flags would be read as 
 
 | MCP message | What the gateway does |
 |---|---|
-| `tools/list` (response) | tools are compared against the pins for this server (below), and a changed or new tool is removed from the list; every remaining description is observed as untrusted content, and so is every `description` and `title` inside the tool's `inputSchema`, at any depth up to 16 levels (a deeper schema marks the session). Strings in `default`, `enum` and `examples` are not observed. and the hidden layer is cut before the model sees the list (tool poisoning lives exactly there) |
+| `tools/list` (response) | tools are compared against the pins for this server (below), and a changed or new tool is removed from the list; every remaining description is observed as untrusted content, and so is every `description` and `title` inside the tool's `inputSchema`, at any depth up to 16 levels (a deeper schema marks the session). Strings in `default`, `enum` and `examples` are not observed. The hidden layer is cut before the model sees the list, because tool poisoning lives exactly there |
 | `tools/call` (request) | the call goes through the gate: allow passes it to the server, rewrite forwards it with the untrusted fragment cut out of the arguments, deny never reaches the server at all — the model gets a `CallToolResult` with `isError: true` and the reason |
 | `tools/call` (response) | text blocks are observed and substituted with the cleaned text; a block without text (an image, audio) cannot be cleaned, so the session is marked and the next consequential call escalates |
 | `resources/read`, `prompts/get` (responses) | the text is observed the same way; `prompts/get` is the classic vector — the server writes what lands in the conversation as if it were the user's own words |
@@ -80,7 +80,9 @@ There are no user turns over MCP: the model's conversation with the human happen
 task: change the price of item 99887766 to the seasonal one
 ```
 
-Atoms — links, paths, identifiers — are extracted from the task text by the same function that extracts them from user messages, and the exemption compares a call's targets against them. Without a `task`, every consequential call under the exposure mark escalates, which is the honest default for a run nobody described. A non-string `task` is a load error, not a silent default.
+Atoms — links, paths, identifiers — are extracted from the task text by the same function that extracts them from user messages, and the exemption compares a call's targets against them. Without a `task`, every consequential call under the exposure mark escalates, which is the honest default for a run nobody described.
+
+In practice the mark is set before the first call. Tool descriptions are untrusted text the model reads, and poisoned descriptions are usually plain visible text, not a hidden layer. So the first `tools/list` marks the session. Through the gateway, a write, a send or a shell call is therefore always a question in interactive mode and a refusal in autonomous mode, unless `task` names its target. That is the price of the transport, and it is deliberate. A description is where the server's author speaks to your model, and pinning makes it stable, not trustworthy. A non-string `task` is a load error, not a silent default.
 
 `toolsReturn` works as everywhere else: an MCP tool's result is treated as source by default (the hidden layer is not stripped, the finding is named in the journal), and `toolsReturn: <tool>: rendered` switches stripping on for the tools whose output the human sees rendered.
 
