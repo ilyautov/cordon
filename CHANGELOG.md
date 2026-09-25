@@ -2,7 +2,7 @@
 
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versions follow [SemVer](https://semver.org/).
 
-## [Unreleased]
+## [0.6.1] - 2026-09-26
 
 The journal names the source a decision turned on. A provenance refusal or a quarantine rewrite names the page the argument's target came from, and an exposure refusal names the read that set the mark, instead of whichever page happened to be read last. MCP tool descriptions no longer fill the fallback: the live gateway run showed a certificate refusal blamed on the last description in `tools/list`, an arbitrary name. The field is carried on the decision for the journal only and never reaches a harness.
 
