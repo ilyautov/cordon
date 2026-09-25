@@ -53,7 +53,6 @@ export function issue(policy: Policy, turn: number): Certificate {
       hosts: strings((bounds as { hosts?: unknown })?.hosts),
     },
     issuedAtTurn: turn,
-    expiresAtTurn: null,
     origin: 'profile',
   }
 }
@@ -82,10 +81,7 @@ export interface Coverage {
   reason: string
 }
 
-export function covers(cert: Certificate, effects: readonly EffectClass[], turn: number): Coverage {
-  if (cert.expiresAtTurn !== null && turn >= cert.expiresAtTurn) {
-    return { ok: false, missing: [...effects], reason: 'the certificate has expired' }
-  }
+export function covers(cert: Certificate, effects: readonly EffectClass[]): Coverage {
   // A call for which not a single effect class could be determined is covered
   // by nothing. Otherwise an unknown MCP tool would pass more freely than a
   // known one, and fail-closed would turn into fail-open.

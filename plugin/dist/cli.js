@@ -8052,7 +8052,6 @@ function issue(policy, turn) {
       hosts: strings(bounds?.hosts)
     },
     issuedAtTurn: turn,
-    expiresAtTurn: null,
     origin: "profile"
   };
 }
@@ -8065,10 +8064,7 @@ function narrow(cert, requested) {
   }
   return { ...cert, effects: kept, origin: "narrowed" };
 }
-function covers(cert, effects, turn) {
-  if (cert.expiresAtTurn !== null && turn >= cert.expiresAtTurn) {
-    return { ok: false, missing: [...effects], reason: "the certificate has expired" };
-  }
+function covers(cert, effects) {
   if (effects.length === 0) {
     return { ok: false, missing: [], reason: "the effect class is undetermined" };
   }
@@ -8213,7 +8209,7 @@ function decide(call, ctx) {
   if (!verdict.classified) {
     return escalate(ctx, verdict.reason);
   }
-  const coverage = covers(ctx.cert, verdict.effects, ctx.turn);
+  const coverage = covers(ctx.cert, verdict.effects);
   if (!coverage.ok) {
     return escalate(ctx, coverage.reason);
   }

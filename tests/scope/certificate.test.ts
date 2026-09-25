@@ -80,32 +80,26 @@ describe('covers', () => {
   const cert = issue(POLICY, 0)
 
   it('covers its own classes', () => {
-    expect(covers(cert, ['read', 'create'], 0).ok).toBe(true)
+    expect(covers(cert, ['read', 'create']).ok).toBe(true)
   })
 
   it('does not cover a class that is not its own', () => {
-    const verdict = covers(cert, ['update', 'financial'], 0)
+    const verdict = covers(cert, ['update', 'financial'])
     expect(verdict.ok).toBe(false)
     expect(verdict.missing).toEqual(['update', 'financial'])
   })
 
   it('an empty effect list is never covered', () => {
-    expect(covers(cert, [], 0).ok).toBe(false)
-  })
-
-  it('an expired certificate covers nothing', () => {
-    const expiring = { ...cert, expiresAtTurn: 2 }
-    expect(covers(expiring, ['read'], 1).ok).toBe(true)
-    expect(covers(expiring, ['read'], 3).ok).toBe(false)
+    expect(covers(cert, []).ok).toBe(false)
   })
 
   it('a broken certificate covers nothing', () => {
     const broken = { ...cert, effects: 'read' as unknown as EffectClass[] }
-    expect(covers(broken, ['read'], 0).ok).toBe(false)
+    expect(covers(broken, ['read']).ok).toBe(false)
   })
 
   it('a class from the object prototype is not covered', () => {
-    expect(covers(cert, ['toString'] as unknown as EffectClass[], 0).ok).toBe(false)
+    expect(covers(cert, ['toString'] as unknown as EffectClass[]).ok).toBe(false)
   })
 })
 

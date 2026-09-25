@@ -112,7 +112,7 @@ function decide(call: ToolCall, ctx: GateContext): Decision {
     return escalate(ctx, verdict.reason)
   }
 
-  const coverage = covers(ctx.cert, verdict.effects, ctx.turn)
+  const coverage = covers(ctx.cert, verdict.effects)
   if (!coverage.ok) {
     return escalate(ctx, coverage.reason)
   }

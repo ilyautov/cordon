@@ -201,7 +201,7 @@ function mechanismOf(reason: string): string {
   if (/read untrusted content/u.test(reason)) return 'exposure'
   if (/self-protection/u.test(reason)) return 'self-protection'
   if (/outside the certificate's boundaries/u.test(reason)) return 'certificate-bounds'
-  if (/outside the certificate|not declared in the policy|certificate has expired/u.test(reason)) {
+  if (/outside the certificate|not declared in the policy/u.test(reason)) {
     return 'certificate'
   }
   if (/quarantine|untrusted fragment|target from an untrusted source/u.test(reason)) return 'provenance'

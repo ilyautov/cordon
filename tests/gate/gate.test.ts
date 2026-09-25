@@ -289,14 +289,6 @@ describe('adversarial: ways to get an action past the gate', () => {
     expect(gate({ tool: 'Write', args: { file_path: 12345 } }, ctx).kind).toBe('allow')
   })
 
-  it('9. an expired certificate', () => {
-    const ctx = setup({ mode: 'autonomous' })
-    ctx.cert = { ...ctx.cert, expiresAtTurn: 1 }
-    const decision = gate({ tool: 'wb_reply', args: { text: 'thanks' } }, ctx)
-    expect(decision.kind).toBe('deny')
-    expect(decision.kind === 'deny' && decision.reason).toContain('expired')
-  })
-
   it('10. an attempt to narrow the certificate with untrusted text', () => {
     const ctx = setup({ mode: 'autonomous' })
     // A directive from a review. Even if the adapter errs and feeds it here,

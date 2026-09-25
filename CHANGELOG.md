@@ -14,6 +14,8 @@ A read aimed at a record by an identifier an untrusted source supplied now passe
 
 The claim that the adapters hold no security logic is now measured. `tests/adversarial/transports.test.ts` sends the same nine scenarios through Claude Code, Gemini CLI, the MCP gateway and the LangChain middleware, each in its own shape: hook events for the two harnesses, JSON-RPC through a real upstream process for the gateway, a real `createAgent` loop on a scripted model for LangChain. It compares three things with Claude Code: whether a result's hidden layer reached the model, whether the reads went through, and what happened to the final call, down to the refusal's reason. The scenarios cover a call outside the certificate, destinations named by the user, by the page and by the hidden layer only, a destination nobody named after an untrusted read, an identifier from the page, and page text copied into a message. All four agree on all nine. The reference outcomes are written down too, so the four cannot pass by being wrong the same way. Dropping the MCP server context from the Gemini driver turns seven of the rows red.
 
+The certificate no longer carries `expiresAtTurn`. It was always `null`: the certificate is reissued from the policy at every user turn, so nothing ever set an expiry, and the check that read it could not fire. Code in the decision path that cannot run is still code a reviewer has to read and trust.
+
 ## [0.7.0] - 2026-09-26
 
 The release for teams: `cordon audit` before deployment, MCP tool pinning at run time, `cordon init` profiles, `cordon log`, a managed-settings deployment guide, and npm provenance on the published package. Refusals on Claude Code now also leave with exit code 2.

@@ -38,8 +38,6 @@ export interface Certificate {
   effects: EffectClass[]
   resources: ResourceBounds
   issuedAtTurn: number
-  /** null means "until the end of the session". */
-  expiresAtTurn: number | null
   /** profile — straight from the policy; narrowed — narrowed by a user directive. */
   origin: 'profile' | 'narrowed'
 }
