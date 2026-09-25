@@ -1,4 +1,4 @@
-export const VERSION = '0.0.0'
+export const VERSION = '0.6.0'
 export { sanitize } from './sanitize/index.js'
 export type { Finding, FindingKind, SanitizeResult } from './sanitize/types.js'
 export { Cordon, type CordonOptions, type Envelope } from './cordon.js'

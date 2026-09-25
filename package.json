@@ -1,6 +1,6 @@
 {
-  "name": "cordon",
-  "version": "0.5.0",
+  "name": "@ilyautov/cordon",
+  "version": "0.6.0",
   "description": "A deterministic layer between untrusted content and agent actions: it removes the hidden layer, remembers where data came from, and keeps calls inside the boundaries of the intent.",
   "keywords": [
     "prompt-injection",
@@ -24,8 +24,18 @@
   "author": "Ilya Utov (https://github.com/ilyautov)",
   "license": "MIT",
   "type": "module",
-  "private": true,
   "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist",
+    "README.md",
+    "README.ru.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "bin": {
     "cordon": "./dist/cli.js"
   },
@@ -34,6 +44,7 @@
   },
   "scripts": {
     "test": "vitest run",
+    "prepublishOnly": "npm run typecheck && npm test && npm run build && node scripts/no-invisible.mjs",
     "build": "npm run build:lib && npm run bundle",
     "build:lib": "tsc -p tsconfig.json && chmod +x dist/cli.js",
     "typecheck": "tsc -p tsconfig.check.json",

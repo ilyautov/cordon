@@ -6,8 +6,8 @@ For agents built on LangChain.js `createAgent`, Cordon ships as a middleware —
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { createAgent } from 'langchain'
-import { createCordonMiddleware } from 'cordon/dist/adapters/langchain/middleware.js'
-import { loadPolicy } from 'cordon/dist/policy/load.js'
+import { createCordonMiddleware } from '@ilyautov/cordon/dist/adapters/langchain/middleware.js'
+import { loadPolicy } from '@ilyautov/cordon/dist/policy/load.js'
 
 const cordonHome = process.env.CORDON_HOME ?? join(homedir(), '.cordon')
 
@@ -26,7 +26,7 @@ const agent = createAgent({
 
 `langchain` and `@langchain/core` are peer dependencies: your application already has them, and Cordon's own bundle does not pull them in. The runtime dependency count stays at two.
 
-The package is not published to npm yet, so the import path above resolves to a built checkout today: build from source (`npm install && npm run build:lib`) and import from its `dist/`. The policy is the same `<cordonHome>/policy.yaml` the hooks and the gateway read, with the defaults when the file is absent.
+Install it with `npm install @ilyautov/cordon`; the import paths above point into its `dist/`. The policy is the same `<cordonHome>/policy.yaml` the hooks and the gateway read, with the defaults when the file is absent.
 
 ## What is intercepted
 

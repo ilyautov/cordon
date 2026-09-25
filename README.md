@@ -22,7 +22,7 @@
 [![ci](https://github.com/ilyautov/cordon/actions/workflows/ci.yml/badge.svg)](https://github.com/ilyautov/cordon/actions/workflows/ci.yml)
 [![HOL Guard](https://github.com/ilyautov/cordon/actions/workflows/hol-scan.yml/badge.svg)](https://github.com/ilyautov/cordon/actions/workflows/hol-scan.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.5.0-blueviolet)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.6.0-blueviolet)](CHANGELOG.md)
 [![Finding kinds](https://img.shields.io/badge/finding%20kinds-5-1F6F5C)](#what-gets-stripped)
 [![Attack vectors](https://img.shields.io/badge/attack%20vectors-18-1F6F5C)](#development)
 [![node 22+](https://img.shields.io/badge/node-22%2B-1F6F5C)](package.json)
@@ -93,10 +93,10 @@ node dist/cli.js scan data.md --json
 
 A finding is a risk signal, not a verdict. `scan` blocks nothing and always returns 0 when the input was read successfully: turning a finding into a build failure would mean going back to the detector-as-verdict this project deliberately rejected.
 
-The same module is available as a library. The package is not published to npm yet, so imports come from the built copy:
+The same module is available as a library, published to npm as `@ilyautov/cordon`:
 
 ```ts
-import { sanitize } from './dist/index.js'
+import { sanitize } from '@ilyautov/cordon'
 
 const { clean, findings } = sanitize(untrustedHtml)
 ```
@@ -143,7 +143,14 @@ What was removed does not vanish silently: `sample` holds what was hidden, so th
 
 The shortest path, from nothing to a working install with a check that it is alive, is [QUICKSTART.md](QUICKSTART.md): five minutes, no keys, no account.
 
-As a Claude Code plugin and as a Gemini CLI extension it installs with a single command, see [docs/install.md](docs/install.md) and [docs/install-gemini.md](docs/install-gemini.md). As a library and CLI the package is not published yet, so there is one path: build from source.
+As a Claude Code plugin and as a Gemini CLI extension it installs with a single command, see [docs/install.md](docs/install.md) and [docs/install-gemini.md](docs/install-gemini.md). As a library and CLI it installs from npm:
+
+```bash
+npm install @ilyautov/cordon
+npx cordon scan README.md
+```
+
+Or from source:
 
 ```bash
 git clone https://github.com/ilyautov/cordon.git

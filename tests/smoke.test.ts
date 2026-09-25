@@ -1,8 +1,12 @@
+import { readFileSync } from 'node:fs'
 import { describe, it, expect } from 'vitest'
 import { VERSION } from '../src/index.js'
 
 describe('the package', () => {
-  it('exports the version', () => {
-    expect(VERSION).toBe('0.0.0')
+  it('exports the version it is published under', () => {
+    // A library that reports a version other than the one installed sends a
+    // bug report to the wrong release.
+    const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as { version: string }
+    expect(VERSION).toBe(pkg.version)
   })
 })
