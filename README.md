@@ -170,7 +170,7 @@ For a whole organization, deploy the hooks through Claude Code managed settings,
 
 The most important section in this file. Cordon works on one narrow stretch, and it is more honest to name the boundaries of that stretch up front.
 
-How that stretch sits next to classifier firewalls, MCP scanners and gateways, and the research designs closest to Cordon (CaMeL, FIDES), and which of them does what Cordon does not, is in [docs/comparison.md](docs/comparison.md).
+How that stretch sits next to classifier firewalls, MCP scanners and gateways, and the research designs closest to Cordon (CaMeL, FIDES), and which of them does what Cordon does not, is in [docs/comparison.md](docs/comparison.md). What was taken from those tools, what was declined and why, and what is still open, each row with the test that checks it, is in [docs/readiness.md](docs/readiness.md).
 
 **It has been verified on one live harness, not two.** Claude Code 2.1.236 was run with the hooks in place and the whole path was watched from the outside: the four events fire, a call outside the certificate is refused, a link that came out of a read file is refused, the source-influence footer appears under the answer, and a quarantined argument is applied by the harness — the file came out with the untrusted line missing while the model's own account said it was there. The record, with the journal lines, is in [docs/live-run.md](docs/live-run.md). Gemini CLI has had no live run: its events, their names and the shape of a rewrite are all different, and nothing measured here transfers to it.
 
