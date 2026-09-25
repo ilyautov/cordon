@@ -7589,15 +7589,71 @@ function viewIsUnknown(source) {
 // src/gate/gate.ts
 import { resolve as resolve2, sep as sep3 } from "node:path";
 
+// src/gate/fields.ts
+var MAX_FIELDS = 2e3;
+var MAX_DEPTH = 8;
+function fields(args) {
+  const out = [];
+  const visit2 = (key, node, depth) => {
+    if (out.length >= MAX_FIELDS) throw new Error("the call arguments branch too widely");
+    if (depth > MAX_DEPTH) throw new Error("the call arguments are too deep");
+    out.push({ key, value: node, depth });
+    if (node === null || typeof node !== "object") return;
+    if (Array.isArray(node)) {
+      for (const item of node) visit2(key, item, depth + 1);
+      return;
+    }
+    for (const [name, value] of Object.entries(node)) visit2(name, value, depth + 1);
+  };
+  for (const [key, value] of Object.entries(args)) visit2(key, value, 0);
+  return out;
+}
+
+// src/gate/memory.ts
+import { basename as basename2 } from "node:path";
+
+// src/core/argument-keys.ts
+var PATH_KEYS = /* @__PURE__ */ new Set([
+  "filepath",
+  "filepaths",
+  "path",
+  "paths",
+  "notebookpath",
+  "absolutepath",
+  "targetpath",
+  "destination",
+  "dest",
+  "outputpath",
+  "filename",
+  "filenames"
+]);
+var URL_KEYS = /* @__PURE__ */ new Set([
+  "url",
+  "urls",
+  "uri",
+  "uris",
+  "href",
+  "link",
+  "links",
+  "endpoint",
+  "webhook",
+  "baseurl",
+  "callbackurl"
+]);
+var COMMAND_KEYS = /* @__PURE__ */ new Set(["command", "cmd", "script", "shell"]);
+function fold(name) {
+  return name.toLowerCase().replace(/[_-]/gu, "");
+}
+
 // src/policy/selfprotect.ts
 import { readlinkSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join as join2, resolve, sep as sep2 } from "node:path";
 var HARNESS_CONFIG = [".claude", ".cursor", ".codex", ".gemini", ".config" + sep2 + "cordon"];
 var HARNESS_SEGMENTS = HARNESS_CONFIG.map(
-  (marker) => marker.split(sep2).map(fold)
+  (marker) => marker.split(sep2).map(fold2)
 );
-function fold(segment) {
+function fold2(segment) {
   return segment.toLowerCase().replace(/[. ]+$/, "");
 }
 function expandTilde(path) {
@@ -7621,13 +7677,13 @@ function withoutSymlinks(path, hops = 0) {
   return join2(withoutSymlinks(parent, hops), basename(path));
 }
 function isInside(path, home) {
-  const foldedPath = path.split(sep2).map(fold);
-  const foldedHome = home.split(sep2).map(fold);
+  const foldedPath = path.split(sep2).map(fold2);
+  const foldedHome = home.split(sep2).map(fold2);
   if (foldedPath.length < foldedHome.length) return false;
   return foldedHome.every((segment, index) => segment === foldedPath[index]);
 }
 function hitsHarnessConfig(path) {
-  const segments2 = path.split(sep2).map(fold);
+  const segments2 = path.split(sep2).map(fold2);
   return HARNESS_SEGMENTS.some(
     (marker) => segments2.some((_, start) => marker.every((part, offset) => part === segments2[start + offset]))
   );
@@ -7646,6 +7702,90 @@ function touchesCordonItself(target, cordonHome2) {
     }
   }
   return false;
+}
+
+// src/scope/effects.ts
+var BUILTIN = {
+  Read: ["read"],
+  Glob: ["read"],
+  Grep: ["read"],
+  NotebookRead: ["read"],
+  WebFetch: ["read", "network-egress"],
+  WebSearch: ["read", "network-egress"],
+  // Schema lookup for tools the harness defers. It touches nothing and
+  // returns nothing but declarations, so it is the smallest class there is.
+  // It is listed because leaving it out was not a safe default but a broken
+  // one: where the harness defers a tool, the model reaches that tool only
+  // through this call, so an undeclared ToolSearch escalates on every attempt
+  // to find Read. Escalation is not loosened by listing it — a schema is not
+  // a call, and the call it leads to is classified on its own merits.
+  ToolSearch: ["read"],
+  Write: ["create", "update"],
+  Edit: ["update"],
+  NotebookEdit: ["update"],
+  // Bash can read, write and send anything. A single exec class is more
+  // honest than a set of guesses based on the command text: parsing the
+  // command means a shell parser, and every shell parser can be worked
+  // around.
+  Bash: ["exec"]
+};
+function declaredFor(table, tool) {
+  if (!Object.hasOwn(table, tool)) return void 0;
+  const value = table[tool];
+  if (!Array.isArray(value) || value.some((effect) => typeof effect !== "string")) return void 0;
+  return value;
+}
+function classify(call, fromPolicy) {
+  const declared = declaredFor(fromPolicy, call.tool) ?? declaredFor(BUILTIN, call.tool);
+  if (!declared) {
+    return {
+      effects: [],
+      classified: false,
+      reason: `tool ${call.tool} is not declared in the policy`
+    };
+  }
+  return { effects: [...declared], classified: true, reason: "" };
+}
+
+// src/gate/memory.ts
+var MEMORY_FILES = /* @__PURE__ */ new Set([
+  "claude.md",
+  "claude.local.md",
+  "agents.md",
+  "gemini.md",
+  ".cursorrules",
+  ".windsurfrules",
+  "copilot-instructions.md"
+]);
+var MEMORY_TOOLS = /* @__PURE__ */ new Set([
+  // Gemini CLI: appends a fact to GEMINI.md under the user's home.
+  "save_memory"
+]);
+function memoryTarget(call, policy) {
+  if (MEMORY_TOOLS.has(call.tool) || declaredTools(policy).includes(call.tool)) return call.tool;
+  const verdict = classify(call, policy.tools);
+  if (!verdict.effects.some((effect) => effect === "create" || effect === "update")) return null;
+  const extra = declaredFiles(policy);
+  for (const { key, value } of fields(call.args ?? {})) {
+    if (typeof value !== "string" || !PATH_KEYS.has(fold(key))) continue;
+    for (const form of canonicalForms(value).reverse()) {
+      const name = memoryName(form);
+      if (MEMORY_FILES.has(name) || extra.has(name)) return form;
+    }
+  }
+  return null;
+}
+function memoryName(path) {
+  return fold2(basename2(path.replace(/\\/gu, "/")));
+}
+function declaredTools(policy) {
+  const tools = policy.memory?.tools;
+  return Array.isArray(tools) ? tools.filter((tool) => typeof tool === "string") : [];
+}
+function declaredFiles(policy) {
+  const files = policy.memory?.files;
+  if (!Array.isArray(files)) return /* @__PURE__ */ new Set();
+  return new Set(files.filter((file) => typeof file === "string").map((file) => fold2(file)));
 }
 
 // src/provenance/normalize.ts
@@ -7821,49 +7961,6 @@ function parseTrustMemory(userText) {
   return /^[ \t]*cordon:[ \t]*trust[ \t]+memory[ \t]*$/mu.test(userText);
 }
 
-// src/scope/effects.ts
-var BUILTIN = {
-  Read: ["read"],
-  Glob: ["read"],
-  Grep: ["read"],
-  NotebookRead: ["read"],
-  WebFetch: ["read", "network-egress"],
-  WebSearch: ["read", "network-egress"],
-  // Schema lookup for tools the harness defers. It touches nothing and
-  // returns nothing but declarations, so it is the smallest class there is.
-  // It is listed because leaving it out was not a safe default but a broken
-  // one: where the harness defers a tool, the model reaches that tool only
-  // through this call, so an undeclared ToolSearch escalates on every attempt
-  // to find Read. Escalation is not loosened by listing it — a schema is not
-  // a call, and the call it leads to is classified on its own merits.
-  ToolSearch: ["read"],
-  Write: ["create", "update"],
-  Edit: ["update"],
-  NotebookEdit: ["update"],
-  // Bash can read, write and send anything. A single exec class is more
-  // honest than a set of guesses based on the command text: parsing the
-  // command means a shell parser, and every shell parser can be worked
-  // around.
-  Bash: ["exec"]
-};
-function declaredFor(table, tool) {
-  if (!Object.hasOwn(table, tool)) return void 0;
-  const value = table[tool];
-  if (!Array.isArray(value) || value.some((effect) => typeof effect !== "string")) return void 0;
-  return value;
-}
-function classify(call, fromPolicy) {
-  const declared = declaredFor(fromPolicy, call.tool) ?? declaredFor(BUILTIN, call.tool);
-  if (!declared) {
-    return {
-      effects: [],
-      classified: false,
-      reason: `tool ${call.tool} is not declared in the policy`
-    };
-  }
-  return { effects: [...declared], classified: true, reason: "" };
-}
-
 // src/gate/quarantine.ts
 var INDIVISIBLE = /* @__PURE__ */ new Set([
   "command",
@@ -7886,7 +7983,7 @@ var INDIVISIBLE = /* @__PURE__ */ new Set([
 ]);
 var MAX_CUT_SHARE = 2 / 3;
 var MAX_CUT_CHARS = 300;
-function fold2(name) {
+function fold3(name) {
   return name.toLowerCase().replace(/[_-]/gu, "");
 }
 function put(target, key, value) {
@@ -7905,7 +8002,7 @@ function quarantine(args, spansByArg) {
     if (typeof value !== "string") {
       return refuse(`argument ${name} is not a string, there is nothing to cut`);
     }
-    if (INDIVISIBLE.has(fold2(name))) {
+    if (INDIVISIBLE.has(fold3(name))) {
       return refuse(`argument ${name} is indivisible: a truncated value is a different call`);
     }
     if (!valid(spans, value.length)) {
@@ -7951,42 +8048,7 @@ function introducesIdentity(before, after) {
   return atoms(after).some((atom) => !was.has(atom));
 }
 
-// src/core/argument-keys.ts
-var PATH_KEYS = /* @__PURE__ */ new Set([
-  "filepath",
-  "filepaths",
-  "path",
-  "paths",
-  "notebookpath",
-  "absolutepath",
-  "targetpath",
-  "destination",
-  "dest",
-  "outputpath",
-  "filename",
-  "filenames"
-]);
-var URL_KEYS = /* @__PURE__ */ new Set([
-  "url",
-  "urls",
-  "uri",
-  "uris",
-  "href",
-  "link",
-  "links",
-  "endpoint",
-  "webhook",
-  "baseurl",
-  "callbackurl"
-]);
-var COMMAND_KEYS = /* @__PURE__ */ new Set(["command", "cmd", "script", "shell"]);
-function fold3(name) {
-  return name.toLowerCase().replace(/[_-]/gu, "");
-}
-
 // src/gate/gate.ts
-var MAX_FIELDS = 2e3;
-var MAX_DEPTH = 8;
 function gate(call, ctx) {
   try {
     return decide(call, ctx);
@@ -8047,6 +8109,14 @@ function decide(call, ctx) {
   if (scan.nested) {
     return escalate(ctx, "quarantine is impossible: the untrusted fragment sits inside a nested argument", blamed);
   }
+  const memory = memoryTarget(call, ctx.policy);
+  if (memory !== null) {
+    return escalate(
+      ctx,
+      `an untrusted fragment would be cut out of a write into memory (${memory}); a note the harness reloads is not rewritten silently`,
+      blamed
+    );
+  }
   const cleaned = quarantine(own2, scan.spans);
   if (!cleaned.possible) {
     return escalate(ctx, `quarantine is impossible: ${cleaned.reason}`, blamed);
@@ -8059,25 +8129,9 @@ function decide(call, ctx) {
     ...blamed === void 0 ? {} : { source: blamed }
   };
 }
-function fields(args) {
-  const out = [];
-  const visit2 = (key, node, depth) => {
-    if (out.length >= MAX_FIELDS) throw new Error("the call arguments branch too widely");
-    if (depth > MAX_DEPTH) throw new Error("the call arguments are too deep");
-    out.push({ key, value: node, depth });
-    if (node === null || typeof node !== "object") return;
-    if (Array.isArray(node)) {
-      for (const item of node) visit2(key, item, depth + 1);
-      return;
-    }
-    for (const [name, value] of Object.entries(node)) visit2(name, value, depth + 1);
-  };
-  for (const [key, value] of Object.entries(args)) visit2(key, value, 0);
-  return out;
-}
 function selfProtection(parts, ctx) {
   for (const { key, value } of parts) {
-    const folded = fold3(key);
+    const folded = fold(key);
     if (PATH_KEYS.has(folded)) {
       const paths = asPaths(value);
       if (paths === null) {
@@ -8181,7 +8235,7 @@ function returnsToOrigin(sources, parts, effects) {
   if (sources.length === 0) return false;
   if (!effects.some((effect) => PUTS_BACK.has(effect))) return false;
   if (effects.some((effect) => BEYOND_PATH.has(effect))) return false;
-  if (parts.some(({ key, value }) => URL_KEYS.has(fold3(key)) && isFilled(value))) return false;
+  if (parts.some(({ key, value }) => URL_KEYS.has(fold(key)) && isFilled(value))) return false;
   const target = destination(parts);
   if (target === null) return false;
   return sources.every(
@@ -8194,7 +8248,7 @@ function isFilled(value) {
 function destination(parts) {
   const seen = /* @__PURE__ */ new Set();
   for (const { key, value } of parts) {
-    if (!PATH_KEYS.has(fold3(key))) continue;
+    if (!PATH_KEYS.has(fold(key))) continue;
     const paths = asPaths(value);
     if (paths === null) return null;
     for (const path of paths) {
@@ -8223,7 +8277,7 @@ function outOfBounds(parts, cert) {
   if (!checkPaths && !checkHosts) return null;
   for (const { key, value } of parts) {
     if (typeof value !== "string") continue;
-    const folded = fold3(key);
+    const folded = fold(key);
     if (checkPaths && PATH_KEYS.has(folded) && !insideAnyBound(value, paths)) {
       return `argument ${key} is outside the certificate's boundaries: ${value}`;
     }
@@ -8292,48 +8346,6 @@ function hostAllowed(raw, hosts) {
   }
   if (host === "") return false;
   return hosts.includes(host);
-}
-
-// src/gate/memory.ts
-import { basename as basename2 } from "node:path";
-var MEMORY_FILES = /* @__PURE__ */ new Set([
-  "claude.md",
-  "claude.local.md",
-  "agents.md",
-  "gemini.md",
-  ".cursorrules",
-  ".windsurfrules",
-  "copilot-instructions.md"
-]);
-var MEMORY_TOOLS = /* @__PURE__ */ new Set([
-  // Gemini CLI: appends a fact to GEMINI.md under the user's home.
-  "save_memory"
-]);
-function memoryTarget(call, policy) {
-  if (MEMORY_TOOLS.has(call.tool) || declaredTools(policy).includes(call.tool)) return call.tool;
-  const verdict = classify(call, policy.tools);
-  if (!verdict.effects.some((effect) => effect === "create" || effect === "update")) return null;
-  const extra = declaredFiles(policy);
-  for (const { key, value } of fields(call.args ?? {})) {
-    if (typeof value !== "string" || !PATH_KEYS.has(fold3(key))) continue;
-    for (const form of canonicalForms(value).reverse()) {
-      const name = memoryName(form);
-      if (MEMORY_FILES.has(name) || extra.has(name)) return form;
-    }
-  }
-  return null;
-}
-function memoryName(path) {
-  return fold(basename2(path.replace(/\\/gu, "/")));
-}
-function declaredTools(policy) {
-  const tools = policy.memory?.tools;
-  return Array.isArray(tools) ? tools.filter((tool) => typeof tool === "string") : [];
-}
-function declaredFiles(policy) {
-  const files = policy.memory?.files;
-  if (!Array.isArray(files)) return /* @__PURE__ */ new Set();
-  return new Set(files.filter((file) => typeof file === "string").map((file) => fold(file)));
 }
 
 // src/notify/notifier.ts
@@ -12359,7 +12371,7 @@ function rebuild(node, key, depth, parts, cursor) {
   return node;
 }
 function roleOf(key, value) {
-  const folded = fold3(key);
+  const folded = fold(key);
   if (TEXT_KEYS.has(folded)) return "text";
   if (LABEL_KEYS.has(folded)) return "label";
   if (OPAQUE_KEYS.has(folded)) return "opaque";
@@ -12577,7 +12589,7 @@ function sourceLabel(call) {
   const args = Object.entries(call.args);
   for (const set of [URL_KEYS, PATH_KEYS]) {
     for (const [key, value] of args) {
-      if (!set.has(fold3(key))) continue;
+      if (!set.has(fold(key))) continue;
       if (typeof value === "string" && value !== "") return value;
     }
   }
@@ -12888,7 +12900,7 @@ function sourceLabel2(call) {
   const args = Object.entries(call.args);
   for (const set of [URL_KEYS, PATH_KEYS]) {
     for (const [key, value] of args) {
-      if (!set.has(fold3(key))) continue;
+      if (!set.has(fold(key))) continue;
       if (typeof value === "string" && value !== "") return value;
     }
   }
@@ -13200,7 +13212,7 @@ function sourceLabel3(call) {
   const args = Object.entries(call.args);
   for (const set of [URL_KEYS, PATH_KEYS]) {
     for (const [key, value] of args) {
-      if (!set.has(fold3(key))) continue;
+      if (!set.has(fold(key))) continue;
       if (typeof value === "string" && value !== "") return value;
     }
   }

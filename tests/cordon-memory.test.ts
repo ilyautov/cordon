@@ -100,6 +100,29 @@ describe('Cordon: memory written under exposure carries the mark into later sess
     expect(second.gate(later).kind).toBe('allow')
   })
 
+  it('a memory write carrying a verbatim piece of the page is put to the human, not cut', () => {
+    // Measured on a live Claude Code: quarantine cut a matching window out of
+    // a summary written into CLAUDE.md, the file came out mangled, and the
+    // model reported the whole sentence. A note the harness reloads into every
+    // later session is the one place a silent rewrite costs most.
+    const quoted = 'the rollout freeze starts at noon on friday and support stays on page duty until monday morning'
+    const { session } = setup({ exposure: false })
+    const first = session('monday')
+    first.observe(quoted, page)
+    const decision = first.gate({ tool: 'Write', args: { file_path: '/srv/project/CLAUDE.md', content: `Note: ${quoted}` } })
+    expect(decision.kind).toBe('ask')
+    expect(decision.kind === 'ask' && decision.reason).toContain('memory')
+  })
+
+  it('the same verbatim piece in an ordinary file is still quarantined', () => {
+    const quoted = 'the rollout freeze starts at noon on friday and support stays on page duty until monday morning'
+    const { session } = setup({ exposure: false })
+    const first = session('monday')
+    first.observe(quoted, page)
+    const decision = first.gate({ tool: 'Write', args: { file_path: '/srv/project/NOTES.md', content: `Note: ${quoted}` } })
+    expect(decision.kind).toBe('rewrite')
+  })
+
   it('a memory write in a session that read nothing untrusted carries nothing', () => {
     const { session } = setup()
     const first = session('monday')

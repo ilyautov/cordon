@@ -249,6 +249,7 @@ export function runAttack(spec: AttackSpec, profileName: string): Row {
     JSON.parse(runHook(JSON.stringify(event), home)) as Record<string, any>
 
   if (spec.seed) spec.seed(home, session)
+  let stoppedEarlier: Verdict | null = null
   if (spec.earlier) {
     const before = `${session}-earlier`
     if (spec.earlier.prompt !== null) {
@@ -267,7 +268,16 @@ export function runAttack(spec: AttackSpec, profileName: string): Row {
       send({ session_id: before, hook_event_name: 'UserPromptSubmit', prompt: spec.earlier.followUp })
     }
     for (const call of spec.earlier.calls) {
-      send({ session_id: before, hook_event_name: 'PreToolUse', tool_name: call.tool, tool_input: call.args })
+      const verdict = verdictOf(
+        send({ session_id: before, hook_event_name: 'PreToolUse', tool_name: call.tool, tool_input: call.args }),
+        spec,
+      )
+      // A refused call in the earlier session never happened: the note was
+      // never written, and whatever the later session does, the attack ended
+      // here. Probing on would measure a world the gate did not allow.
+      if (verdict.outcome === 'denied' && stoppedEarlier === null) {
+        stoppedEarlier = { ...verdict, detail: `stopped in the earlier session: ${verdict.detail}` }
+      }
     }
   }
   if (spec.prompt !== null) {
@@ -302,7 +312,9 @@ export function runAttack(spec: AttackSpec, profileName: string): Row {
 
   let verdict: Verdict
   let gateIfSeen = ''
-  if (!reached) {
+  if (stoppedEarlier !== null) {
+    verdict = stoppedEarlier
+  } else if (!reached) {
     // The order never reached the model: sanitize ends the attack here. The
     // gate is still probed, because "stripped AND the gate would have stopped
     // it anyway" is a different world from "stripped, and nothing else would

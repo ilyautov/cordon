@@ -1,5 +1,7 @@
 import { resolve, sep } from 'node:path'
 import type { Certificate, Decision, EffectClass, ExposureMark, Source, ToolCall } from '../core/types.js'
+import { fields, type Field } from './fields.js'
+import { memoryTarget } from './memory.js'
 import type { Policy } from '../policy/defaults.js'
 import { canonicalForms, touchesCordonItself } from '../policy/selfprotect.js'
 import { atoms } from '../provenance/normalize.js'
@@ -42,9 +44,6 @@ export interface GateContext {
  * Names are folded to one form: `file_path`, `filePath` and `FILE-PATH` are
  * chosen by the MCP server and all mean the same thing.
  */
-/** Limits on walking the arguments. Exceeding them is a refusal, not a truncated walk. */
-const MAX_FIELDS = 2000
-const MAX_DEPTH = 8
 
 export function gate(call: ToolCall, ctx: GateContext): Decision {
   try {
@@ -158,6 +157,21 @@ function decide(call: ToolCall, ctx: GateContext): Decision {
     return escalate(ctx, 'quarantine is impossible: the untrusted fragment sits inside a nested argument', blamed)
   }
 
+  // A memory file is the one place a silent cut costs most: the harness
+  // reloads it into every later session, and the model reports having written
+  // what it asked for. Measured on a live Claude Code — a summary came out of
+  // quarantine mangled and nobody but the journal knew. So a write into memory
+  // that would be cut is put to the human whole instead.
+  const memory = memoryTarget(call, ctx.policy)
+  if (memory !== null) {
+    return escalate(
+      ctx,
+      `an untrusted fragment would be cut out of a write into memory (${memory}); ` +
+        'a note the harness reloads is not rewritten silently',
+      blamed,
+    )
+  }
+
   const cleaned = quarantine(own, scan.spans)
   if (!cleaned.possible) {
     return escalate(ctx, `quarantine is impossible: ${cleaned.reason}`, blamed)
@@ -172,39 +186,6 @@ function decide(call: ToolCall, ctx: GateContext): Decision {
   }
 }
 
-export interface Field {
-  /** Name of the nearest object field. An array element inherits its field's name. */
-  key: string
-  value: unknown
-  depth: number
-}
-
-/**
- * Flattens the arguments into a list of fields.
- *
- * Without descending, a tainted string inside `{payload: {note: "…"}}` is
- * invisible to both axes: provenance only looks at strings, and the string
- * sits one level down. MCP tools accept nested objects all the time, so this
- * is not exotic but an ordinary call.
- */
-export function fields(args: Record<string, unknown>): Field[] {
-  const out: Field[] = []
-
-  const visit = (key: string, node: unknown, depth: number): void => {
-    if (out.length >= MAX_FIELDS) throw new Error('the call arguments branch too widely')
-    if (depth > MAX_DEPTH) throw new Error('the call arguments are too deep')
-    out.push({ key, value: node, depth })
-    if (node === null || typeof node !== 'object') return
-    if (Array.isArray(node)) {
-      for (const item of node) visit(key, item, depth + 1)
-      return
-    }
-    for (const [name, value] of Object.entries(node)) visit(name, value, depth + 1)
-  }
-
-  for (const [key, value] of Object.entries(args)) visit(key, value, 0)
-  return out
-}
 
 /**
  * Checked first and overridden by nothing. A certificate granting the right

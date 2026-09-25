@@ -4,7 +4,7 @@ import { PATH_KEYS, fold } from '../core/argument-keys.js'
 import type { Policy } from '../policy/defaults.js'
 import { canonicalForms, fold as foldSegment } from '../policy/selfprotect.js'
 import { classify } from '../scope/effects.js'
-import { fields } from './gate.js'
+import { fields } from './fields.js'
 
 /**
  * Instruction files the harnesses reload into every new session, by base name.
