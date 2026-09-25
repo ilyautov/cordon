@@ -10547,22 +10547,33 @@ var HIDDEN_STYLE = /(display\s*:\s*none|visibility\s*:\s*hidden|font-size\s*:\s*
 var OFFSCREEN_STYLE = /(text-indent\s*:\s*-\d{3,}|(?:left|top|right|bottom|margin-left|margin-top)\s*:\s*-\d{4,}|clip\s*:\s*rect\(\s*0|clip-path\s*:\s*inset\(\s*100%)/i;
 var DROP_TAGS = /* @__PURE__ */ new Set(["SCRIPT", "STYLE", "META", "NOSCRIPT", "TEMPLATE"]);
 var RAW_TEXT_TAGS = /* @__PURE__ */ new Set(["SCRIPT", "STYLE", "NOSCRIPT", "TEMPLATE"]);
-var MENTION_MARK = "\uE000";
+function mentionMark(source) {
+  for (let code = 57344; code <= 63743; code++) {
+    const mark2 = String.fromCharCode(code);
+    if (!source.includes(mark2)) return mark2;
+  }
+  for (let first = 57344; first <= 63743; first++) {
+    for (let second = 57344; second <= 63743; second++) {
+      const mark2 = String.fromCharCode(first, second);
+      if (!source.includes(mark2)) return mark2;
+    }
+  }
+  throw new Error("no private-use mark is free in this input");
+}
 function hasClosingTag(source, tag) {
   return new RegExp(`</${tag}\\s*>`, "i").test(source);
 }
-function maskUnclosedRawTags(source) {
-  if (source.includes(MENTION_MARK)) return source;
+function maskUnclosedRawTags(source, mark2) {
   let masked = source;
   for (const tag of RAW_TEXT_TAGS) {
     const name = tag.toLowerCase();
     if (hasClosingTag(source, name)) continue;
-    masked = masked.replace(new RegExp(`<(?=${name}[\\s>/])`, "gi"), MENTION_MARK);
+    masked = masked.replace(new RegExp(`<(?=${name}[\\s>/])`, "gi"), mark2);
   }
   return masked;
 }
-function unmask(text) {
-  return text.includes(MENTION_MARK) ? text.replaceAll(MENTION_MARK, "<") : text;
+function unmask(text, mark2) {
+  return text.includes(mark2) ? text.replaceAll(mark2, "<") : text;
 }
 var REPORT_ATTRS = ["alt", "title"];
 var HIDDEN_TEXT_ATTRS = /* @__PURE__ */ new Set([
@@ -10712,7 +10723,8 @@ function stripHiddenHtml(input) {
     }
     return "";
   });
-  const source = maskUnclosedRawTags(withoutComments);
+  const mark2 = mentionMark(withoutComments);
+  const source = maskUnclosedRawTags(withoutComments, mark2);
   const pageHasBackground = BACKGROUND_DECLARED.test(input);
   const cuts = [];
   const stack = [];
@@ -10827,8 +10839,8 @@ function stripHiddenHtml(input) {
   parser.write(source);
   parser.end();
   return {
-    clean: unmask(cutOut(source, cuts)),
-    findings: findings.map((finding) => ({ ...finding, sample: unmask(finding.sample) }))
+    clean: unmask(cutOut(source, cuts), mark2),
+    findings: findings.map((finding) => ({ ...finding, sample: unmask(finding.sample, mark2) }))
   };
 }
 

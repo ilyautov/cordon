@@ -120,6 +120,22 @@ describe('stripHiddenHtml: layers beyond the plan', () => {
     expect(result.clean).toBe(text)
   })
 
+  it('a private-use character in the input does not switch the mention guard off', () => {
+    // Found in review: the guard stepped aside whenever the input already
+    // held its stand-in mark, so one private-use character ahead of an
+    // unclosed <style> let the raw block swallow everything below it — the
+    // rest of an email thread, say — without a word.
+    const text = 'Note \uE000 here. See `<style>` for details.\nThis paragraph must survive.'
+    const result = stripHiddenHtml(text)
+    expect(result.clean).toContain('This paragraph must survive.')
+    expect(result.clean).toContain('\uE000')
+  })
+
+  it('every private-use mark in the input is kept as it was', () => {
+    const text = '\uE000\uE001 `<script>` tail must survive'
+    expect(stripHiddenHtml(text).clean).toBe(text)
+  })
+
   it('parses <style> as markup when the closing tag is in place', () => {
     const result = stripHiddenHtml('<style>.a{display:none}</style><p>visible</p>')
     expect(result.findings.some((f) => f.detail === 'tag:style')).toBe(true)

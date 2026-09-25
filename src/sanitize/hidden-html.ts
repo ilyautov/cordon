@@ -24,11 +24,31 @@ const DROP_TAGS = new Set(['SCRIPT', 'STYLE', 'META', 'NOSCRIPT', 'TEMPLATE'])
 const RAW_TEXT_TAGS = new Set(['SCRIPT', 'STYLE', 'NOSCRIPT', 'TEMPLATE'])
 
 /**
- * The stand-in mark for a masked mention. A private-use character was chosen
- * because it never occurs in meaningful text, while HTML parsing treats it as
- * an ordinary letter.
+ * The stand-in mark for a masked mention: a private-use character the input
+ * does not already contain. HTML parsing treats it as an ordinary letter.
+ *
+ * Chosen per input rather than fixed. With one fixed mark, an input already
+ * holding it had to be left unmasked — restoring would have turned the
+ * original character into an angle bracket — and review found what that
+ * costs: one private-use character ahead of an unclosed `<style>` switched
+ * the guard off, and the raw block swallowed everything below it. A pair is
+ * the fallback for an input that holds every single private-use character.
  */
-const MENTION_MARK = '\uE000'
+function mentionMark(source: string): string {
+  for (let code = 0xe000; code <= 0xf8ff; code++) {
+    const mark = String.fromCharCode(code)
+    if (!source.includes(mark)) return mark
+  }
+  for (let first = 0xe000; first <= 0xf8ff; first++) {
+    for (let second = 0xe000; second <= 0xf8ff; second++) {
+      const mark = String.fromCharCode(first, second)
+      if (!source.includes(mark)) return mark
+    }
+  }
+  // Unreachable for any input under a gigabyte of distinct pairs; failing
+  // loudly here is a refusal upstream, never a silently swallowed document.
+  throw new Error('no private-use mark is free in this input')
+}
 
 /** A closing tag in the source text. */
 function hasClosingTag(source: string, tag: string): boolean {
@@ -50,23 +70,19 @@ function hasClosingTag(source: string, tag: string): boolean {
  * error, that is, silently discarding half of a legitimate document on every
  * mention of a tag.
  */
-function maskUnclosedRawTags(source: string): string {
-  // Input that already contains the stand-in mark is left alone entirely:
-  // restoring it would put an extra angle bracket in its place.
-  if (source.includes(MENTION_MARK)) return source
-
+function maskUnclosedRawTags(source: string, mark: string): string {
   let masked = source
   for (const tag of RAW_TEXT_TAGS) {
     const name = tag.toLowerCase()
     if (hasClosingTag(source, name)) continue
-    masked = masked.replace(new RegExp(`<(?=${name}[\\s>/])`, 'gi'), MENTION_MARK)
+    masked = masked.replace(new RegExp(`<(?=${name}[\\s>/])`, 'gi'), mark)
   }
   return masked
 }
 
 /** Gives masked mentions their angle bracket back. */
-function unmask(text: string): string {
-  return text.includes(MENTION_MARK) ? text.replaceAll(MENTION_MARK, '<') : text
+function unmask(text: string, mark: string): string {
+  return text.includes(mark) ? text.replaceAll(mark, '<') : text
 }
 
 const REPORT_ATTRS = ['alt', 'title'] as const
@@ -353,7 +369,8 @@ export function stripHiddenHtml(input: string): { clean: string; findings: Findi
     return ''
   })
 
-  const source = maskUnclosedRawTags(withoutComments)
+  const mark = mentionMark(withoutComments)
+  const source = maskUnclosedRawTags(withoutComments, mark)
   const pageHasBackground = BACKGROUND_DECLARED.test(input)
   const cuts: Array<readonly [number, number]> = []
   const stack: Frame[] = []
@@ -515,7 +532,7 @@ export function stripHiddenHtml(input: string): { clean: string; findings: Findi
   parser.end()
 
   return {
-    clean: unmask(cutOut(source, cuts)),
-    findings: findings.map((finding) => ({ ...finding, sample: unmask(finding.sample) })),
+    clean: unmask(cutOut(source, cuts), mark),
+    findings: findings.map((finding) => ({ ...finding, sample: unmask(finding.sample, mark) })),
   }
 }
