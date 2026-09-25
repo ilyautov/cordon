@@ -17,7 +17,7 @@ import { sanitize } from './sanitize/index.js'
 import { MemoryLedger } from './session/memory.js'
 
 const USAGE =
-  'usage: cordon scan <file|-> [--json] | cordon hook [--harness claude-code|gemini] | cordon mcp -- <server command...> | cordon mcp approve -- <server command...> | cordon doctor | cordon init [--profile locked|research|documents|coding] [--force] | cordon audit [dir] [--json|--sarif] [--fail-on high|medium|low]'
+  'usage: cordon scan <file|-> [--json] | cordon hook [--harness claude-code|gemini] | cordon mcp -- <server command...> | cordon mcp approve -- <server command...> | cordon doctor | cordon init [--profile locked|research|documents|coding] [--force] | cordon log [--last N] [--json] | cordon audit [dir] [--json|--sarif] [--fail-on high|medium|low]'
 
 /**
  * Event parsing depends on the harness, so the harness is named explicitly.
@@ -55,6 +55,8 @@ export function main(argv: string[]): number | Promise<number> {
   if (command === 'audit') return runAudit(rest)
 
   if (command === 'init') return init(rest)
+
+  if (command === 'log') return showLog(rest)
 
   if (command !== 'scan') {
     process.stderr.write(USAGE + '\n')
@@ -804,4 +806,102 @@ if (launchedDirectly()) {
   } else {
     process.exit(code)
   }
+}
+
+/**
+ * `cordon log`: the journal read back by a human.
+ *
+ * The journal carries source labels, and a source label is text an attacker
+ * wrote: a URL can hold an escape sequence that clears the screen or retitles
+ * the terminal of the admin reading it. Everything printed from it goes
+ * through visible(). A line that does not parse is counted aloud, because a
+ * log that quietly drops lines is a log someone can hide an event in.
+ */
+function showLog(args: string[]): number {
+  const asJson = args.includes('--json')
+  const at = args.indexOf('--last')
+  let last = Infinity
+  if (at >= 0) {
+    last = Number(args[at + 1])
+    if (!Number.isInteger(last) || last < 1) {
+      process.stderr.write('cordon log: --last takes a positive whole number\n')
+      return 2
+    }
+  }
+
+  const home = cordonHome()
+  let file: string | null
+  try {
+    file = loadPolicy(home).notify.file
+  } catch (error) {
+    process.stderr.write(`cordon log: ${(error as Error).message}\n`)
+    return 1
+  }
+  if (file === null) {
+    process.stderr.write(
+      `cordon log: no journal is configured; set notify.file in ${join(home, 'policy.yaml')} (cordon init writes one)\n`,
+    )
+    return 1
+  }
+
+  let text = ''
+  try {
+    text = readFileSync(file, 'utf8')
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+      process.stderr.write(`cordon log: could not read ${file}: ${(error as Error).message}\n`)
+      return 1
+    }
+  }
+
+  const events: Array<Record<string, unknown>> = []
+  let unreadable = 0
+  for (const line of text.split('\n')) {
+    if (line.trim() === '') continue
+    try {
+      const event: unknown = JSON.parse(line)
+      if (event === null || typeof event !== 'object' || Array.isArray(event)) throw new Error('not an event')
+      events.push(event as Record<string, unknown>)
+    } catch {
+      // Counted and reported below; the reader learns the journal has a hole.
+      unreadable++
+    }
+  }
+  const shown = events.slice(Math.max(0, events.length - last))
+
+  if (asJson) {
+    process.stdout.write(JSON.stringify(shown, null, 2) + '\n')
+    return 0
+  }
+
+  if (shown.length === 0) process.stdout.write(`no events in ${file}\n`)
+  for (const event of shown) {
+    const decision = visible(event.decision).padEnd(9)
+    process.stdout.write(`${visible(event.at)}  ${decision} ${visible(event.tool)}  ${visible(event.reason)}\n`)
+    if (event.source !== null && event.source !== undefined) {
+      process.stdout.write(`    source: ${visible(event.source)}\n`)
+    }
+  }
+  if (shown.length > 0) {
+    const counts = new Map<string, number>()
+    for (const event of shown) {
+      const key = visible(event.decision)
+      counts.set(key, (counts.get(key) ?? 0) + 1)
+    }
+    const summary = [...counts].map(([decision, count]) => `${count} ${decision}`).join(', ')
+    process.stdout.write(`\n${shown.length} event${shown.length === 1 ? '' : 's'}: ${summary}\n`)
+  }
+  if (unreadable > 0) {
+    process.stdout.write(`${unreadable} line${unreadable === 1 ? '' : 's'} could not be read in ${file}\n`)
+  }
+  return 0
+}
+
+/** A journal field as one printable line: control characters become escapes. */
+function visible(value: unknown): string {
+  const text = typeof value === 'string' ? value : JSON.stringify(value) ?? ''
+  return text.replace(
+    /[\u0000-\u001f\u007f-\u009f]/gu,
+    (char) => `\\u${char.charCodeAt(0).toString(16).padStart(4, '0')}`,
+  )
 }

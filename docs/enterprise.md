@@ -98,6 +98,8 @@ Every refusal, question, argument rewrite, memory write under exposure and MCP t
 | `reason` | the reason, in the same words the model and the human saw |
 | `source` | the untrusted source the decision turned on, or `null` |
 
+On a single machine, `cordon log` prints the journal for a human, with control characters from source labels escaped.
+
 Cordon has no network in its core, by design, so it never ships logs itself. Point your existing log shipper (Fluent Bit, Vector, the Datadog or Splunk agent) at the file:
 
 ```yaml

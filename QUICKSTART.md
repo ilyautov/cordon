@@ -71,7 +71,7 @@ Read it as four statements, in order of how much they matter:
 
 **`toolsReturn: rendered`** says that you, the human, see this tool's output the way a browser draws it. So a `display:none` block never reaches your eyes, and Cordon strips it before the model sees it either. Leave it out and the hidden layer goes through to the model, though loudly: the finding lands in the transcript and in the journal.
 
-**`notify.file`** is the half of autonomous mode people forget. A call blocked at three in the morning that nobody was told about is, to you, indistinguishable from a call that never happened.
+**`notify.file`** is the half of autonomous mode people forget. A call blocked at three in the morning that nobody was told about is, to you, indistinguishable from a call that never happened. `npx @ilyautov/cordon log` reads it back in the morning.
 
 ## 4. Check that it is actually alive
 

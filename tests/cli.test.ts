@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll } from 'vitest'
 import { ensureBuiltCli } from './support/built-cli.js'
 import { PinStore } from '../src/session/pins.js'
-import { execFileSync } from 'node:child_process'
+import { spawnSync } from 'node:child_process'
 import { readFileSync, writeFileSync, mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -15,18 +15,13 @@ function run(
   args: string[],
   input?: string,
   env?: Record<string, string>,
-): { stdout: string; status: number } {
-  try {
-    const stdout = execFileSync('node', [CLI, ...args], {
-      input: input ?? '',
-      encoding: 'utf8',
-      env: { ...process.env, ...env },
-    })
-    return { stdout, status: 0 }
-  } catch (error) {
-    const err = error as { stdout?: string; status?: number }
-    return { stdout: err.stdout ?? '', status: err.status ?? 1 }
-  }
+): { stdout: string; stderr: string; status: number } {
+  const result = spawnSync('node', [CLI, ...args], {
+    input: input ?? '',
+    encoding: 'utf8',
+    env: { ...process.env, ...env },
+  })
+  return { stdout: result.stdout ?? '', stderr: result.stderr ?? '', status: result.status ?? 1 }
 }
 
 describe('cordon scan', () => {
@@ -263,5 +258,79 @@ describe('cordon init', () => {
   it('an unknown profile is a usage error', () => {
     const home = mkdtempSync(join(tmpdir(), 'cordon-init-'))
     expect(run(['init', '--profile', 'everything'], '', { CORDON_HOME: home }).status).toBe(2)
+  })
+})
+
+describe('cordon log', () => {
+  beforeAll(() => {
+    ensureBuiltCli()
+  }, 60_000)
+
+  function journal(lines: string[]): string {
+    const home = mkdtempSync(join(tmpdir(), 'cordon-log-'))
+    const file = join(home, 'events.jsonl')
+    writeFileSync(join(home, 'policy.yaml'), `notify:\n  file: ${file}\n`)
+    writeFileSync(file, lines.join('\n') + '\n')
+    return home
+  }
+
+  const deny = JSON.stringify({ at: '2026-09-26T09:14:02.118Z', decision: 'deny', tool: 'WebFetch', reason: 'the link came from the page', source: 'https://a.example/x' })
+  const rewrite = JSON.stringify({ at: '2026-09-26T09:15:00.000Z', decision: 'rewrite', tool: 'Write', reason: 'an untrusted fragment was cut out', source: null })
+  const drift = JSON.stringify({ at: '2026-09-26T09:16:00.000Z', decision: 'mcp-drift', tool: 'mystery_box', reason: 'changed', source: 'fake-server' })
+
+  it('prints each event and a count by decision', () => {
+    const { stdout, status } = run(['log'], '', { CORDON_HOME: journal([deny, rewrite, drift]) })
+    expect(status).toBe(0)
+    expect(stdout).toContain('WebFetch')
+    expect(stdout).toContain('the link came from the page')
+    expect(stdout).toContain('https://a.example/x')
+    expect(stdout).toContain('3 events: 1 deny, 1 rewrite, 1 mcp-drift')
+  })
+
+  it('--last keeps only the newest events', () => {
+    const { stdout } = run(['log', '--last', '1'], '', { CORDON_HOME: journal([deny, rewrite, drift]) })
+    expect(stdout).toContain('mystery_box')
+    expect(stdout).not.toContain('WebFetch')
+  })
+
+  it('--json prints the events as an array', () => {
+    const { stdout, status } = run(['log', '--json'], '', { CORDON_HOME: journal([deny, drift]) })
+    expect(status).toBe(0)
+    const events = JSON.parse(stdout) as Array<{ tool: string }>
+    expect(events.map((event) => event.tool)).toEqual(['WebFetch', 'mystery_box'])
+  })
+
+  it('names a line it could not read instead of skipping it quietly', () => {
+    const { stdout, status } = run(['log'], '', { CORDON_HOME: journal([deny, '{"at":', drift]) })
+    expect(status).toBe(0)
+    expect(stdout).toContain('1 line could not be read')
+  })
+
+  it('a control sequence from a page never reaches the terminal', () => {
+    const planted = JSON.stringify({ at: '2026-09-26T09:14:02.118Z', decision: 'deny', tool: 'WebFetch', reason: 'x', source: 'https://a.example/\u001b[2J\u001b]0;owned\u0007' })
+    const { stdout } = run(['log'], '', { CORDON_HOME: journal([planted]) })
+    expect(stdout).not.toMatch(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/u)
+    expect(stdout).toContain('\\u001b[2J')
+  })
+
+  it('without a journal in the policy it says so and fails', () => {
+    const home = mkdtempSync(join(tmpdir(), 'cordon-log-'))
+    const { stderr, status } = run(['log'], '', { CORDON_HOME: home })
+    expect(status).toBe(1)
+    expect(stderr).toContain('notify.file')
+  })
+
+  it('a configured journal that is not written yet is no events, not an error', () => {
+    const home = mkdtempSync(join(tmpdir(), 'cordon-log-'))
+    writeFileSync(join(home, 'policy.yaml'), `notify:\n  file: ${join(home, 'events.jsonl')}\n`)
+    const { stdout, status } = run(['log'], '', { CORDON_HOME: home })
+    expect(status).toBe(0)
+    expect(stdout).toContain('no events')
+  })
+
+  it('a broken policy fails loudly', () => {
+    const home = mkdtempSync(join(tmpdir(), 'cordon-log-'))
+    writeFileSync(join(home, 'policy.yaml'), 'mode: sometimes\n')
+    expect(run(['log'], '', { CORDON_HOME: home }).status).toBe(1)
   })
 })
