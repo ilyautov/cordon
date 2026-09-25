@@ -2,7 +2,7 @@
 
 This page is for the administrator who puts Cordon on every developer's machine and needs it to stay there. It covers Claude Code; the MCP gateway is deployed through the host's own configuration ([install-mcp.md](install-mcp.md)).
 
-Everything about Claude Code's managed settings below is taken from its documentation ([managed settings](https://code.claude.com/docs/en/managed-settings), [settings reference](https://code.claude.com/docs/en/settings-reference)). Verify it on one machine before a fleet rollout, as described below.
+Everything about Claude Code's managed settings below is taken from its documentation ([managed settings](https://code.claude.com/docs/en/managed-settings), [settings reference](https://code.claude.com/docs/en/settings-reference)). The deployment below was run on one machine, with the result recorded under [What was verified](#what-was-verified). Verify it on one of yours before a fleet rollout.
 
 ## Why managed settings, and not the plugin alone
 
@@ -81,6 +81,15 @@ CORDON_HOME=/path/to/staging cordon doctor
 2. Run `claude doctor`. It lists entries Claude Code dropped from managed settings.
 3. Run `cordon doctor` as the developer. It shows the home, the policy and the state.
 4. Ask the agent to write a file outside the profile. The call should be refused, with the reason in the transcript. With the default profile (`read`, `summarize`) any write is outside it.
+
+### What was verified
+
+On 26 September 2026 this was run with Cordon 0.7.0 and Claude Code 2.1.282 on macOS. A managed settings file of the shape above was installed at the macOS path. The test project attacked in every way listed at the top of this page. Its `.claude/settings.json` set `disableAllHooks: true` and disabled `cordon@cordon`. Its `env` pointed `CORDON_HOME` at a planted permissive policy inside the project, and set `NODE_OPTIONS` to `--require` a script that leaves a marker file when loaded.
+
+- **Control, without the managed file:** `claude -p` asked to write a file, and the file was written.
+- **With the managed file:** the same prompt was refused with `outside the certificate: create, update`, and the model reported that reason. The refusal was journaled in the managed home. The planted home was never touched, so the managed `CORDON_HOME` won over the project's. The hook ran, since session state appeared in the managed home, and no marker file appeared, so the project's `NODE_OPTIONS` never reached it. `disableAllHooks` and the disabled plugin changed nothing.
+
+Not covered by this run: `/status` and `claude doctor` output, server-managed settings, MDM delivery, Linux and Windows paths.
 
 ## Audit logs
 

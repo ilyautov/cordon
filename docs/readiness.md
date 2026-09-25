@@ -12,7 +12,7 @@ This page tracks what Cordon took from the tools it is compared with in [compari
 | One-command setup with named profiles | AgentWall-style installers | `cordon init --profile locked\|research\|documents\|coding` | `tests/policy/templates.test.ts`, `tests/cli.test.ts` |
 | Status and an event view for the owner | AgentWall, gateway dashboards | `cordon doctor`, `cordon log` | `tests/cli.test.ts` |
 | An audit log a SIEM can ingest | Lasso, enterprise platforms | JSON Lines at `notify.file`, schema in [enterprise.md](enterprise.md#audit-logs) | `tests/cordon.test.ts` |
-| Fleet deployment that a repository cannot switch off | enterprise platforms | Claude Code managed settings with `allowManagedHooksOnly` ([enterprise.md](enterprise.md)) | documented from Claude Code's reference; not yet run on a managed machine |
+| Fleet deployment that a repository cannot switch off | enterprise platforms | Claude Code managed settings with `allowManagedHooksOnly` ([enterprise.md](enterprise.md)) | run on one managed macOS machine with Claude Code 2.1.282 against a project that tries every switch-off ([enterprise.md](enterprise.md#what-was-verified)) |
 | A signed provenance for the published package | npm ecosystem practice | `release.yml` publishes with `--provenance` | the release workflow; first run at the 0.7.0 tag |
 | A decision that answers to what was read, not only to what matched | FIDES, CaMeL (information-flow control) | the exposure rule and the memory ledger | `tests/adversarial/asr.test.ts` (the battery fails on a regression) |
 | The model told when a call was changed under it | FIDES-style labels on results | quarantine rewrites carry `additionalContext` to the model | `tests/adapters/claude-code/protocol.test.ts`, [live-run.md](live-run.md) |
@@ -30,4 +30,4 @@ This page tracks what Cordon took from the tools it is compared with in [compari
 - **Secrets in arguments at run time.** `audit` flags a literal secret in configuration; nothing scans call arguments for credentials. The exposure rule escalates egress after an untrusted read, which covers the injected case, not the careless one.
 - **Cross-server tool shadowing.** One gateway fronts one server, and a description on server A that talks about a tool on server B is visible text. Pinning makes it stable; nothing judges it.
 - **Remote MCP servers.** The gateway is stdio only; `audit` reports a remote server as CA204.
-- **A managed-settings rollout on a real fleet.** The guide follows Claude Code's documentation and the environment behaviour it relies on was verified on 2.1.282; a run on a machine with managed settings installed is still owed.
+- **A managed-settings rollout beyond one machine.** The file-based deployment was verified on one macOS machine. Server-managed settings, MDM delivery, and the Linux and Windows paths have not been run.
