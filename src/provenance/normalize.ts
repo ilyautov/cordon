@@ -1,4 +1,5 @@
 import { homedir } from 'node:os'
+import { posix } from 'node:path'
 
 /** The shingle window length, in characters of normalized text. */
 export const SHINGLE_WINDOW = 32
@@ -45,19 +46,25 @@ export function atoms(text: string): string[] {
   for (const match of source.matchAll(/\b[\w.-]+@[\w-]+\.[a-z]{2,}\b/giu)) {
     found.add(match[0].toLowerCase())
   }
-  for (const match of source.matchAll(/(?<![\w/])[/~][\w./-]{4,}/gu)) {
+  // `$HOME/x` is the shell's spelling of `~/x`. Without this a page writes
+  // `cat $HOME/.ssh/config` and the path never becomes an atom at all: the
+  // slash after `HOME` sits behind a word character and fails the lookbehind.
+  const shell = source.replace(/\$(?:HOME\b|\{HOME\})/gu, '~')
+  for (const match of shell.matchAll(/(?<![\w/])[/~][\w./-]{4,}/gu)) {
     // A dot belongs to the path character class, so a sentence-final dot
     // sticks to a path just as it sticks to a link. Without trimming, a path
     // from a document lands in the index with a foreign tail and never
     // matches again — that is, it quietly stops being found.
     const path = trimTail(match[0])
     found.add(path)
-    // Both spellings, always. A page writes `~/.ssh/config` and the agent
-    // calls Read with the absolute path, or the other way round; one spelling
-    // in the index and the other in the argument means the two never meet,
-    // and the page chooses which spelling it writes.
-    const other = otherSpelling(path)
-    if (other !== null) found.add(other)
+    // Every spelling, always. A page writes `~/.ssh/config` and the agent
+    // calls Read with the absolute path, or with `~/work/../.ssh/config`;
+    // one spelling in the index and another in the argument means the two
+    // never meet, and the page chooses which spelling it writes.
+    // After a dot the match is the tail of a relative path (`../../etc/x`
+    // yields `/../etc/x`), and folding that would invent an absolute one.
+    const relativeTail = match.index > 0 && shell[match.index - 1] === '.'
+    if (!relativeTail) for (const other of otherSpellings(path)) found.add(other)
   }
   for (const match of source.matchAll(/\b[a-z0-9][a-z0-9_-]{7,}\b/giu)) {
     const token = match[0].toLowerCase()
@@ -77,18 +84,23 @@ export function atoms(text: string): string[] {
  * before the key is needed at all.
  */
 /**
- * The same path written the other way: `~/x` against `<home>/x`.
+ * The same path written the other ways: `~/x` against `<home>/x`, and either
+ * with `.`, `..` and doubled separators folded away.
  *
  * The home directory is the agent's own — the hook runs as the agent — so
  * this is a fact about the machine rather than a guess. A home of `/` gives
- * nothing back: every absolute path would otherwise acquire a tilde twin.
+ * no tilde twin: every absolute path would otherwise acquire one. A relative
+ * path is left alone, because resolving it needs a working directory, and
+ * the page's idea of one is not the agent's.
  */
-function otherSpelling(path: string): string | null {
+function otherSpellings(path: string): string[] {
   const home = homedir().toLowerCase().replace(/\/+$/u, '')
-  if (home === '') return null
-  if (path.startsWith('~/')) return home + path.slice(1)
-  if (path.startsWith(`${home}/`)) return `~${path.slice(home.length)}`
-  return null
+  const absolute = path.startsWith('~/') && home !== '' ? home + path.slice(1) : path
+  if (!absolute.startsWith('/')) return []
+  const folded = posix.normalize(absolute)
+  const out = [absolute, folded]
+  if (home !== '' && folded.startsWith(`${home}/`)) out.push(`~${folded.slice(home.length)}`)
+  return out.filter((form) => form !== path)
 }
 
 /** Trailing punctuation belongs to the sentence, not to the token. */

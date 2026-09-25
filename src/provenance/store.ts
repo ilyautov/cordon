@@ -205,6 +205,14 @@ export class TaintStore {
       hits.add(sourceId)
       found.push(atom)
       let at = lowered.indexOf(atom)
+      // An atom from another spelling of a path (`$HOME`, `..`) is not in the
+      // value verbatim, so where it sits is unknown: the whole value is
+      // declared tainted, as for a decoded form below.
+      if (at < 0) {
+        const whole: [number, number] = [0, value.length]
+        spans.push(whole)
+        perSource.set(sourceId, [...(perSource.get(sourceId) ?? []), whole])
+      }
       while (at >= 0) {
         const span: [number, number] = [at, at + atom.length]
         spans.push(span)

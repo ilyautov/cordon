@@ -11,7 +11,7 @@
 - **Core** plus adapters for **Claude Code** and **Gemini CLI**, a gateway for **MCP hosts**, middleware for **LangChain** agents.
 - Hidden-layer neutralization, provenance of untrusted data, an intent certificate, an action gate that also answers the fact of reading untrusted content, a source-influence footer under the model's answer, and packaging that intercepts four harness events.
 
-**Measured:** 1164 tests · 20 pinned attack vectors · 8 legitimate documents · 2 runtime dependencies.
+**Measured:** 1169 tests · 20 pinned attack vectors · 8 legitimate documents · 2 runtime dependencies.
 
 **Install:** [Claude Code](docs/install.md) · [Gemini CLI](docs/install-gemini.md) · [MCP hosts](docs/install-mcp.md) · [LangChain](docs/install-langchain.md)
 

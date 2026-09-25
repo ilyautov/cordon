@@ -7911,6 +7911,7 @@ function declaredFiles(policy) {
 
 // src/provenance/normalize.ts
 import { homedir as homedir4 } from "node:os";
+import { posix } from "node:path";
 var SHINGLE_WINDOW = 32;
 var SHINGLE_STEP = 8;
 function normalize(text) {
@@ -7925,11 +7926,12 @@ function atoms(text) {
   for (const match of source.matchAll(/\b[\w.-]+@[\w-]+\.[a-z]{2,}\b/giu)) {
     found.add(match[0].toLowerCase());
   }
-  for (const match of source.matchAll(/(?<![\w/])[/~][\w./-]{4,}/gu)) {
+  const shell = source.replace(/\$(?:HOME\b|\{HOME\})/gu, "~");
+  for (const match of shell.matchAll(/(?<![\w/])[/~][\w./-]{4,}/gu)) {
     const path = trimTail(match[0]);
     found.add(path);
-    const other = otherSpelling(path);
-    if (other !== null) found.add(other);
+    const relativeTail = match.index > 0 && shell[match.index - 1] === ".";
+    if (!relativeTail) for (const other of otherSpellings(path)) found.add(other);
   }
   for (const match of source.matchAll(/\b[a-z0-9][a-z0-9_-]{7,}\b/giu)) {
     const token = match[0].toLowerCase();
@@ -7937,12 +7939,14 @@ function atoms(text) {
   }
   return [...found];
 }
-function otherSpelling(path) {
+function otherSpellings(path) {
   const home = homedir4().toLowerCase().replace(/\/+$/u, "");
-  if (home === "") return null;
-  if (path.startsWith("~/")) return home + path.slice(1);
-  if (path.startsWith(`${home}/`)) return `~${path.slice(home.length)}`;
-  return null;
+  const absolute = path.startsWith("~/") && home !== "" ? home + path.slice(1) : path;
+  if (!absolute.startsWith("/")) return [];
+  const folded = posix.normalize(absolute);
+  const out = [absolute, folded];
+  if (home !== "" && folded.startsWith(`${home}/`)) out.push(`~${folded.slice(home.length)}`);
+  return out.filter((form) => form !== path);
 }
 function trimTail(token) {
   return token.toLowerCase().replace(/[.,;:!?)\]]+$/u, "");
@@ -11360,6 +11364,11 @@ var TaintStore = class _TaintStore {
       hits.add(sourceId);
       found.push(atom);
       let at = lowered.indexOf(atom);
+      if (at < 0) {
+        const whole = [0, value.length];
+        spans.push(whole);
+        perSource.set(sourceId, [...perSource.get(sourceId) ?? [], whole]);
+      }
       while (at >= 0) {
         const span = [at, at + atom.length];
         spans.push(span);
