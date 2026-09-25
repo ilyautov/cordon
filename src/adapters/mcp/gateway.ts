@@ -9,6 +9,7 @@ import { PATH_KEYS, URL_KEYS, fold } from '../../core/argument-keys.js'
 import { makeDirectory } from '../../core/mkdir.js'
 import type { Source, ToolCall } from '../../core/types.js'
 import type { Policy } from '../../policy/defaults.js'
+import { homeProblem, projectDir } from '../../policy/home.js'
 import { classifySource } from '../../provenance/trust.js'
 import { parseError, parseLine, pendingKey, toolError, type Message } from './jsonrpc.js'
 
@@ -75,6 +76,11 @@ export function runGateway(options: GatewayOptions): Promise<number> {
     // state the hooks refuse to start in, and here refusing is cheap: the
     // host simply sees a server that failed to start.
     try {
+      // A project's MCP configuration can set env for the server entry, and
+      // with it CORDON_HOME: the same repository-supplied policy the hooks
+      // refuse.
+      const problem = homeProblem(options.cordonHome, projectDir())
+      if (problem !== null) throw new Error(problem)
       ensureUsableHome(options.cordonHome)
     } catch (error) {
       finish(1, `the home directory is not usable: ${(error as Error).message}`)

@@ -7367,14 +7367,14 @@ var require_dist = __commonJS({
 });
 
 // src/cli.ts
-import { accessSync as accessSync4, constants as constants4, existsSync, mkdtempSync, readdirSync as readdirSync5, readFileSync as readFileSync6, realpathSync as realpathSync2, rmSync as rmSync5, writeFileSync as writeFileSync5 } from "node:fs";
-import { homedir as homedir4, tmpdir } from "node:os";
+import { accessSync as accessSync4, constants as constants4, existsSync, mkdtempSync, readdirSync as readdirSync5, readFileSync as readFileSync6, realpathSync as realpathSync3, rmSync as rmSync5, writeFileSync as writeFileSync5 } from "node:fs";
+import { homedir as homedir5, tmpdir } from "node:os";
 import { join as join12 } from "node:path";
 import { fileURLToPath } from "node:url";
 
 // src/adapters/claude-code/main.ts
 import { accessSync, constants } from "node:fs";
-import { homedir as homedir3 } from "node:os";
+import { homedir as homedir4 } from "node:os";
 import { join as join8 } from "node:path";
 
 // src/core/mkdir.ts
@@ -7392,6 +7392,36 @@ function makeDirectory(path, mode = 448) {
       if (error.code !== "EEXIST") throw error;
     }
   }
+}
+
+// src/policy/home.ts
+import { realpathSync } from "node:fs";
+import { homedir } from "node:os";
+import { dirname, isAbsolute, relative, resolve } from "node:path";
+function homeProblem(home, projectDir2, userHome = homedir()) {
+  const project = real(projectDir2);
+  const user = real(userHome);
+  if (inside(user, project)) return null;
+  const resolved = real(home);
+  if (!inside(resolved, project)) return null;
+  return `Cordon's home ${home} lies inside the project ${projectDir2}: a repository could supply its own policy that way (a project setting can set CORDON_HOME). Point CORDON_HOME outside the project`;
+}
+function inside(path, dir) {
+  const rel = relative(dir, path);
+  return rel === "" || !rel.startsWith("..") && !isAbsolute(rel);
+}
+function real(path) {
+  const absolute = resolve(path);
+  try {
+    return realpathSync(absolute);
+  } catch {
+    const parent = dirname(absolute);
+    if (parent === absolute) return absolute;
+    return resolve(real(parent), relative(parent, absolute));
+  }
+}
+function projectDir() {
+  return process.env["CLAUDE_PROJECT_DIR"] ?? process.env["GEMINI_PROJECT_DIR"] ?? process.cwd();
 }
 
 // src/policy/load.ts
@@ -7624,7 +7654,7 @@ function viewIsUnknown(source) {
 }
 
 // src/gate/gate.ts
-import { resolve as resolve2, sep as sep3 } from "node:path";
+import { resolve as resolve3, sep as sep3 } from "node:path";
 
 // src/gate/fields.ts
 var MAX_FIELDS = 2e3;
@@ -7683,9 +7713,9 @@ function fold(name) {
 }
 
 // src/policy/selfprotect.ts
-import { readlinkSync, realpathSync } from "node:fs";
-import { homedir } from "node:os";
-import { basename, dirname, join as join2, resolve, sep as sep2 } from "node:path";
+import { readlinkSync, realpathSync as realpathSync2 } from "node:fs";
+import { homedir as homedir2 } from "node:os";
+import { basename, dirname as dirname2, join as join2, resolve as resolve2, sep as sep2 } from "node:path";
 var HARNESS_CONFIG = [".claude", ".cursor", ".codex", ".gemini", ".config" + sep2 + "cordon"];
 var HARNESS_SEGMENTS = HARNESS_CONFIG.map(
   (marker) => marker.split(sep2).map(fold2)
@@ -7694,22 +7724,22 @@ function fold2(segment) {
   return segment.toLowerCase().replace(/[. ]+$/, "");
 }
 function expandTilde(path) {
-  if (path === "~") return homedir();
-  if (path.startsWith("~" + sep2) || path.startsWith("~/")) return join2(homedir(), path.slice(2));
+  if (path === "~") return homedir2();
+  if (path.startsWith("~" + sep2) || path.startsWith("~/")) return join2(homedir2(), path.slice(2));
   return path;
 }
 function withoutSymlinks(path, hops = 0) {
   if (hops > 32) return path;
   try {
-    return realpathSync(path);
+    return realpathSync2(path);
   } catch {
   }
   try {
     const link = readlinkSync(path);
-    return withoutSymlinks(resolve(dirname(path), link), hops + 1);
+    return withoutSymlinks(resolve2(dirname2(path), link), hops + 1);
   } catch {
   }
-  const parent = dirname(path);
+  const parent = dirname2(path);
   if (parent === path) return path;
   return join2(withoutSymlinks(parent, hops), basename(path));
 }
@@ -7726,7 +7756,7 @@ function hitsHarnessConfig(path) {
   );
 }
 function canonicalForms(target) {
-  const path = resolve(expandTilde(target));
+  const path = resolve2(expandTilde(target));
   return [.../* @__PURE__ */ new Set([path, withoutSymlinks(path)])];
 }
 function touchesCordonItself(target, cordonHome2) {
@@ -7872,7 +7902,7 @@ function declaredFiles(policy) {
 }
 
 // src/provenance/normalize.ts
-import { homedir as homedir2 } from "node:os";
+import { homedir as homedir3 } from "node:os";
 var SHINGLE_WINDOW = 32;
 var SHINGLE_STEP = 8;
 function normalize(text) {
@@ -7900,7 +7930,7 @@ function atoms(text) {
   return [...found];
 }
 function otherSpelling(path) {
-  const home = homedir2().toLowerCase().replace(/\/+$/u, "");
+  const home = homedir3().toLowerCase().replace(/\/+$/u, "");
   if (home === "") return null;
   if (path.startsWith("~/")) return home + path.slice(1);
   if (path.startsWith(`${home}/`)) return `~${path.slice(home.length)}`;
@@ -8351,7 +8381,7 @@ function destination(parts) {
   return only ?? null;
 }
 function normalizePath(path) {
-  return resolve2(path);
+  return resolve3(path);
 }
 function samePath(label, target) {
   return normalizePath(label) === target;
@@ -8469,7 +8499,7 @@ function stable(value) {
 
 // src/notify/notifier.ts
 import { appendFileSync } from "node:fs";
-import { dirname as dirname2 } from "node:path";
+import { dirname as dirname3 } from "node:path";
 var FileNotifier = class {
   constructor(path) {
     this.path = path;
@@ -8477,7 +8507,7 @@ var FileNotifier = class {
   path;
   notify(event) {
     try {
-      makeDirectory(dirname2(this.path), 493);
+      makeDirectory(dirname3(this.path), 493);
       appendFileSync(this.path, JSON.stringify(event) + "\n", "utf8");
     } catch {
     }
@@ -12859,7 +12889,7 @@ function deny(reason) {
 
 // src/adapters/claude-code/main.ts
 function cordonHome() {
-  return process.env.CORDON_HOME ?? join8(homedir3(), ".cordon");
+  return process.env.CORDON_HOME ?? join8(homedir4(), ".cordon");
 }
 function runHook(stdin, home = cordonHome()) {
   let event;
@@ -12869,6 +12899,8 @@ function runHook(stdin, home = cordonHome()) {
     return JSON.stringify(deny2(`Cordon failure: ${error.message}`));
   }
   try {
+    const problem = homeProblem(home, projectDir());
+    if (problem !== null) throw new Error(problem);
     ensureUsableHome(home);
     const policy = loadPolicy(home);
     return JSON.stringify(handle(event, { policy, cordonHome: home }));
@@ -13163,6 +13195,8 @@ function sourceLabel2(call) {
 function runHook2(stdin, home = cordonHome()) {
   const event = parseEvent2(stdin);
   try {
+    const problem = homeProblem(home, projectDir());
+    if (problem !== null) throw new Error(problem);
     ensureUsableHome2(home);
     const policy = loadPolicy(home);
     return JSON.stringify(handle2(event, { policy, cordonHome: home }));
@@ -13229,7 +13263,7 @@ function runGateway(options) {
 `));
   const hostIn = options.hostIn ?? process.stdin;
   const hostOut = options.hostOut ?? process.stdout;
-  return new Promise((resolve3) => {
+  return new Promise((resolve4) => {
     let settled = false;
     let upstream = null;
     const finish = (code, reason) => {
@@ -13237,9 +13271,11 @@ function runGateway(options) {
       settled = true;
       if (reason !== void 0) log(reason);
       if (upstream !== null && upstream.exitCode === null && !upstream.killed) upstream.kill();
-      resolve3(code);
+      resolve4(code);
     };
     try {
+      const problem = homeProblem(options.cordonHome, projectDir());
+      if (problem !== null) throw new Error(problem);
       ensureUsableHome3(options.cordonHome);
     } catch (error) {
       finish(1, `the home directory is not usable: ${error.message}`);
@@ -13513,7 +13549,7 @@ function ensureUsableHome3(home) {
 
 // src/audit/audit.ts
 import { readdirSync as readdirSync4, readFileSync as readFileSync5, statSync } from "node:fs";
-import { join as join11, relative } from "node:path";
+import { join as join11, relative as relative2 } from "node:path";
 var CODES = {
   CA101: { severity: "high", owasp: "LLM01 Prompt Injection", title: "invisible characters in a file the agent loads as instruction" },
   CA102: { severity: "medium", owasp: "LLM01 Prompt Injection", title: "an encoded block in a file the agent loads as instruction" },
@@ -13524,6 +13560,7 @@ var CODES = {
   CA203: { severity: "high", owasp: "LLM02 Sensitive Information Disclosure", title: "a literal secret in an MCP server configuration" },
   CA204: { severity: "low", owasp: "LLM01 Prompt Injection", title: "a remote MCP server the stdio gateway cannot cover" },
   CA301: { severity: "medium", owasp: "LLM03 Supply Chain", title: "a hook defined in the project's own settings" },
+  CA303: { severity: "high", owasp: "LLM03 Supply Chain", title: "the project sets environment that steers Cordon or the hook process" },
   CA302: { severity: "low", owasp: "LLM01 Prompt Injection", title: "Claude Code runs without Cordon" },
   CA901: { severity: "medium", owasp: "LLM03 Supply Chain", title: "a configuration file that could not be read" }
 };
@@ -13601,7 +13638,7 @@ var INSTRUCTION_CODES = [
 function instructionFinding(path, base, add) {
   const text = readSmall(path);
   if (text === null) return;
-  const file = base.label + relative(base.dir, path);
+  const file = base.label + relative2(base.dir, path);
   const found = sanitize(text).findings;
   for (const { code, kinds, why } of INSTRUCTION_CODES) {
     const matching = found.filter((finding) => kinds.has(finding.kind));
@@ -13657,6 +13694,7 @@ function serverFindings(name, entry, file, add) {
     const unpinned = unpinnedPackage(upstream);
     if (unpinned !== null) add("CA202", file, `\`${unpinned}\` resolves to whatever the registry serves at start; pin a version`, name);
   }
+  if (!file.startsWith("~/")) steeringEnv(entry.env, file, add);
   for (const [where, block] of [["env", entry.env], ["headers", entry.headers]]) {
     if (!isRecord3(block)) continue;
     for (const [key, value] of Object.entries(block)) {
@@ -13664,6 +13702,13 @@ function serverFindings(name, entry, file, add) {
         add("CA203", file, `${where}.${key} holds a literal value; reference the environment instead (\${${key}})`, name);
       }
     }
+  }
+}
+var STEERING = /^(CORDON_[A-Z_]*|NODE_OPTIONS|NODE_PATH|PATH|LD_PRELOAD|DYLD_[A-Z_]+)$/u;
+function steeringEnv(env, file, add) {
+  if (!isRecord3(env)) return;
+  for (const key of Object.keys(env)) {
+    if (STEERING.test(key)) add("CA303", file, `env.${key} is set by the project; it reaches the hook processes that enforce the policy`, key);
   }
 }
 function isGateway(words) {
@@ -13722,6 +13767,7 @@ function hookFindings(options, add) {
       add("CA301", name, `\`${command}\` runs on this machine when the agent starts here; it came with the repository`);
     }
     if (hasCordonPlugin(settings2)) cordonSeen = true;
+    steeringEnv(isRecord3(settings2) ? settings2["env"] : void 0, name, add);
   }
   const userSettings = join11(options.home, ".claude", "settings.json");
   if (!isFile(userSettings)) return;
@@ -14163,7 +14209,7 @@ ${USAGE}
     return 2;
   }
   const root = dirs[0] ?? process.cwd();
-  const findings = audit({ root, home: process.env["HOME"] ?? homedir4() });
+  const findings = audit({ root, home: process.env["HOME"] ?? homedir5() });
   if (args.includes("--sarif")) process.stdout.write(JSON.stringify(sarif(findings), null, 2) + "\n");
   else if (args.includes("--json")) process.stdout.write(JSON.stringify(findings, null, 2) + "\n");
   else printAudit(findings);
@@ -14259,7 +14305,7 @@ function launchedDirectly() {
   const entry = process.argv[1];
   if (!entry) return false;
   try {
-    return realpathSync2(fileURLToPath(import.meta.url)) === realpathSync2(entry);
+    return realpathSync3(fileURLToPath(import.meta.url)) === realpathSync3(entry);
   } catch {
     return false;
   }

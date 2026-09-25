@@ -1,6 +1,7 @@
 import { accessSync, constants } from 'node:fs'
 import { join } from 'node:path'
 import { makeDirectory } from '../../core/mkdir.js'
+import { homeProblem, projectDir } from '../../policy/home.js'
 import { loadPolicy } from '../../policy/load.js'
 import { cordonHome } from '../claude-code/main.js'
 import { handle, silentOnFailure } from './handlers.js'
@@ -19,6 +20,10 @@ export function runHook(stdin: string, home: string = cordonHome()): string {
   const event = parseEvent(stdin)
 
   try {
+    // Thrown, so the refusal takes the form the event allows, as for any
+    // other failure here.
+    const problem = homeProblem(home, projectDir())
+    if (problem !== null) throw new Error(problem)
     ensureUsableHome(home)
     const policy = loadPolicy(home)
     return JSON.stringify(handle(event, { policy, cordonHome: home }))

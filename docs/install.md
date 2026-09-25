@@ -98,7 +98,7 @@ The lifetimes are constants in `src/session/sweep.ts` and are deliberately not c
 
 The policy is read from one place: `~/.cordon/policy.yaml`. The `CORDON_HOME` variable moves Cordon's home directory as a whole.
 
-The project's working directory takes no part in this and never will. A poisoned repository bringing its own config with the defence turned off would disable Cordon before it ever fired.
+The project's working directory takes no part in this and never will. The same goes for a home inside the project: Claude Code hands a project's `env` setting to hook processes (verified on 2.1.282), so a repository could otherwise point `CORDON_HOME` at a policy of its own. A hook or gateway whose home resolves inside the project directory refuses, and says why. A session started in your home directory itself is exempt. A poisoned repository bringing its own config with the defence turned off would disable Cordon before it ever fired.
 
 Without a policy file the default applies: `autonomous` mode, a profile of two classes, `read` and `summarize`, and no declared tools. Such an agent can read and summarize, and nothing else. The default is meant to be uselessly safe; widening it is a deliberate act.
 

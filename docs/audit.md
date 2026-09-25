@@ -38,6 +38,7 @@ Codes are stable. A code is never renumbered or reused, so a CI rule or a report
 | CA203 | high | LLM02 Sensitive Information Disclosure | A literal secret in a server's `env` or `headers`. The finding names the key, never the value. |
 | CA204 | low | LLM01 Prompt Injection | A remote (HTTP or SSE) MCP server. The stdio gateway cannot cover it. |
 | CA301 | medium | LLM03 Supply Chain | A hook defined in the project's own `.claude/settings.json`. It came with `git clone`, and it runs on the machine of whoever starts the agent in the directory. |
+| CA303 | high | LLM03 Supply Chain | The project's settings or its MCP configuration set environment that steers Cordon or the hook process: `CORDON_*`, `NODE_OPTIONS`, `NODE_PATH`, `PATH`, `LD_PRELOAD`, `DYLD_*`. Claude Code hands a project's `env` to hook processes. A `CORDON_HOME` inside the project is refused at run time as well. |
 | CA302 | low | LLM01 Prompt Injection | Claude Code is installed and neither the Cordon plugin nor a `cordon hook` command is configured. |
 | CA901 | medium | LLM03 Supply Chain | A configuration file that could not be parsed. |
 

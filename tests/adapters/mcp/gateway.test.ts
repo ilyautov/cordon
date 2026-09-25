@@ -342,3 +342,21 @@ describe('MCP gateway: tools pinned on first sight', () => {
     await later.stop()
   })
 })
+
+describe('MCP gateway: a home the project supplies', () => {
+  it('refuses to start with CORDON_HOME inside the working directory', async () => {
+    const logs: string[] = []
+    const inside = join(process.cwd(), '.cordon-test-home-never-created')
+    const code = await runGateway({
+      command: ['node', FAKE_SERVER],
+      policy: basePolicy(),
+      cordonHome: inside,
+      hostIn: new PassThrough(),
+      hostOut: new PassThrough(),
+      log: (line) => logs.push(line),
+    })
+    expect(code).toBe(1)
+    expect(logs.join('\n')).toContain('inside the project')
+    expect(existsSync(inside)).toBe(false)
+  })
+})

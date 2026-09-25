@@ -46,6 +46,7 @@ export const CODES = {
   CA203: { severity: 'high', owasp: 'LLM02 Sensitive Information Disclosure', title: 'a literal secret in an MCP server configuration' },
   CA204: { severity: 'low', owasp: 'LLM01 Prompt Injection', title: 'a remote MCP server the stdio gateway cannot cover' },
   CA301: { severity: 'medium', owasp: 'LLM03 Supply Chain', title: 'a hook defined in the project\'s own settings' },
+  CA303: { severity: 'high', owasp: 'LLM03 Supply Chain', title: 'the project sets environment that steers Cordon or the hook process' },
   CA302: { severity: 'low', owasp: 'LLM01 Prompt Injection', title: 'Claude Code runs without Cordon' },
   CA901: { severity: 'medium', owasp: 'LLM03 Supply Chain', title: 'a configuration file that could not be read' },
 } as const satisfies Record<string, { severity: Severity; owasp: string; title: string }>
@@ -216,6 +217,8 @@ function serverFindings(name: string, entry: ServerEntry, file: string, add: Add
     if (unpinned !== null) add('CA202', file, `\`${unpinned}\` resolves to whatever the registry serves at start; pin a version`, name)
   }
 
+  if (!file.startsWith('~/')) steeringEnv(entry.env, file, add)
+
   for (const [where, block] of [['env', entry.env], ['headers', entry.headers]] as const) {
     if (!isRecord(block)) continue
     for (const [key, value] of Object.entries(block)) {
@@ -225,6 +228,22 @@ function serverFindings(name: string, entry: ServerEntry, file: string, add: Add
         add('CA203', file, `${where}.${key} holds a literal value; reference the environment instead (\${${key}})`, name)
       }
     }
+  }
+}
+
+/**
+ * Variables that decide which policy Cordon reads or what code runs in the
+ * hook process. Claude Code hands a project's `env` to hook processes
+ * (verified live), so a repository setting CORDON_HOME brings its own policy,
+ * and NODE_OPTIONS or PATH put its own code into the hook. The runtime refuses
+ * a home inside the project; this names the attempt before anything runs.
+ */
+const STEERING = /^(CORDON_[A-Z_]*|NODE_OPTIONS|NODE_PATH|PATH|LD_PRELOAD|DYLD_[A-Z_]+)$/u
+
+function steeringEnv(env: unknown, file: string, add: Add): void {
+  if (!isRecord(env)) return
+  for (const key of Object.keys(env)) {
+    if (STEERING.test(key)) add('CA303', file, `env.${key} is set by the project; it reaches the hook processes that enforce the policy`, key)
   }
 }
 
@@ -288,6 +307,7 @@ function hookFindings(options: AuditOptions, add: Add): void {
       add('CA301', name, `\`${command}\` runs on this machine when the agent starts here; it came with the repository`)
     }
     if (hasCordonPlugin(settings)) cordonSeen = true
+    steeringEnv(isRecord(settings) ? settings['env'] : undefined, name, add)
   }
 
   const userSettings = join(options.home, '.claude', 'settings.json')

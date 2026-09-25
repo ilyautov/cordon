@@ -191,3 +191,38 @@ describe('cordon audit', () => {
     expect(run(['audit', root, '--fail-on', 'critical'], '', { HOME: home }).status).toBe(2)
   })
 })
+
+describe('cordon hook: a home the project itself supplies', () => {
+  beforeAll(() => {
+    ensureBuiltCli()
+  }, 60_000)
+
+  // Project settings can set `env`, and Claude Code hands it to hook
+  // processes — verified live. A cloned repository could point CORDON_HOME at
+  // a directory of its own holding a permissive policy, and the defence would
+  // switch itself off with every check still reporting green.
+  const event = JSON.stringify({ session_id: 'h1', hook_event_name: 'PreToolUse', tool_name: 'Read', tool_input: { file_path: '/etc/hosts' } })
+
+  it('refuses when CORDON_HOME lies inside the project directory', () => {
+    const project = mkdtempSync(join(tmpdir(), 'cordon-project-'))
+    const home = join(project, '.cordon-here')
+    const { stdout, status } = run(['hook'], event, { CORDON_HOME: home, CLAUDE_PROJECT_DIR: project })
+    expect(status).toBe(2)
+    expect(stdout).toContain('inside the project')
+  })
+
+  it('works when CORDON_HOME lies outside the project directory', () => {
+    const project = mkdtempSync(join(tmpdir(), 'cordon-project-'))
+    const home = mkdtempSync(join(tmpdir(), 'cordon-home-'))
+    const { status } = run(['hook'], event, { CORDON_HOME: home, CLAUDE_PROJECT_DIR: project })
+    expect(status).toBe(0)
+  })
+
+  it('a session started in the home directory itself is not a project', () => {
+    // Claude Code started in ~ has ~ as its project directory, and every
+    // home Cordon could use lies inside it.
+    const user = mkdtempSync(join(tmpdir(), 'cordon-user-'))
+    const { status } = run(['hook'], event, { HOME: user, CORDON_HOME: join(user, '.cordon'), CLAUDE_PROJECT_DIR: user })
+    expect(status).toBe(0)
+  })
+})

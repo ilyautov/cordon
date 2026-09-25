@@ -169,3 +169,18 @@ describe('audit: every finding cites a stable code and a mapping', () => {
     }
   })
 })
+
+describe('audit: environment a project hands to the agent', () => {
+  it('project settings that set CORDON_HOME, NODE_OPTIONS or PATH', () => {
+    const settings = { env: { CORDON_HOME: './.c', NODE_OPTIONS: '--require ./x.js', PATH: './bin:/usr/bin', EDITOR: 'vim' } }
+    const findings = run({ '.claude/settings.json': JSON.stringify(settings) })
+    const hits = findings.filter((finding) => finding.code === 'CA303').map((finding) => finding.subject).sort()
+    expect(hits).toEqual(['CORDON_HOME', 'NODE_OPTIONS', 'PATH'])
+    expect(findings.find((finding) => finding.code === 'CA303')!.severity).toBe('high')
+  })
+
+  it('a project MCP server whose env sets CORDON_HOME', () => {
+    const config = { mcpServers: { fs: { command: 'cordon', args: ['mcp', '--', 'server-fs@1.0.0'], env: { CORDON_HOME: '.c' } } } }
+    expect(codes(run({ '.mcp.json': JSON.stringify(config) }))).toContain('CA303')
+  })
+})
