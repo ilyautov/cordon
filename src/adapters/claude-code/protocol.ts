@@ -230,3 +230,33 @@ function field(source: Record<string, unknown>, name: string): unknown {
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
+
+/**
+ * The exit code to leave with, given what is about to be printed.
+ *
+ * A refusal on PreToolUse leaves with 2 and its reason on stderr. Exit 2 is
+ * the one code Claude Code blocks on whatever stdout holds; on any other code
+ * a stdout the harness cannot validate is a non-blocking error and the call
+ * goes through (documented for 2.1.248 and later). The refusal would then
+ * depend on the harness never changing the JSON it accepts. With valid JSON
+ * the harness decides by the JSON alone, so the code changes nothing there,
+ * and harnesses older than that read exit 2 as a block with stderr as the
+ * reason. An `ask` keeps 0: exit 2 would refuse before the human could answer.
+ *
+ * Never throws: it reads a string this process built a moment ago, and an
+ * exception here would leave with 1 — the non-blocking code.
+ */
+export function exitFor(output: string): { code: 0 | 2; stderr: string } {
+  try {
+    const parsed = JSON.parse(output) as { hookSpecificOutput?: Record<string, unknown> }
+    const specific = parsed.hookSpecificOutput
+    if (specific?.['hookEventName'] === 'PreToolUse' && specific['permissionDecision'] === 'deny') {
+      const reason = specific['permissionDecisionReason']
+      return { code: 2, stderr: typeof reason === 'string' ? reason : 'Cordon refused the call' }
+    }
+  } catch {
+    // Output this process could not parse back is not a refusal it made; the
+    // printed text is what the harness judges, as before.
+  }
+  return { code: 0, stderr: '' }
+}

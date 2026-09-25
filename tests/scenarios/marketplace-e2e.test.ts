@@ -1,4 +1,4 @@
-import { execFileSync } from 'node:child_process'
+import { spawnSync } from 'node:child_process'
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -201,13 +201,18 @@ describe('the end-to-end scenario on the bundled plugin', () => {
   // neither the packaging, nor the entry point, nor that the decision made it
   // to stdout.
   function spawn(home: string, event: object): Record<string, any> {
-    const out = execFileSync('node', [join(process.cwd(), 'plugin', 'dist', 'cli.js'), 'hook'], {
+    const result = spawnSync('node', [join(process.cwd(), 'plugin', 'dist', 'cli.js'), 'hook'], {
       input: JSON.stringify(event),
       env: { ...process.env, CORDON_HOME: home },
       encoding: 'utf8',
     })
+    const out = result.stdout
     expect(out.trim(), 'the harness reads empty output as "let it through"').not.toBe('')
-    return JSON.parse(out)
+    const decision = JSON.parse(out)
+    // A refusal also leaves with 2, so it blocks even where the JSON is not read.
+    const denied = decision.hookSpecificOutput?.permissionDecision === 'deny'
+    expect(result.status, result.stderr).toBe(denied ? 2 : 0)
+    return decision
   }
 
   it('separate processes give the same outcome as calls inside one', () => {

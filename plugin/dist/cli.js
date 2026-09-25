@@ -12466,6 +12466,18 @@ function field(source, name) {
 function isRecord(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
+function exitFor(output) {
+  try {
+    const parsed = JSON.parse(output);
+    const specific = parsed.hookSpecificOutput;
+    if (specific?.["hookEventName"] === "PreToolUse" && specific["permissionDecision"] === "deny") {
+      const reason = specific["permissionDecisionReason"];
+      return { code: 2, stderr: typeof reason === "string" ? reason : "Cordon refused the call" };
+    }
+  } catch {
+  }
+  return { code: 0, stderr: "" };
+}
 
 // src/adapters/claude-code/handlers.ts
 function handle(event, env) {
@@ -13594,8 +13606,12 @@ ${USAGE}
   } catch {
     stdin = "";
   }
-  process.stdout.write(run(stdin) + "\n");
-  return 0;
+  const output = run(stdin);
+  process.stdout.write(output + "\n");
+  if (named !== "claude-code") return 0;
+  const exit = exitFor(output);
+  if (exit.stderr !== "") process.stderr.write(exit.stderr + "\n");
+  return exit.code;
 }
 function launchedDirectly() {
   const entry = process.argv[1];

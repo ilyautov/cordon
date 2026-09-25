@@ -1,4 +1,4 @@
-import { execFileSync } from 'node:child_process'
+import { execFileSync, spawnSync, type SpawnSyncOptions } from 'node:child_process'
 import { builtinModules } from 'node:module'
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -24,6 +24,17 @@ function selfProtectEvent(home: string): string {
     tool_name: 'Write',
     tool_input: { file_path: join(home, 'policy.yaml'), content: 'mode: off' },
   })
+}
+
+/**
+ * Starts the hook and returns its stdout, requiring exit 2. A refusal leaves
+ * with 2 so that it blocks even where the harness cannot read the JSON; a
+ * zero here would mean the deny rests on the JSON alone.
+ */
+function refused(command: string, args: string[], options: SpawnSyncOptions): string {
+  const result = spawnSync(command, args, { ...options, encoding: 'utf8' })
+  expect(result.status, String(result.stderr)).toBe(2)
+  return String(result.stdout)
 }
 
 describe('the plugin is self-contained', () => {
@@ -58,11 +69,10 @@ describe('the plugin is self-contained', () => {
     const elsewhere = mkdtempSync(join(tmpdir(), 'cordon-elsewhere-'))
     const home = mkdtempSync(join(tmpdir(), 'cordon-bundle-home-'))
 
-    const out = execFileSync('node', [join(process.cwd(), BUNDLE), 'hook'], {
+    const out = refused('node', [join(process.cwd(), BUNDLE), 'hook'], {
       input: selfProtectEvent(home),
       cwd: elsewhere,
       env: { ...process.env, CORDON_HOME: home },
-      encoding: 'utf8',
     })
 
     const decision = JSON.parse(out)
@@ -81,11 +91,10 @@ describe('the plugin is self-contained', () => {
     cpSync(join(process.cwd(), 'plugin'), installed, { recursive: true })
     const home = mkdtempSync(join(tmpdir(), 'cordon-installed-home-'))
 
-    const out = execFileSync('node', [join(installed, 'dist', 'cli.js'), 'hook'], {
+    const out = refused('node', [join(installed, 'dist', 'cli.js'), 'hook'], {
       input: selfProtectEvent(home),
       cwd: installed,
       env: { ...process.env, CORDON_HOME: home },
-      encoding: 'utf8',
     })
 
     expect(JSON.parse(out).hookSpecificOutput.permissionDecision).toBe('deny')
@@ -106,11 +115,10 @@ describe('the plugin is self-contained', () => {
       installed,
     )
 
-    const out = execFileSync('/bin/sh', ['-c', command], {
+    const out = refused('/bin/sh', ['-c', command], {
       input: selfProtectEvent(home),
       cwd: installed,
       env: { ...process.env, CORDON_HOME: home },
-      encoding: 'utf8',
     })
 
     expect(JSON.parse(out).hookSpecificOutput.permissionDecision).toBe('deny')
@@ -133,10 +141,9 @@ describe('the plugin is self-contained', () => {
     symlinkSync(real, link, 'dir')
     const home = mkdtempSync(join(tmpdir(), 'cordon-symlink-home-'))
 
-    const out = execFileSync('node', [join(link, 'cordon', 'dist', 'cli.js'), 'hook'], {
+    const out = refused('node', [join(link, 'cordon', 'dist', 'cli.js'), 'hook'], {
       input: selfProtectEvent(home),
       env: { ...process.env, CORDON_HOME: home },
-      encoding: 'utf8',
     })
 
     expect(out.trim(), 'the harness reads empty hook output as "let it through"').not.toBe('')

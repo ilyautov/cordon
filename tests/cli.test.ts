@@ -91,13 +91,17 @@ describe('cordon hook', () => {
     return { CORDON_HOME: mkdtempSync(join(tmpdir(), 'cordon-hook-')) }
   }
 
-  it('prints deny and exits zero on a call outside the default profile', () => {
+  it('prints deny and exits 2 on a call outside the default profile', () => {
+    // Exit 2 is the one code Claude Code blocks on whatever stdout holds: a
+    // JSON the harness stops accepting would otherwise read as a non-blocking
+    // error, and the call would go through. With valid JSON the harness
+    // decides by the JSON alone, so the code changes nothing there.
     const event = JSON.stringify({
       session_id: 'cli', hook_event_name: 'PreToolUse',
       tool_name: 'Write', tool_input: { file_path: '/tmp/x', content: 'y' },
     })
     const { stdout, status } = run(['hook'], event, homeEnv())
-    expect(status).toBe(0)
+    expect(status).toBe(2)
     expect(JSON.parse(stdout).hookSpecificOutput.permissionDecision).toBe('deny')
   })
 
@@ -113,7 +117,7 @@ describe('cordon hook', () => {
 
   it('prints deny on empty stdin instead of staying silent', () => {
     const { stdout, status } = run(['hook'], '', homeEnv())
-    expect(status).toBe(0)
+    expect(status).toBe(2)
     expect(JSON.parse(stdout).hookSpecificOutput.permissionDecision).toBe('deny')
   })
 })

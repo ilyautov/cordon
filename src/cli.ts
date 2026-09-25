@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { cordonHome, runHook as runClaudeCodeHook } from './adapters/claude-code/main.js'
+import { exitFor } from './adapters/claude-code/protocol.js'
 import { runHook as runGeminiHook } from './adapters/gemini-cli/main.js'
 import { runGateway } from './adapters/mcp/gateway.js'
 import { humanSeesRendered, type SourceView } from './core/types.js'
@@ -599,8 +600,14 @@ function hook(args: string[]): number {
   } catch {
     stdin = ''
   }
-  process.stdout.write(run(stdin) + '\n')
-  return 0
+  const output = run(stdin)
+  process.stdout.write(output + '\n')
+  // Only on Claude Code, where the docs and a live run agree on what exit 2
+  // does. Gemini CLI's own semantics were never run live.
+  if (named !== 'claude-code') return 0
+  const exit = exitFor(output)
+  if (exit.stderr !== '') process.stderr.write(exit.stderr + '\n')
+  return exit.code
 }
 
 /**
