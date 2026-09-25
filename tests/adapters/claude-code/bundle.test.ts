@@ -53,7 +53,10 @@ describe('the plugin is self-contained', () => {
     // was no longer in the code and stayed silent about the one that replaced
     // it. A list of names by its very design misses every new dependency, that
     // is, exactly the case the check was written for.
-    const external = [...source.matchAll(/(?:from\s*|require\()['"]([^'"]+)['"]/gu)]
+    // `from` must stand where an import puts it, after whitespace or a
+    // brace: the string '--from' in the audit's flag handling once read as
+    // an import of whatever came after its closing quote.
+    const external = [...source.matchAll(/(?:(?:^|[\s}])from\s*|require\(|\bimport\s*\(?\s*)['"]([^'"]+)['"]/gmu)]
       .map((match) => match[1]!)
       .filter((specifier) => !specifier.startsWith('.'))
       // Built-in modules are filtered out by Node's own list rather than by

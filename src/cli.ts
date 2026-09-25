@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { accessSync, constants, existsSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { cordonHome, runHook as runClaudeCodeHook } from './adapters/claude-code/main.js'
@@ -8,13 +8,14 @@ import { exitFor } from './adapters/claude-code/protocol.js'
 import { runHook as runGeminiHook } from './adapters/gemini-cli/main.js'
 import { runGateway } from './adapters/mcp/gateway.js'
 import { humanSeesRendered, type SourceView } from './core/types.js'
+import { audit, CODES, type AuditFinding, type Severity } from './audit/audit.js'
 import { Cordon } from './cordon.js'
 import { loadPolicy } from './policy/load.js'
 import { sanitize } from './sanitize/index.js'
 import { MemoryLedger } from './session/memory.js'
 
 const USAGE =
-  'usage: cordon scan <file|-> [--json] | cordon hook [--harness claude-code|gemini] | cordon mcp -- <server command...> | cordon mcp approve -- <server command...> | cordon doctor'
+  'usage: cordon scan <file|-> [--json] | cordon hook [--harness claude-code|gemini] | cordon mcp -- <server command...> | cordon mcp approve -- <server command...> | cordon doctor | cordon audit [dir] [--json|--sarif] [--fail-on high|medium|low]'
 
 /**
  * Event parsing depends on the harness, so the harness is named explicitly.
@@ -48,6 +49,8 @@ export function main(argv: string[]): number | Promise<number> {
   if (command === 'mcp') return mcp(rest)
 
   if (command === 'doctor') return printDoctor(cordonHome())
+
+  if (command === 'audit') return runAudit(rest)
 
   if (command !== 'scan') {
     process.stderr.write(USAGE + '\n')
@@ -588,6 +591,81 @@ function mcp(args: string[]): Promise<number> | number {
   }
 
   return runGateway({ command, policy, cordonHome: home })
+}
+
+const SEVERITY_RANK: Record<Severity, number> = { low: 1, medium: 2, high: 3 }
+
+/**
+ * `cordon audit`: reads what an agent will load and reports it. Exit 0 unless
+ * the caller asks otherwise with --fail-on: a finding is a signal, and making
+ * it a gate is a decision for whoever runs the audit — the same line `scan`
+ * holds, but audit exists to sit in CI, so the gate is one flag away.
+ */
+function runAudit(args: string[]): number {
+  const at = args.indexOf('--fail-on')
+  const failOn = at === -1 ? null : args[at + 1]
+  if (failOn !== null && (failOn === undefined || !Object.hasOwn(SEVERITY_RANK, failOn))) {
+    process.stderr.write(`--fail-on takes high, medium or low\n${USAGE}\n`)
+    return 2
+  }
+  const dirs = args.filter((arg, index) => !arg.startsWith('--') && (at === -1 || index !== at + 1))
+  if (dirs.length > 1) {
+    process.stderr.write(`audit reads one project directory, got ${dirs.length}\n${USAGE}\n`)
+    return 2
+  }
+  const root = dirs[0] ?? process.cwd()
+  const findings = audit({ root, home: process.env['HOME'] ?? homedir() })
+
+  if (args.includes('--sarif')) process.stdout.write(JSON.stringify(sarif(findings), null, 2) + '\n')
+  else if (args.includes('--json')) process.stdout.write(JSON.stringify(findings, null, 2) + '\n')
+  else printAudit(findings)
+
+  if (failOn === null) return 0
+  const threshold = SEVERITY_RANK[failOn as Severity]
+  return findings.some((finding) => SEVERITY_RANK[finding.severity] >= threshold) ? 1 : 0
+}
+
+function printAudit(findings: AuditFinding[]): void {
+  if (findings.length === 0) {
+    process.stdout.write('no findings\n')
+    return
+  }
+  const order = [...findings].sort((a, b) => SEVERITY_RANK[b.severity] - SEVERITY_RANK[a.severity] || a.code.localeCompare(b.code))
+  for (const finding of order) {
+    const subject = finding.subject === undefined ? '' : ` [${finding.subject}]`
+    process.stdout.write(`${finding.code} ${finding.severity}\t${finding.file}${subject}: ${finding.title}\n    ${finding.detail}\n`)
+  }
+  const counts = (['high', 'medium', 'low'] as const).map((level) => `${findings.filter((f) => f.severity === level).length} ${level}`)
+  process.stdout.write(`${findings.length} finding(s): ${counts.join(', ')}\n`)
+}
+
+/** SARIF 2.1.0, the format GitHub code scanning and most CI dashboards read. */
+function sarif(findings: AuditFinding[]): Record<string, unknown> {
+  const level = (severity: Severity): string => (severity === 'high' ? 'error' : severity === 'medium' ? 'warning' : 'note')
+  return {
+    version: '2.1.0',
+    $schema: 'https://json.schemastore.org/sarif-2.1.0.json',
+    runs: [{
+      tool: {
+        driver: {
+          name: 'cordon',
+          informationUri: 'https://github.com/ilyautov/cordon',
+          rules: Object.entries(CODES).map(([id, rule]) => ({
+            id,
+            shortDescription: { text: rule.title },
+            properties: { tags: [rule.owasp] },
+            defaultConfiguration: { level: level(rule.severity) },
+          })),
+        },
+      },
+      results: findings.map((finding) => ({
+        ruleId: finding.code,
+        level: level(finding.severity),
+        message: { text: `${finding.title}${finding.subject === undefined ? '' : ` (${finding.subject})`}: ${finding.detail}` },
+        locations: [{ physicalLocation: { artifactLocation: { uri: finding.file } } }],
+      })),
+    }],
+  }
 }
 
 /**

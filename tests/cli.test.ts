@@ -145,3 +145,49 @@ describe('cordon mcp approve', () => {
     expect(stdout).toContain('no pins')
   })
 })
+
+describe('cordon audit', () => {
+  beforeAll(() => {
+    ensureBuiltCli()
+  }, 60_000)
+
+  function project(): { root: string; home: string } {
+    const root = mkdtempSync(join(tmpdir(), 'cordon-audit-cli-'))
+    const home = mkdtempSync(join(tmpdir(), 'cordon-audit-home-'))
+    writeFileSync(join(root, '.mcp.json'), JSON.stringify({ mcpServers: { fs: { command: 'npx', args: ['server-fs'] } } }))
+    return { root, home }
+  }
+
+  it('prints the findings with their codes and exits 0 by default', () => {
+    const { root, home } = project()
+    const { stdout, status } = run(['audit', root], '', { HOME: home })
+    expect(status).toBe(0)
+    expect(stdout).toContain('CA201')
+    expect(stdout).toContain('CA202')
+  })
+
+  it('--fail-on fails the run at or above the named severity', () => {
+    const { root, home } = project()
+    expect(run(['audit', root, '--fail-on', 'medium'], '', { HOME: home }).status).toBe(1)
+    expect(run(['audit', root, '--fail-on', 'high'], '', { HOME: home }).status).toBe(0)
+  })
+
+  it('--json prints the findings as JSON', () => {
+    const { root, home } = project()
+    const parsed = JSON.parse(run(['audit', root, '--json'], '', { HOME: home }).stdout) as Array<{ code: string }>
+    expect(parsed.map((finding) => finding.code)).toContain('CA201')
+  })
+
+  it('--sarif prints SARIF 2.1.0 for code scanning', () => {
+    const { root, home } = project()
+    const sarif = JSON.parse(run(['audit', root, '--sarif'], '', { HOME: home }).stdout)
+    expect(sarif.version).toBe('2.1.0')
+    expect(sarif.runs[0].tool.driver.name).toBe('cordon')
+    expect(sarif.runs[0].results.map((result: { ruleId: string }) => result.ruleId)).toContain('CA201')
+  })
+
+  it('an unknown severity is a usage error', () => {
+    const { root, home } = project()
+    expect(run(['audit', root, '--fail-on', 'critical'], '', { HOME: home }).status).toBe(2)
+  })
+})

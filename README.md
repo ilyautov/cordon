@@ -11,7 +11,7 @@
 - **Core** plus adapters for **Claude Code** and **Gemini CLI**, a gateway for **MCP hosts**, middleware for **LangChain** agents.
 - Hidden-layer neutralization, provenance of untrusted data, an intent certificate, an action gate that also answers the fact of reading untrusted content, a source-influence footer under the model's answer, and packaging that intercepts four harness events.
 
-**Measured:** 1107 tests · 18 pinned attack vectors · 7 legitimate documents · 2 runtime dependencies.
+**Measured:** 1133 tests · 18 pinned attack vectors · 7 legitimate documents · 2 runtime dependencies.
 
 **Install:** [Claude Code](docs/install.md) · [Gemini CLI](docs/install-gemini.md) · [MCP hosts](docs/install-mcp.md) · [LangChain](docs/install-langchain.md)
 
@@ -92,6 +92,8 @@ node dist/cli.js scan data.md --json
 ```
 
 A finding is a risk signal, not a verdict. `scan` blocks nothing and always returns 0 when the input was read successfully: turning a finding into a build failure would mean going back to the detector-as-verdict this project deliberately rejected.
+
+**An audit before the agent runs.** `npx @ilyautov/cordon audit` reads what an agent will load: instruction files and skills, MCP server configurations for Claude Code, Cursor, Gemini CLI, Windsurf and Claude Desktop, and the hooks a cloned repository brings with it. It reports invisible characters in a `SKILL.md`, servers not behind the gateway, unpinned server packages, literal secrets and project-level hooks. Every finding has a stable code mapped to the OWASP Top 10 for LLM Applications. Output is text, JSON or SARIF for code scanning, and `--fail-on high` gates a build. It needs no account and no network, and it runs nothing it reads. The code catalogue is in [docs/audit.md](docs/audit.md).
 
 The same module is available as a library, published to npm as `@ilyautov/cordon`:
 
