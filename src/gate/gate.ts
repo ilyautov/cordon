@@ -113,9 +113,13 @@ function decide(call: ToolCall, ctx: GateContext): Decision {
   const scan = scanTaint(parts, ctx.taint)
   if (!scan.tainted) {
     const exposed = exposedCall(verdict.effects, parts, ctx)
-    if (exposed) return escalate(ctx, exposed)
+    if (exposed) return escalate(ctx, exposed, ctx.exposure?.source)
     return { kind: 'allow' }
   }
+
+  // Which page aimed the call, for the owner's journal: the sources the
+  // arguments matched, not whichever page happened to be read last.
+  const blamed = scan.sources.map((source) => source.label).join(', ') || undefined
 
   // The data axis answers differently in different cases, and that is not a
   // concession but a condition of usability. An agent that read a document
@@ -132,10 +136,10 @@ function decide(call: ToolCall, ctx: GateContext): Decision {
     const targets = scan.targets.filter((atom) => !isDate(atom))
     if (targets.length === 0) {
       const exposed = exposedCall(verdict.effects, parts, ctx)
-      if (exposed) return escalate(ctx, exposed)
+      if (exposed) return escalate(ctx, exposed, ctx.exposure?.source)
       return { kind: 'allow' }
     }
-    return escalate(ctx, `an argument carries a target from an untrusted source: ${targets.join(', ')}`)
+    return escalate(ctx, `an argument carries a target from an untrusted source: ${targets.join(', ')}`, blamed)
   }
 
   // Content returning to the very source it was read from is not subject to
@@ -151,12 +155,12 @@ function decide(call: ToolCall, ctx: GateContext): Decision {
   // works on a whole string argument, and we cannot parse somebody else's
   // argument schema. Hence escalation.
   if (scan.nested) {
-    return escalate(ctx, 'quarantine is impossible: the untrusted fragment sits inside a nested argument')
+    return escalate(ctx, 'quarantine is impossible: the untrusted fragment sits inside a nested argument', blamed)
   }
 
   const cleaned = quarantine(own, scan.spans)
   if (!cleaned.possible) {
-    return escalate(ctx, `quarantine is impossible: ${cleaned.reason}`)
+    return escalate(ctx, `quarantine is impossible: ${cleaned.reason}`, blamed)
   }
 
   return {
@@ -164,6 +168,7 @@ function decide(call: ToolCall, ctx: GateContext): Decision {
     args: cleaned.args,
     removed: cleaned.removed,
     reason: 'an untrusted fragment was cut out of the arguments',
+    ...(blamed === undefined ? {} : { source: blamed }),
   }
 }
 
@@ -269,8 +274,9 @@ function selfMarkers(cordonHome: string): string[] {
   return [cordonHome, '.cordon', '.claude/settings', '.claude/hooks', '.cursor', '.codex', '.gemini']
 }
 
-function escalate(ctx: GateContext, reason: string): Decision {
-  return ctx.policy.mode === 'interactive' ? { kind: 'ask', reason } : { kind: 'deny', reason }
+function escalate(ctx: GateContext, reason: string, source?: string): Decision {
+  const kind = ctx.policy.mode === 'interactive' ? 'ask' : 'deny'
+  return source === undefined ? { kind, reason } : { kind, reason, source }
 }
 
 /**

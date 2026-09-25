@@ -117,5 +117,5 @@ What came back, in order:
 | `get-sum {a: 4, b: 5}` after that | passed through: reading stays open under the mark |
 | `gzip-file-as-resource` with an outside URL | `isError: true`, refused by the exposure rule; the journal recorded both refusals |
 
-One thing the run showed that the tests did not: the journal's `source` for the `get-env` refusal named `simulate-research-query`, the last tool description observed in `tools/list`, not anything that had a hand in the call. Tool descriptions are untrusted content and are observed as such, so the label is technically the last untrusted read — and misleading to a human reading the journal. Recorded here rather than silently accepted.
+One thing the run showed that the tests did not: the journal's `source` for the `get-env` refusal named `simulate-research-query`, the last tool description observed in `tools/list`, not anything that had a hand in the call. Tool descriptions are untrusted content and are observed as such, so the label is technically the last untrusted read — and misleading to a human reading the journal. Recorded here rather than silently accepted, and fixed in 0.6.1: descriptions no longer fill the journal's fallback, and a refusal the gate can attribute names the source it turned on.
 

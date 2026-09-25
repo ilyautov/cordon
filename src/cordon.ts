@@ -219,7 +219,12 @@ export class Cordon {
       // own values echoed back.
       if (source.trust === 'untrusted') this.exposure = { at: this.turn, source: source.label }
     }
-    if (source.trust === 'untrusted') this.lastSource = source
+    // A tool description is read once for the whole session, in a batch, so
+    // "the last one" is an arbitrary name; the live MCP run showed it being
+    // blamed for a certificate refusal it had no part in. Descriptions still
+    // mark the session and enter provenance above — they are only kept out of
+    // the journal's guess.
+    if (source.trust === 'untrusted' && source.kind !== 'mcp-description') this.lastSource = source
     this.persist()
     return { text: clean, source, findings, substitute }
   }
@@ -254,7 +259,9 @@ export class Cordon {
         decision: decision.kind,
         tool: call.tool,
         reason: decision.reason,
-        source: this.lastSource?.label ?? null,
+        // What the gate knows beats what the core guesses: the source the
+        // decision turned on, and only failing that, the last page read.
+        source: decision.source ?? this.lastSource?.label ?? null,
       })
     }
 

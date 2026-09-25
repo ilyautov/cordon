@@ -8030,31 +8030,33 @@ function decide(call, ctx) {
   const scan = scanTaint(parts, ctx.taint);
   if (!scan.tainted) {
     const exposed = exposedCall(verdict.effects, parts, ctx);
-    if (exposed) return escalate(ctx, exposed);
+    if (exposed) return escalate(ctx, exposed, ctx.exposure?.source);
     return { kind: "allow" };
   }
+  const blamed = scan.sources.map((source) => source.label).join(", ") || void 0;
   if (!verdict.effects.some((effect) => IRREVERSIBLE.has(effect))) {
     const targets = scan.targets.filter((atom) => !isDate(atom));
     if (targets.length === 0) {
       const exposed = exposedCall(verdict.effects, parts, ctx);
-      if (exposed) return escalate(ctx, exposed);
+      if (exposed) return escalate(ctx, exposed, ctx.exposure?.source);
       return { kind: "allow" };
     }
-    return escalate(ctx, `an argument carries a target from an untrusted source: ${targets.join(", ")}`);
+    return escalate(ctx, `an argument carries a target from an untrusted source: ${targets.join(", ")}`, blamed);
   }
   if (returnsToOrigin(scan.sources, parts, verdict.effects)) return { kind: "allow" };
   if (scan.nested) {
-    return escalate(ctx, "quarantine is impossible: the untrusted fragment sits inside a nested argument");
+    return escalate(ctx, "quarantine is impossible: the untrusted fragment sits inside a nested argument", blamed);
   }
   const cleaned = quarantine(own2, scan.spans);
   if (!cleaned.possible) {
-    return escalate(ctx, `quarantine is impossible: ${cleaned.reason}`);
+    return escalate(ctx, `quarantine is impossible: ${cleaned.reason}`, blamed);
   }
   return {
     kind: "rewrite",
     args: cleaned.args,
     removed: cleaned.removed,
-    reason: "an untrusted fragment was cut out of the arguments"
+    reason: "an untrusted fragment was cut out of the arguments",
+    ...blamed === void 0 ? {} : { source: blamed }
   };
 }
 function fields(args) {
@@ -8115,8 +8117,9 @@ function asPaths(value) {
 function selfMarkers(cordonHome2) {
   return [cordonHome2, ".cordon", ".claude/settings", ".claude/hooks", ".cursor", ".codex", ".gemini"];
 }
-function escalate(ctx, reason) {
-  return ctx.policy.mode === "interactive" ? { kind: "ask", reason } : { kind: "deny", reason };
+function escalate(ctx, reason, source) {
+  const kind = ctx.policy.mode === "interactive" ? "ask" : "deny";
+  return source === void 0 ? { kind, reason } : { kind, reason, source };
 }
 function exposedCall(effects, parts, ctx) {
   if (ctx.policy.exposure === false) return null;
@@ -11692,7 +11695,7 @@ var Cordon = class {
       if (!substitute && clean !== text) this.taint.record(text, source);
       if (source.trust === "untrusted") this.exposure = { at: this.turn, source: source.label };
     }
-    if (source.trust === "untrusted") this.lastSource = source;
+    if (source.trust === "untrusted" && source.kind !== "mcp-description") this.lastSource = source;
     this.persist();
     return { text: clean, source, findings, substitute };
   }
@@ -11714,7 +11717,9 @@ var Cordon = class {
         decision: decision.kind,
         tool: call.tool,
         reason: decision.reason,
-        source: this.lastSource?.label ?? null
+        // What the gate knows beats what the core guesses: the source the
+        // decision turned on, and only failing that, the last page read.
+        source: decision.source ?? this.lastSource?.label ?? null
       });
     }
     return decision;

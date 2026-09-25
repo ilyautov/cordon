@@ -44,11 +44,17 @@ export interface Certificate {
   origin: 'profile' | 'narrowed'
 }
 
+/**
+ * `source` names the untrusted source the decision answers to, when the gate
+ * knows it: the page an argument's target came from, the read that set the
+ * exposure mark. It is for the owner's journal and never changes the
+ * decision; absent means the decision did not turn on anything read.
+ */
 export type Decision =
   | { kind: 'allow' }
-  | { kind: 'deny'; reason: string }
-  | { kind: 'ask'; reason: string }
-  | { kind: 'rewrite'; args: Record<string, unknown>; removed: string[]; reason: string }
+  | { kind: 'deny'; reason: string; source?: string }
+  | { kind: 'ask'; reason: string; source?: string }
+  | { kind: 'rewrite'; args: Record<string, unknown>; removed: string[]; reason: string; source?: string }
 
 export type TrustLabel = 'trusted' | 'untrusted'
 

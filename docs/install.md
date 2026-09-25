@@ -252,7 +252,7 @@ The directive is read only from the user's message. The memory file comes into t
 {"at":"2026-08-19T02:14:07.201Z","decision":"deny","tool":"wb_update_price","reason":"outside the certificate: update, financial","source":null}
 ```
 
-**The `source` field is always empty today, and this is a known shortcoming.** The label of an untrusted source lives in process memory, and every hook event is a separate process, so it does not survive until the decision is recorded. The journal does not yet name who exactly poisoned the turn, though it does name the reason and the tool.
+**The `source` field names the untrusted source the decision answers to.** When the gate knows it, it is exact: the page an argument's target came from for a provenance refusal or a quarantine rewrite, the read that set the mark for an exposure refusal, the page a memory note was written after for a `memory` line. When the decision did not turn on anything read — a tool outside the certificate — it falls back to the last untrusted page or tool result of the session, as the likeliest author of the attempt, and to `null` when nothing untrusted was read. MCP tool descriptions never fill it by that fallback: they are read in one batch per session, and the last of them is an arbitrary name.
 
 The journal is half of autonomous mode. A call blocked overnight that the owner never heard about is indistinguishable, for them, from a call that never happened.
 

@@ -2,6 +2,10 @@
 
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versions follow [SemVer](https://semver.org/).
 
+## [Unreleased]
+
+The journal names the source a decision turned on. A provenance refusal or a quarantine rewrite names the page the argument's target came from, and an exposure refusal names the read that set the mark, instead of whichever page happened to be read last. MCP tool descriptions no longer fill the fallback: the live gateway run showed a certificate refusal blamed on the last description in `tools/list`, an arbitrary name. The field is carried on the decision for the journal only and never reaches a harness.
+
 ## [0.6.0] - 2026-09-25
 
 Memory that outlives the session. The exposure mark answers untrusted content within a session, and session state lives a day, so neither reached the attack that waits: a page read on Monday leaves a note in `CLAUDE.md`, and on Thursday a fresh session — one that read nothing untrusted — reloads the file and obeys it (Claws, arXiv:2607.05189; MINJA, arXiv:2503.03704). A write into memory made while the session carries untrusted content — the exposure mark, the unredacted mark, a full store, a quarantine rewrite, or content from outside read in any earlier turn — is now recorded in `~/.cordon/memory/`, one file per write, never rewritten: a path, a source label and a time, never the content, for thirty days. Every later session starts under the exposure mark, with the refusal naming the file, until the user writes `cordon: trust memory` on a line of its own. The directive is parsed only from the user's message, so a note cannot vouch for itself.
