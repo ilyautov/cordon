@@ -47,7 +47,7 @@ Restart the harness afterwards. Hooks are read at startup.
 
 ## 3. Write a policy
 
-Cordon runs without one, on defaults that only allow reading and summarizing. That is safe and quickly annoying, because your agent probably needs to write something too. Create `~/.cordon/policy.yaml`:
+Cordon runs without one, on defaults that only allow reading and summarizing. That is safe and quickly annoying, because your agent probably needs to write something too. The quick way is a commented starting point: `npx @ilyautov/cordon init --profile coding` (or `research`, `documents`, `locked`) writes one you can edit. Or write `~/.cordon/policy.yaml` by hand:
 
 ```yaml
 mode: autonomous

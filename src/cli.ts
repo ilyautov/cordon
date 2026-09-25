@@ -10,12 +10,14 @@ import { runGateway } from './adapters/mcp/gateway.js'
 import { humanSeesRendered, type SourceView } from './core/types.js'
 import { audit, CODES, type AuditFinding, type Severity } from './audit/audit.js'
 import { Cordon } from './cordon.js'
+import { makeDirectory } from './core/mkdir.js'
 import { loadPolicy } from './policy/load.js'
+import { PROFILES, renderPolicy } from './policy/templates.js'
 import { sanitize } from './sanitize/index.js'
 import { MemoryLedger } from './session/memory.js'
 
 const USAGE =
-  'usage: cordon scan <file|-> [--json] | cordon hook [--harness claude-code|gemini] | cordon mcp -- <server command...> | cordon mcp approve -- <server command...> | cordon doctor | cordon audit [dir] [--json|--sarif] [--fail-on high|medium|low]'
+  'usage: cordon scan <file|-> [--json] | cordon hook [--harness claude-code|gemini] | cordon mcp -- <server command...> | cordon mcp approve -- <server command...> | cordon doctor | cordon init [--profile locked|research|documents|coding] [--force] | cordon audit [dir] [--json|--sarif] [--fail-on high|medium|low]'
 
 /**
  * Event parsing depends on the harness, so the harness is named explicitly.
@@ -51,6 +53,8 @@ export function main(argv: string[]): number | Promise<number> {
   if (command === 'doctor') return printDoctor(cordonHome())
 
   if (command === 'audit') return runAudit(rest)
+
+  if (command === 'init') return init(rest)
 
   if (command !== 'scan') {
     process.stderr.write(USAGE + '\n')
@@ -591,6 +595,30 @@ function mcp(args: string[]): Promise<number> | number {
   }
 
   return runGateway({ command, policy, cordonHome: home })
+}
+
+/**
+ * `cordon init`: writes a starting policy into Cordon's home. An existing
+ * policy is never overwritten without --force: it may be the only record of
+ * what its owner decided.
+ */
+function init(args: string[]): number {
+  const at = args.indexOf('--profile')
+  const name = at === -1 ? 'locked' : args[at + 1]
+  if (name === undefined || !Object.hasOwn(PROFILES, name)) {
+    process.stderr.write(`unknown profile ${name ?? '(none given)'}; the profiles are ${Object.keys(PROFILES).join(', ')}\n${USAGE}\n`)
+    return 2
+  }
+  const home = cordonHome()
+  const path = join(home, 'policy.yaml')
+  if (existsSync(path) && !args.includes('--force')) {
+    process.stdout.write(`${path} already exists; nothing was written. Pass --force to replace it\n`)
+    return 1
+  }
+  makeDirectory(home)
+  writeFileSync(path, renderPolicy(name, home), { encoding: 'utf8', mode: 0o600 })
+  process.stdout.write(`wrote ${path} (${name}: ${PROFILES[name]!.summary})\ncheck it with: cordon doctor\n`)
+  return 0
 }
 
 const SEVERITY_RANK: Record<Severity, number> = { low: 1, medium: 2, high: 3 }

@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { homedir } from 'node:os'
+import { isAbsolute, join } from 'node:path'
 import { parse } from 'yaml'
 import type { EffectClass, PresenceMode, SourceView } from '../core/types.js'
 import { DEFAULT_POLICY, type Policy } from './defaults.js'
@@ -104,9 +105,7 @@ function validate(parsed: unknown, path: string): Policy {
       )
     }
     onlyKnown(notify, ['file'], path, 'notify.')
-    policy.notify = {
-      file: typeof notify.file === 'string' ? notify.file : null,
-    }
+    policy.notify = { file: journalPath(notify.file, path) }
   }
 
   // The field is read as an own property: the policy file is parsed from
@@ -179,6 +178,25 @@ function validate(parsed: unknown, path: string): Policy {
   }
 
   return policy
+}
+
+/**
+ * The journal path: absent, `~/…`, or absolute.
+ *
+ * The quickstart once wrote `file: ~/.cordon/events.jsonl` and nothing
+ * expanded the tilde, so the journal landed in a directory literally named
+ * `~` inside whatever project the agent ran in — not where the owner looked,
+ * and one `git add .` from the repository. A relative path fails the same
+ * way, against the working directory, so it stops the load.
+ */
+function journalPath(value: unknown, path: string): string | null {
+  if (value === undefined || value === null) return null
+  if (typeof value !== 'string') throw new Error(`${path}: notify.file must be a path, not ${String(value)}`)
+  if (value === '~' || value.startsWith('~/')) return join(homedir(), value.slice(1))
+  if (!isAbsolute(value)) {
+    throw new Error(`${path}: notify.file must be an absolute path or start with ~/, not ${value}; a relative one lands in the project the agent runs in`)
+  }
+  return value
 }
 
 const TOP_LEVEL = [

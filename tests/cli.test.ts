@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll } from 'vitest'
 import { ensureBuiltCli } from './support/built-cli.js'
 import { PinStore } from '../src/session/pins.js'
 import { execFileSync } from 'node:child_process'
-import { writeFileSync, mkdtempSync } from 'node:fs'
+import { readFileSync, writeFileSync, mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -236,5 +236,32 @@ describe('CORDON_HOME with a leading tilde', () => {
     const user = mkdtempSync(join(tmpdir(), 'cordon-tilde-'))
     const { stdout } = run(['doctor'], '', { HOME: user, CORDON_HOME: '~/.cordon-pinned' })
     expect(stdout).toContain(join(user, '.cordon-pinned'))
+  })
+})
+
+describe('cordon init', () => {
+  beforeAll(() => {
+    ensureBuiltCli()
+  }, 60_000)
+
+  it('writes the named profile into the home and prints where', () => {
+    const home = mkdtempSync(join(tmpdir(), 'cordon-init-'))
+    const { stdout, status } = run(['init', '--profile', 'coding'], '', { CORDON_HOME: home })
+    expect(status).toBe(0)
+    expect(stdout).toContain(join(home, 'policy.yaml'))
+    expect(readFileSync(join(home, 'policy.yaml'), 'utf8')).toContain('exec')
+  })
+
+  it('never overwrites a policy without --force', () => {
+    const home = mkdtempSync(join(tmpdir(), 'cordon-init-'))
+    writeFileSync(join(home, 'policy.yaml'), 'mode: interactive\n')
+    expect(run(['init', '--profile', 'coding'], '', { CORDON_HOME: home }).status).toBe(1)
+    expect(readFileSync(join(home, 'policy.yaml'), 'utf8')).toBe('mode: interactive\n')
+    expect(run(['init', '--profile', 'coding', '--force'], '', { CORDON_HOME: home }).status).toBe(0)
+  })
+
+  it('an unknown profile is a usage error', () => {
+    const home = mkdtempSync(join(tmpdir(), 'cordon-init-'))
+    expect(run(['init', '--profile', 'everything'], '', { CORDON_HOME: home }).status).toBe(2)
   })
 })

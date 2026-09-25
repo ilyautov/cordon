@@ -1,5 +1,5 @@
 import { mkdtempSync, writeFileSync, mkdirSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { loadPolicy } from '../../src/policy/load.js'
@@ -311,5 +311,29 @@ describe('mcp.pin', () => {
     const home = scratch()
     writeFileSync(join(home, 'policy.yaml'), 'mcp:\n  pin: "no"\n')
     expect(() => loadPolicy(home)).toThrow(/mcp\.pin must be true or false/u)
+  })
+})
+
+describe('notify.file', () => {
+  // The quickstart wrote `file: ~/.cordon/events.jsonl`, and nothing expanded
+  // the tilde: the journal went to a directory literally named `~` inside
+  // whatever project the agent ran in — not where the owner looked, and one
+  // `git add .` away from the repository.
+  it('a leading tilde is the user home', () => {
+    const home = scratch()
+    writeFileSync(join(home, 'policy.yaml'), 'notify:\n  file: ~/.cordon/events.jsonl\n')
+    expect(loadPolicy(home).notify.file).toBe(join(homedir(), '.cordon', 'events.jsonl'))
+  })
+
+  it('a relative path stops the load', () => {
+    const home = scratch()
+    writeFileSync(join(home, 'policy.yaml'), 'notify:\n  file: logs/events.jsonl\n')
+    expect(() => loadPolicy(home)).toThrow(/notify\.file must be an absolute path/u)
+  })
+
+  it('a value that is not a string stops the load', () => {
+    const home = scratch()
+    writeFileSync(join(home, 'policy.yaml'), 'notify:\n  file: 42\n')
+    expect(() => loadPolicy(home)).toThrow(/notify\.file/u)
   })
 })

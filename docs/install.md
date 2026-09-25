@@ -102,6 +102,17 @@ The project's working directory takes no part in this and never will. The same g
 
 Without a policy file the default applies: `autonomous` mode, a profile of two classes, `read` and `summarize`, and no declared tools. Such an agent can read and summarize, and nothing else. The default is meant to be uselessly safe; widening it is a deliberate act.
 
+`cordon init --profile <name>` writes a commented starting policy into Cordon's home. It never overwrites an existing one without `--force`.
+
+| Profile | Mode | Effect classes |
+|---|---|---|
+| `locked` | autonomous | read, summarize (the default, written out) |
+| `research` | interactive | read, summarize, network-egress |
+| `documents` | interactive | read, summarize, create, update |
+| `coding` | interactive | read, summarize, create, update, exec, network-egress |
+
+No profile grants `delete`, `export` or `financial`, because those are irreversible and adding them is your decision to write down. The widened profiles are interactive: under the exposure rule, autonomous mode refuses what interactive mode asks you about.
+
 ### Fields
 
 **`mode`**: `interactive` or `autonomous`. See the section on modes below.
@@ -116,7 +127,7 @@ Without a policy file the default applies: `autonomous` mode, a profile of two c
 
 **`toolsReturn`**: what a tool returns — `source` or `rendered`. See the separate section below: whether the hidden layer is stripped from a result depends on this.
 
-**`notify.file`**: path to the event journal. See the section on the journal.
+**`notify.file`**: path to the event journal. It must be absolute or start with `~/`. A relative path stops the load, because it would resolve against whatever project the agent runs in. See the section on the journal.
 
 **`exposure`**: `true` or `false`, default `true`. While it is on, a session that read untrusted content is marked, and a call acting beyond reading — anything from the irreversible classes, plus `create` — escalates while the mark stands, unless the user named the call's destination (a link, a path, an identifier) in their own message. This is the rule that answers the attacks whose arguments share no byte with what was read: a paraphrase, an encoding, a clean shell command. The measured difference on the adversarial battery's working profile is a drop from 80% to 6% attack success rate; see [adversarial-report.md](adversarial-report.md). The price is friction: in autonomous mode, after any untrusted read a consequential call is refused until the user's next message names its destination. `false` restores the previous behaviour and weakens no other axis, and `cordon doctor` names the off state out loud with its price — from the outside it is indistinguishable from a session that simply read nothing untrusted.
 
