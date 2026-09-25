@@ -1,10 +1,11 @@
 import { execFileSync } from 'node:child_process'
-import { chmodSync, existsSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { ensureBuiltCli } from './support/built-cli.js'
 import { doctor } from '../src/cli.js'
+import { MemoryLedger } from '../src/session/memory.js'
 
 function home(): string {
   return mkdtempSync(join(tmpdir(), 'cordon-doctor-'))
@@ -264,5 +265,32 @@ describe('doctor: the default source view', () => {
 
     expect(out).toContain('gemini-cli')
     expect(out).toMatch(/tool result/u)
+  })
+})
+
+describe('doctor: memory written under exposure', () => {
+  it('names live entries so the owner can review them', () => {
+    // A carried mark escalates calls in sessions that read nothing untrusted;
+    // without this line the owner cannot tell why, short of reading the ledger.
+    const dir = home()
+    new MemoryLedger(dir).record({ target: '/srv/project/CLAUDE.md', source: 'https://evil.example/page', sessionId: 's1' })
+    const report = doctor(dir)
+    expect(report.memory).toEqual(['/srv/project/CLAUDE.md, written after reading https://evil.example/page'])
+    expect(report.warnings.join('\n')).toContain('cordon: trust memory')
+  })
+
+  it('says nothing when the ledger is empty', () => {
+    const report = doctor(home())
+    expect(report.memory).toEqual([])
+    expect(report.warnings.join('\n')).not.toContain('trust memory')
+  })
+
+  it('a corrupted ledger is a warning and a broken check, not silence', () => {
+    const dir = home()
+    mkdirSync(join(dir, 'memory'))
+    writeFileSync(join(dir, 'memory', 'ledger.json'), '{ not json')
+    const report = doctor(dir)
+    expect(report.warnings.join('\n')).toContain('memory ledger')
+    expect(report.selfCheck).toBe('broken')
   })
 })

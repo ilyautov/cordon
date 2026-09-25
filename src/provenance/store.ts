@@ -115,6 +115,17 @@ export class TaintStore {
    * recorded before the ceiling is still true, and refusing to read on would
    * be a denial of service of our own making.
    */
+  /**
+   * The untrusted sources this store has recorded, of the given kinds.
+   *
+   * Asked by the memory rule, which needs to know whether content from
+   * outside is still in the context a note is being written from — a fact
+   * about the session, not a match against the note.
+   */
+  untrusted(kinds: ReadonlySet<Source['kind']>): Source[] {
+    return [...this.sources.values()].filter((source) => source.trust === 'untrusted' && kinds.has(source.kind))
+  }
+
   get saturated(): boolean {
     return this.full
   }

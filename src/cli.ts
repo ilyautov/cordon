@@ -9,6 +9,7 @@ import { runGateway } from './adapters/mcp/gateway.js'
 import { humanSeesRendered, type SourceView } from './core/types.js'
 import { loadPolicy } from './policy/load.js'
 import { sanitize } from './sanitize/index.js'
+import { MemoryLedger } from './session/memory.js'
 
 const USAGE =
   'usage: cordon scan <file|-> [--json] | cordon hook [--harness claude-code|gemini] | cordon mcp -- <server command...> | cordon doctor'
@@ -155,6 +156,14 @@ export interface DoctorReport {
   declaredViews: string[]
   /** Supported harnesses and what each does worse than the other. */
   harnesses: readonly HarnessReport[]
+  /**
+   * Memory written after an untrusted read, still marking every new session.
+   *
+   * Named out loud, because the mark it carries escalates calls in sessions
+   * that read nothing untrusted, and from the inside of such a session the
+   * refusal looks unprovoked.
+   */
+  memory: string[]
   /** Result of running the built-in attack sample through the whole path. */
   selfCheck: 'ok' | 'broken'
 }
@@ -369,8 +378,29 @@ export function doctor(home: string = cordonHome()): DoctorReport {
       mcpView: MCP_VIEW,
       declaredViews: [],
       harnesses: HARNESS_LIMITS,
+      memory: [],
       selfCheck: 'broken',
     }
+  }
+
+  // A damaged ledger makes every hook event a refusal (see MemoryLedger), so
+  // doctor calls the installation broken rather than reporting a clean one.
+  let memory: string[] = []
+  let ledgerBroken = false
+  try {
+    memory = new MemoryLedger(home).live().map((entry) => `${entry.target}, written after reading ${entry.source}`)
+  } catch (error) {
+    ledgerBroken = true
+    warnings.push(
+      `${(error as Error).message}: every hook event will be refused until ${join(home, 'memory', 'ledger.json')} ` +
+        'is repaired or removed by hand',
+    )
+  }
+  if (memory.length > 0 && policy.exposure) {
+    warnings.push(
+      'memory was written after reading untrusted content, and every new session escalates consequential ' +
+        'calls until you review it and write "cordon: trust memory" on a line of its own in a message',
+    )
   }
 
   if (policy.mode === 'autonomous' && !policy.notify.file) {
@@ -433,7 +463,8 @@ export function doctor(home: string = cordonHome()): DoctorReport {
     mcpView: MCP_VIEW,
     declaredViews: declaredViews(policy.toolsReturn),
     harnesses: HARNESS_LIMITS,
-    selfCheck: selfCheck(),
+    memory,
+    selfCheck: ledgerBroken ? 'broken' : selfCheck(),
   }
 }
 
@@ -483,6 +514,7 @@ function printDoctor(home: string): number {
     process.stdout.write(`harness ${harness.name}:\n`)
     for (const limit of harness.limits) process.stdout.write(`  - ${limit}\n`)
   }
+  for (const line of report.memory) process.stdout.write(`memory under review: ${line}\n`)
   process.stdout.write(`self-check: ${report.selfCheck}\n`)
   // Without this line "self-check: ok" reads as "the defence is in place",
   // while it only means "the mechanism works". A hook the harness never calls

@@ -133,6 +133,18 @@ function validate(parsed: unknown, path: string): Policy {
 
   // The field is read as an own property: the policy file is parsed from
   // outside, and `__proto__` inside it must not look like a setting.
+  if (Object.hasOwn(input, 'memory')) {
+    const memory = asObject(input['memory'], `${path}: memory`)
+    // A silent default here would mean the human declared a memory store and
+    // writes into it were never noticed — the same argument as for exposure.
+    policy.memory = {
+      files: asNames(Object.hasOwn(memory, 'files') ? memory['files'] : [], `${path}: memory.files`),
+      tools: asNames(Object.hasOwn(memory, 'tools') ? memory['tools'] : [], `${path}: memory.tools`),
+    }
+  }
+
+  // The field is read as an own property: the policy file is parsed from
+  // outside, and `__proto__` inside it must not look like a setting.
   if (Object.hasOwn(input, 'output')) {
     const output = asObject(input['output'], `${path}: output`)
     if (Object.hasOwn(output, 'footer')) {
@@ -161,6 +173,13 @@ function asStrings(value: unknown, where: string): string[] {
     throw new Error(`${where}: expected a list of strings`)
   }
   return value as string[]
+}
+
+/** A list of names in which an empty entry is a mistake, not a wildcard. */
+function asNames(value: unknown, where: string): string[] {
+  const list = asStrings(value, where)
+  if (list.some((name) => name.trim() === '')) throw new Error(`${where}: an empty name cannot be a declaration`)
+  return list
 }
 
 /**

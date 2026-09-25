@@ -232,3 +232,29 @@ describe('notify', () => {
     expect(() => loadPolicy(home)).toThrow(/webhook/u)
   })
 })
+
+describe('the policy: memory declarations', () => {
+  it('declares nothing extra by default', () => {
+    expect(loadPolicy(scratch()).memory).toEqual({ files: [], tools: [] })
+  })
+
+  it('reads extra memory files and tools', () => {
+    const dir = scratch()
+    writeFileSync(join(dir, 'policy.yaml'), 'memory:\n  files: [.team-rules]\n  tools: [mem0_add]\n')
+    expect(loadPolicy(dir).memory).toEqual({ files: ['.team-rules'], tools: ['mem0_add'] })
+  })
+
+  it('a malformed declaration stops the load', () => {
+    // A silent default would mean the human declared a memory store and
+    // writes into it were never noticed.
+    const dir = scratch()
+    writeFileSync(join(dir, 'policy.yaml'), 'memory:\n  tools: mem0_add\n')
+    expect(() => loadPolicy(dir)).toThrow(/memory\.tools/u)
+  })
+
+  it('an empty name is refused', () => {
+    const dir = scratch()
+    writeFileSync(join(dir, 'policy.yaml'), 'memory:\n  files: [""]\n')
+    expect(() => loadPolicy(dir)).toThrow(/memory\.files/u)
+  })
+})

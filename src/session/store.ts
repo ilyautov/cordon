@@ -2,7 +2,7 @@ import { createHash, randomBytes } from 'node:crypto'
 import { readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { makeDirectory } from '../core/mkdir.js'
-import type { EffectClass } from '../core/types.js'
+import type { EffectClass, ExposureMark } from '../core/types.js'
 import { TaintStore } from '../provenance/store.js'
 
 export interface SessionState {
@@ -37,7 +37,7 @@ export interface SessionState {
    *
    * An absent field means "no mark".
    */
-  exposure?: { at: number; source: string } | null
+  exposure?: ExposureMark | null
   /**
    * Atoms — links, paths, identifiers — extracted from the user's own
    * messages. A call under the exposure mark passes when every one of its
@@ -449,13 +449,15 @@ export function safeName(sessionId: string): string {
  * lookup through the prototype would return a member of Object.prototype
  * instead of an absent field.
  */
-function isExposure(value: unknown): value is { at: number; source: string } {
+function isExposure(value: unknown): value is ExposureMark {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false
   const data = value as Record<string, unknown>
   const at = Object.hasOwn(data, 'at') ? data['at'] : undefined
   const source = Object.hasOwn(data, 'source') ? data['source'] : undefined
+  const memory = Object.hasOwn(data, 'memory') ? data['memory'] : undefined
   return typeof at === 'number' && Number.isInteger(at) && at >= 0 &&
-    typeof source === 'string' && source !== ''
+    typeof source === 'string' && source !== '' &&
+    (memory === undefined || memory === true)
 }
 
 /**

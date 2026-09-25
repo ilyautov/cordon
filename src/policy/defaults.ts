@@ -74,6 +74,23 @@ export interface Policy {
    * run nobody described.
    */
   task: string | null
+  /**
+   * Memory the agent reloads in later sessions, beyond what Cordon knows.
+   *
+   * A write into such memory outlives the session that made it: untrusted
+   * content that lands there acts days later, in a session that read nothing
+   * untrusted at all (Claws, arXiv:2607.05189; MINJA, arXiv:2503.03704).
+   * Cordon knows the instruction files the harnesses reload by name; a Mem0
+   * store behind a LangChain tool or a team's own rules file is known only to
+   * the human who wired it, and this is where they write it down.
+   *
+   * `files` are base names, compared case-folded; `tools` are tool names as
+   * the harness calls them.
+   */
+  memory: {
+    files: string[]
+    tools: string[]
+  }
   output: {
     /**
      * Whether to append a source-influence footer under the model's answer.
@@ -108,5 +125,6 @@ export const DEFAULT_POLICY: Policy = {
   notify: { file: null },
   exposure: true,
   task: null,
+  memory: { files: [], tools: [] },
   output: { footer: true },
 }

@@ -150,6 +150,19 @@ describe('SessionStore', () => {
       JSON.stringify({ ...base, exposure: { at: 'two', source: 'https://evil.example' } }),
     )
     expect(() => new SessionStore(dir).load('abc')).toThrow()
+
+    writeFileSync(
+      join(dir, 'sessions', name),
+      JSON.stringify({ ...base, exposure: { at: 2, source: 'https://evil.example', memory: 'yes' } }),
+    )
+    expect(() => new SessionStore(dir).load('abc')).toThrow()
+  })
+
+  it('a mark carried in from memory keeps saying so after a restart', () => {
+    const dir = home()
+    const mark = { at: 1, source: 'memory /srv/p/CLAUDE.md', memory: true as const }
+    new SessionStore(dir).save('abc', { turn: 1, taint: new TaintStore(), exposure: mark })
+    expect(new SessionStore(dir).load('abc').exposure).toEqual(mark)
   })
 
   it('user atoms of the wrong shape are a refusal, not an empty list', () => {

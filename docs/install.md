@@ -86,6 +86,7 @@ Every hook event is a separate process, so memory between them lives as files in
 | Session state: provenance of what was read, certificate narrowing | `~/.cordon/sessions/` | a day after the session's last event |
 | Accumulated text of the displayed answer | `~/.cordon/drafts/` | an hour after the last delta |
 | Timestamp of the last sweep | `~/.cordon/last-sweep` | overwritten |
+| Memory written after untrusted content was read: path, source label, time | `~/.cordon/memory/ledger.json` | thirty days after the write, or until `cordon: trust memory` |
 
 Session state and drafts hold content that came from untrusted sources: hashes of what was read, source labels, fragments of answer text. There is no reason for it to sit there indefinitely, so expired files are deleted automatically.
 
@@ -117,7 +118,15 @@ Without a policy file the default applies: `autonomous` mode, a profile of two c
 
 **`notify.file`**: path to the event journal. See the section on the journal.
 
-**`exposure`**: `true` or `false`, default `true`. While it is on, a session that read untrusted content is marked, and a call acting beyond reading — anything from the irreversible classes, plus `create` — escalates while the mark stands, unless the user named the call's destination (a link, a path, an identifier) in their own message. This is the rule that answers the attacks whose arguments share no byte with what was read: a paraphrase, an encoding, a clean shell command. The measured difference on the adversarial battery's working profile is a drop from 79% to 7% attack success rate; see [adversarial-report.md](adversarial-report.md). The price is friction: in autonomous mode, after any untrusted read a consequential call is refused until the user's next message names its destination. `false` restores the previous behaviour and weakens no other axis, and `cordon doctor` names the off state out loud with its price — from the outside it is indistinguishable from a session that simply read nothing untrusted.
+**`exposure`**: `true` or `false`, default `true`. While it is on, a session that read untrusted content is marked, and a call acting beyond reading — anything from the irreversible classes, plus `create` — escalates while the mark stands, unless the user named the call's destination (a link, a path, an identifier) in their own message. This is the rule that answers the attacks whose arguments share no byte with what was read: a paraphrase, an encoding, a clean shell command. The measured difference on the adversarial battery's working profile is a drop from 80% to 6% attack success rate; see [adversarial-report.md](adversarial-report.md). The price is friction: in autonomous mode, after any untrusted read a consequential call is refused until the user's next message names its destination. `false` restores the previous behaviour and weakens no other axis, and `cordon doctor` names the off state out loud with its price — from the outside it is indistinguishable from a session that simply read nothing untrusted.
+
+**`memory.files`** and **`memory.tools`**: memory the agent reloads in later sessions, beyond what Cordon knows by name. `files` are base names compared case-folded (`CLAUDE.md`, `CLAUDE.local.md`, `AGENTS.md`, `GEMINI.md`, `.cursorrules`, `.windsurfrules` and `copilot-instructions.md` are known already); `tools` are tool names as the harness calls them (`save_memory` is known already). A Mem0 store behind a tool is declared here. See the section on memory below.
+
+```yaml
+memory:
+  files: [TEAM-RULES.md]
+  tools: [mem0_add]
+```
 
 ### Example: interactive work on code
 
@@ -218,6 +227,22 @@ The line `cordon: scope read` in the user's message narrows the certificate to t
 The narrowing survives the process boundary and is lifted by the next user message. The directive cannot widen the set of classes: the intersection with the profile is applied, so it cannot restore a right the policy does not grant.
 
 A typo in a class name yields an empty set, that is, "nothing is allowed", plus a warning. A typo cannot silently widen rights.
+
+## Memory that outlives the session
+
+The exposure mark lives until the user's next message, and session state lives a day. Neither survives to the session where a poisoned note in `CLAUDE.md` acts — a session that reads nothing untrusted and so has no mark of its own. The memory ledger is the one piece of state that deliberately outlives a session, for exactly that reason.
+
+A write into memory is recorded when the session making it carries untrusted content: the exposure mark, the unredacted mark, a full provenance store, a quarantine rewrite of the call itself, or a page or tool result from outside read in any earlier turn of the session. It is recorded on `allow`, on a rewrite and on `ask` — the hook never learns whether the human said yes, and a declined write recorded costs one question later, while a missed one costs the attack. A `deny` is never recorded: the write did not happen.
+
+While the ledger holds a live entry, every new session starts under the exposure mark: a call acting beyond reading escalates unless the user named its destination. A new user message does not lift this mark, because the harness reloads the file into every turn. The refusal names the file and the source.
+
+To lift it, read the file, fix it if needed, and write on a line of its own in a message:
+
+```
+cordon: trust memory
+```
+
+The directive is read only from the user's message. The memory file comes into the context through the harness, never through this parser, so a note cannot vouch for itself by containing the phrase. `cordon doctor` lists the live entries. `exposure: false` in the policy switches the ledger off along with the rule it extends.
 
 ## Event journal
 

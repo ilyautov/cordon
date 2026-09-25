@@ -2,6 +2,14 @@
 
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versions follow [SemVer](https://semver.org/).
 
+## [Unreleased]
+
+Memory that outlives the session. The exposure mark answers untrusted content within a session, and session state lives a day, so neither reached the attack that waits: a page read on Monday leaves a note in `CLAUDE.md`, and on Thursday a fresh session — one that read nothing untrusted — reloads the file and obeys it (Claws, arXiv:2607.05189; MINJA, arXiv:2503.03704). A write into memory made while the session carries untrusted content — the exposure mark, the unredacted mark, a full store, a quarantine rewrite, or content from outside read in any earlier turn — is now recorded in `~/.cordon/memory/ledger.json`: a path, a source label and a time, never the content, for thirty days. Every later session starts under the exposure mark, with the refusal naming the file, until the user writes `cordon: trust memory` on a line of its own. The directive is parsed only from the user's message, so a note cannot vouch for itself.
+
+The rule lives in the core, in `Cordon.gate`, so all four transports get it without an adapter change. Reloaded instruction files are known by name (`CLAUDE.md`, `CLAUDE.local.md`, `AGENTS.md`, `GEMINI.md`, `.cursorrules`, `.windsurfrules`, `copilot-instructions.md`) along with Gemini CLI's `save_memory`; anything else — a Mem0 store behind a LangChain tool — is declared under the new `memory.files` and `memory.tools` policy fields. `cordon doctor` lists live entries and reports a damaged ledger as a broken installation; a damaged ledger is a refusal on every hook event, never a clean start. `exposure: false` switches the ledger off along with the rule it extends.
+
+The adversarial battery gained a `memory` category with two cross-session scenarios, one saving in the reading turn and one on the user's next message; both succeed on the wide profile without the ledger (checked by reverting it) and are stopped with it. The working profile now reads 80% → 6% over 32 attacks.
+
 ## [0.5.0] - 2026-08-21
 
 Cordon now runs inside a LangChain agent's own loop. `createCordonMiddleware(options)` — built on the v1 `createMiddleware` contract — wires the same core to two hooks, and the adapter holds no security logic, as everywhere else. `beforeModel` feeds the last user message to the core, so this transport keeps what the MCP gateway does not have: real user turns, with the certificate issued per turn, the exposure and unredacted marks lifted by a new message, and the user-named atoms feeding the exposure exemption. The hook fires on every agent step and the loop never appends human messages, so a turn is told from a repeated pass by position and text — object identity would not survive LangGraph rebuilding messages between steps, and the stateless identical-text case is named in the docs as the blind spot it is.

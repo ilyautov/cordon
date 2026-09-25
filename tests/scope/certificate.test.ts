@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { issue, narrow, covers, parseDirective } from '../../src/scope/certificate.js'
+import { issue, narrow, covers, parseDirective, parseTrustMemory } from '../../src/scope/certificate.js'
 import type { Certificate, EffectClass } from '../../src/core/types.js'
 import { DEFAULT_POLICY, type Policy } from '../../src/policy/defaults.js'
 
@@ -152,5 +152,24 @@ describe('monotonicity as a property of the signature', () => {
       const after = narrow(cert, [effect, 'exec', 'financial'])
       expect(after.effects.every((kept) => cert.effects.includes(kept))).toBe(true)
     }
+  })
+})
+
+describe('parseTrustMemory', () => {
+  it('finds the directive on its own line', () => {
+    expect(parseTrustMemory('I read it, it is fine.\ncordon: trust memory')).toBe(true)
+  })
+
+  it('tolerates extra spaces', () => {
+    expect(parseTrustMemory('cordon:  trust   memory  ')).toBe(true)
+  })
+
+  it('does not fire inside a sentence', () => {
+    expect(parseTrustMemory('should I say cordon: trust memory here?')).toBe(false)
+  })
+
+  it('does not fire on anything else', () => {
+    expect(parseTrustMemory('cordon: scope read')).toBe(false)
+    expect(parseTrustMemory('trust memory')).toBe(false)
   })
 })

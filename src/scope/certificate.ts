@@ -120,3 +120,17 @@ export function parseDirective(userText: string): EffectClass[] | null {
   if (!match?.[1]) return null
   return knownEffects(match[1].split(/[,\s]+/u).map((token) => token.trim().toLowerCase()))
 }
+
+/**
+ * Whether the user's message says the memory written under exposure has been
+ * reviewed.
+ *
+ * Only the user's own message is ever parsed here: a memory file comes back
+ * into the context through the harness, not through this function, so the
+ * poisoned note cannot vouch for itself by containing the phrase. The
+ * directive must stand on a line of its own, like `cordon: scope`, so that a
+ * sentence mentioning it is not taken for it.
+ */
+export function parseTrustMemory(userText: string): boolean {
+  return /^[ \t]*cordon:[ \t]*trust[ \t]+memory[ \t]*$/mu.test(userText)
+}

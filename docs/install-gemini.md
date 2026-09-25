@@ -67,6 +67,8 @@ Consequence for you: `cordon doctor` stops being a convenience and becomes part 
 
 Consequence for you: a conversation started afresh starts the data axis from a blank slate. Content read yesterday is not treated as untrusted today, because Cordon does not remember it. This is not a defect in Cordon nor in the harness but the way sessions are built — yet you must know about it: continue long work by resuming the session, not by launching a new one.
 
+The memory ledger is the exception, and it is not tied to the session identifier: a `save_memory` call or a write into `GEMINI.md` made while the session carried untrusted content marks every later launch, resumed or not, until a user message says `cordon: trust memory`. See "Memory that outlives the session" in [install.md](install.md).
+
 ## Two more caveats
 
 **Asking the human for confirmation is not used in headless mode.** Judging by the harness source, a forced prompt in a non-interactive run hangs rather than failing with an error. So in autonomous mode Cordon asks nothing at all: it only allows or refuses.

@@ -1,5 +1,5 @@
 import { resolve, sep } from 'node:path'
-import type { Certificate, Decision, EffectClass, Source, ToolCall } from '../core/types.js'
+import type { Certificate, Decision, EffectClass, ExposureMark, Source, ToolCall } from '../core/types.js'
 import type { Policy } from '../policy/defaults.js'
 import { canonicalForms, touchesCordonItself } from '../policy/selfprotect.js'
 import { atoms } from '../provenance/normalize.js'
@@ -26,7 +26,7 @@ export interface GateContext {
    * of the read and the source's label. Optional because the absence of the
    * mark is its normal state.
    */
-  exposure?: { at: number; source: string } | null
+  exposure?: ExposureMark | null
   /**
    * Atoms — links, paths, identifiers — named by the user in their own
    * messages. The exposure exemption compares a call's targets against this
@@ -320,6 +320,12 @@ function exposedCall(
   const named = new Set(ctx.userAtoms ?? [])
   if (targets.size > 0 && [...targets].every((atom) => named.has(atom))) return null
 
+  if (exposure.memory === true) {
+    return (
+      `untrusted content is back in this session through memory (${exposure.source}); ` +
+      'the call acts beyond reading and its destination was not named by you'
+    )
+  }
   return (
     `this session read untrusted content (${exposure.source}) since your last message; ` +
     'the call acts beyond reading and its destination was not named by you'

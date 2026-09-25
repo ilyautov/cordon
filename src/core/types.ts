@@ -53,6 +53,20 @@ export type Decision =
 export type TrustLabel = 'trusted' | 'untrusted'
 
 /**
+ * The exposure mark: untrusted content is in the model's context.
+ *
+ * `memory` says how it got there — through a file the harness reloads rather
+ * than a tool result since the user's last message. The escalation is the
+ * same either way; the refusal's wording is not, because it tells the human
+ * where to look.
+ */
+export interface ExposureMark {
+  at: number
+  source: string
+  memory?: true
+}
+
+/**
  * What a tool returns: the source or the rendered form.
  *
  * Exactly two values, because exactly one question is being decided: does the

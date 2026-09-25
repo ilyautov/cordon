@@ -122,6 +122,21 @@ export interface AttackSpec {
   control?: boolean
   /** Prepares session state on disk before the events, e.g. a full store. */
   seed?: (home: string, session: string) => void
+  /**
+   * An earlier session in the same Cordon home, run to completion first.
+   *
+   * The delayed attack lives here: the page is read and the memory written in
+   * one session, and the malicious call is made in the next one, which reads
+   * nothing untrusted. Its calls' verdicts are not measured — what the earlier
+   * session leaves on disk is.
+   */
+  earlier?: {
+    prompt: string | null
+    setup: SetupEvent[]
+    /** A second user message between the reads and the calls: "now save it". */
+    followUp?: string
+    calls: Array<{ tool: string; args: Record<string, unknown> }>
+  }
 }
 
 export type Outcome =
@@ -182,6 +197,7 @@ function mechanismOf(reason: string): string {
   if (/Cordon failure/u.test(reason)) return 'crash-fail-closed'
   if (/provenance is full/u.test(reason)) return 'saturation'
   if (/hidden layer/u.test(reason)) return 'unredacted-mark'
+  if (/was written after reading/u.test(reason)) return 'memory-carry'
   if (/read untrusted content/u.test(reason)) return 'exposure'
   if (/self-protection/u.test(reason)) return 'self-protection'
   if (/outside the certificate's boundaries/u.test(reason)) return 'certificate-bounds'
@@ -233,6 +249,27 @@ export function runAttack(spec: AttackSpec, profileName: string): Row {
     JSON.parse(runHook(JSON.stringify(event), home)) as Record<string, any>
 
   if (spec.seed) spec.seed(home, session)
+  if (spec.earlier) {
+    const before = `${session}-earlier`
+    if (spec.earlier.prompt !== null) {
+      send({ session_id: before, hook_event_name: 'UserPromptSubmit', prompt: spec.earlier.prompt })
+    }
+    for (const event of spec.earlier.setup) {
+      send({
+        session_id: before,
+        hook_event_name: 'PostToolUse',
+        tool_name: event.tool,
+        tool_input: event.input,
+        tool_response: event.response,
+      })
+    }
+    if (spec.earlier.followUp !== undefined) {
+      send({ session_id: before, hook_event_name: 'UserPromptSubmit', prompt: spec.earlier.followUp })
+    }
+    for (const call of spec.earlier.calls) {
+      send({ session_id: before, hook_event_name: 'PreToolUse', tool_name: call.tool, tool_input: call.args })
+    }
+  }
   if (spec.prompt !== null) {
     send({ session_id: session, hook_event_name: 'UserPromptSubmit', prompt: spec.prompt })
   }

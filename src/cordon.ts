@@ -1,12 +1,14 @@
-import { humanSeesRendered, type Certificate, type Decision, type EffectClass, type Source, type ToolCall } from './core/types.js'
+import { humanSeesRendered, type Certificate, type ExposureMark, type Decision, type EffectClass, type Source, type ToolCall } from './core/types.js'
 import { gate as decide } from './gate/gate.js'
+import { memoryTarget } from './gate/memory.js'
 import { FileNotifier, SILENT, type Notifier } from './notify/notifier.js'
 import type { Policy } from './policy/defaults.js'
 import { atoms } from './provenance/normalize.js'
 import { TaintStore } from './provenance/store.js'
 import { sanitize } from './sanitize/index.js'
 import type { Finding } from './sanitize/types.js'
-import { issue, narrow, parseDirective } from './scope/certificate.js'
+import { issue, narrow, parseDirective, parseTrustMemory } from './scope/certificate.js'
+import { MemoryLedger, type MemoryEntry } from './session/memory.js'
 import { MAX_USER_ATOMS, SessionStore } from './session/store.js'
 
 export interface Envelope {
@@ -52,6 +54,7 @@ export class Cordon {
   private readonly notifier: Notifier
   private readonly sessions: SessionStore
   private readonly taint: TaintStore
+  private readonly ledger: MemoryLedger
   private cert: Certificate
   private turn = 0
   private unredacted = false
@@ -64,7 +67,7 @@ export class Cordon {
    * attacks shares no recorded byte with its arguments, so provenance stays
    * silent there by construction.
    */
-  private exposure: { at: number; source: string } | null = null
+  private exposure: ExposureMark | null = null
   /**
    * Atoms from the user's own messages. A call under the exposure mark passes
    * when the user themselves named every one of its targets — the destination
@@ -111,6 +114,12 @@ export class Cordon {
     this.cert = issue(this.policy, this.turn)
     this.directive = restored.directive ?? null
     if (this.directive) this.cert = narrow(this.cert, this.directive)
+
+    // Read on construction, not lazily: a session with no user turns at all
+    // (the MCP gateway) must start marked too, and a damaged ledger must
+    // throw here, where the adapter turns it into a refusal.
+    this.ledger = new MemoryLedger(this.cordonHome)
+    this.carryMemory()
   }
 
   /** Trusted input. The only place where the certificate can change. */
@@ -137,6 +146,13 @@ export class Cordon {
     // extraction is the same `atoms` provenance uses, so a link or an
     // identifier means the same token on both sides of the comparison.
     this.exposure = null
+    // Memory written under exposure is the exception to the argument above:
+    // the user saw the turn in which it was written, but the harness reloads
+    // the file into every turn after, and nothing the user saw vouches for
+    // what it now says. Only the user's explicit word lifts it — parsed from
+    // this message and nowhere else, so the note cannot vouch for itself.
+    if (parseTrustMemory(text)) this.ledger.clear()
+    else this.carryMemory()
     for (const atom of atoms(text)) {
       if (!this.userAtoms.includes(atom)) this.userAtoms.push(atom)
     }
@@ -230,6 +246,8 @@ export class Cordon {
     // harness applies the substituted arguments and the model's own account
     // of the turn is wrong about what landed on disk. Without this line the
     // only record of that is the file itself.
+    this.recordMemory(call, decision)
+
     if (decision.kind === 'deny' || decision.kind === 'ask' || decision.kind === 'rewrite') {
       this.notifier.notify({
         at: new Date().toISOString(),
@@ -319,6 +337,74 @@ export class Cordon {
     return this.cert
   }
 
+  /**
+   * Records a write into persistent memory made while the session carried
+   * untrusted content.
+   *
+   * Recorded on every decision that may let the write happen: allow, a
+   * rewrite (quarantine cut the verbatim fragment, a paraphrase may remain),
+   * and ask — the human may say yes, and the hook never learns the answer.
+   * Over-recording on a declined ask costs one question in a later session;
+   * under-recording costs the attack. A deny never lands, so it carries
+   * nothing.
+   *
+   * The condition is the session's marks, not a match against what is being
+   * written: the attack that waits is the paraphrase that shares no byte with
+   * the page, the same blindness the exposure rule answers within a session.
+   * A match counts too, through the rewrite.
+   *
+   * One condition reaches past the current turn: content from outside read in
+   * ANY earlier turn. The common shape of the attack is "read this page", an
+   * answer, then "now save the key points" — the new message lifts the
+   * exposure mark, yet the page is still in the context the note is written
+   * from. Local files and shell output are left out of that look-back: every
+   * file is untrusted by default, and counting them would put every ordinary
+   * CLAUDE.md edit in a coding session under review.
+   *
+   * A failure to write the ledger is not caught: the exception reaches the
+   * adapter, where a failed PreToolUse is a deny. The write then does not
+   * happen, which is the only safe outcome of not being able to remember it.
+   */
+  private recordMemory(call: ToolCall, decision: Decision): void {
+    if (decision.kind === 'deny') return
+    if (this.policy.exposure === false) return
+    const outside = this.taint.untrusted(FROM_OUTSIDE)[0]
+    const marked = this.exposure !== null || this.unredacted || this.taint.saturated ||
+      decision.kind === 'rewrite' || outside !== undefined
+    if (!marked) return
+    const target = memoryTarget(call, this.policy)
+    if (target === null) return
+
+    const source = this.exposure?.source ?? outside?.label ?? this.lastSource?.label ??
+      'a source that could not be read cleanly'
+    this.ledger.record({ target, source, sessionId: this.sessionId })
+    this.notifier.notify({
+      at: new Date().toISOString(),
+      decision: 'memory',
+      tool: call.tool,
+      reason:
+        `memory ${target} is being written after reading untrusted content; every later session ` +
+        'escalates consequential calls until you review it and say "cordon: trust memory"',
+      source,
+    })
+  }
+
+  /**
+   * Starts the session marked when memory was written under exposure.
+   *
+   * The mark reuses the exposure rule whole — the same escalation, the same
+   * exemption for destinations the user named — because the situation is the
+   * same one: untrusted content is in the model's context. Only the way it
+   * got there differs: through a file the harness reloads, not a tool result.
+   */
+  private carryMemory(): void {
+    if (this.policy.exposure === false) return
+    if (this.exposure !== null) return
+    const live = this.ledger.live()
+    if (live.length === 0) return
+    this.exposure = { at: this.turn, source: describeMemory(live), memory: true }
+  }
+
   private persist(): void {
     this.sessions.save(this.sessionId, {
       turn: this.turn,
@@ -329,4 +415,18 @@ export class Cordon {
       userAtoms: this.userAtoms,
     })
   }
+}
+
+/**
+ * Source kinds that bring content from outside the machine: a page, a tool or
+ * MCP server's result. What the memory rule looks back for across turns.
+ */
+const FROM_OUTSIDE: ReadonlySet<Source['kind']> = new Set<Source['kind']>(['web', 'tool', 'mcp-description'])
+
+/** The mark's source line, which is what the human reads in the refusal. */
+function describeMemory(entries: readonly MemoryEntry[]): string {
+  const targets = [...new Set(entries.map((entry) => entry.target))]
+  const shown = targets.length > 3 ? `${targets.slice(0, 3).join(', ')} and ${targets.length - 3} more` : targets.join(', ')
+  const sources = [...new Set(entries.map((entry) => entry.source))].slice(0, 3).join(', ')
+  return `memory ${shown} was written after reading ${sources}; review it, then say "cordon: trust memory"`
 }

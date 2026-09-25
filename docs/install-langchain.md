@@ -46,6 +46,17 @@ The middleware contract maps onto the core's three entries, on two hooks:
 
 The named blind spot: stateless invocation sending the identical text twice is indistinguishable from a repeated pass, and the second copy is not fed. Skipping is the safe direction — feeding it again would lift a mark without anything having been seen.
 
+## Memory stores
+
+A tool that writes into long-term memory — a Mem0 store, a vector store the agent reads back in later runs — is an ordinary tool call to Cordon, and only you know that what it writes outlives the run. Declare it:
+
+```yaml
+memory:
+  tools: [mem0_add]
+```
+
+A write through it while the session carries untrusted content is recorded in the memory ledger, and every later session starts under the exposure mark until a user message says `cordon: trust memory`. See "Memory that outlives the session" in [install.md](install.md).
+
 ## Session and state
 
 State lives under `CORDON_HOME`, or `~/.cordon` when the variable is not set — the same resolution the hooks use. `sessionId` defaults to `langchain`; give each agent its own when several run in one process, because provenance shared between unrelated tasks is worse than provenance per task. A broken state directory throws at middleware creation, not mid-run.
