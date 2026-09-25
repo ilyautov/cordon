@@ -36,6 +36,8 @@ export interface HookOutput {
     permissionDecision?: 'deny' | 'ask'
     permissionDecisionReason?: string
     updatedInput?: Record<string, unknown>
+    /** Added to the model's context. Cordon's own words only, never untrusted text. */
+    additionalContext?: string
     updatedToolOutput?: unknown
     /**
      * Replaces the delta displayed to the human. It changes neither the
@@ -170,10 +172,22 @@ export function renderDecision(decision: Decision, mode: PresenceMode): HookOutp
 
   if (decision.kind === 'rewrite') {
     if (mode === 'autonomous') {
+      const removed = decision.removed.length > 0 ? decision.removed.join(', ') : 'none'
       return {
+        // Nobody is asked in autonomous mode, and a cut nobody hears about
+        // is a damaged result behind a confident answer: on a live run a page
+        // summary was written with a sentence missing while the model
+        // reported the whole text saved. The model is told, so its answer
+        // matches what ran; the human sees it in the transcript. The text is
+        // Cordon's own — the reason and the argument names, never the cut.
+        systemMessage: `Cordon, argument quarantine: ${decision.reason}; arguments changed: ${removed}`,
         hookSpecificOutput: {
           hookEventName: 'PreToolUse',
           updatedInput: decision.args,
+          additionalContext:
+            `Cordon cut an untrusted fragment out of this call before it ran (${decision.reason}; ` +
+            `arguments changed: ${removed}). What ran is not what you wrote: tell the user the ` +
+            'result is incomplete rather than reporting it done in full.',
         },
       }
     }

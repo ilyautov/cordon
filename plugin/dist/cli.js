@@ -7790,8 +7790,12 @@ var MEMORY_TOOLS = /* @__PURE__ */ new Set([
 function memoryTarget(call, policy) {
   if (MEMORY_TOOLS.has(call.tool) || declaredTools(policy).includes(call.tool)) return call.tool;
   const verdict = classify(call, policy.tools);
-  if (!verdict.effects.some((effect) => effect === "create" || effect === "update")) return null;
   const extra = declaredFiles(policy);
+  if (verdict.effects.includes("exec")) {
+    const named = namedInCommand(call, extra);
+    if (named !== null) return named;
+  }
+  if (!verdict.effects.some((effect) => effect === "create" || effect === "update")) return null;
   for (const { key, value } of fields(call.args ?? {})) {
     if (typeof value !== "string" || !PATH_KEYS.has(fold(key))) continue;
     for (const form of canonicalForms(value).reverse()) {
@@ -7800,6 +7804,48 @@ function memoryTarget(call, policy) {
     }
   }
   return null;
+}
+function namedInCommand(call, extra) {
+  const names = [...MEMORY_FILES, ...extra];
+  for (const { value } of fields(call.args ?? {})) {
+    if (typeof value !== "string") continue;
+    for (const raw of value.split(/[\s;&|<>()`=]+/u)) {
+      const word = raw.replace(/["'\\]/gu, "");
+      if (word === "") continue;
+      const name = memoryName(word);
+      if (names.includes(name)) return word;
+      if (/[*?[]/u.test(name) && keepsLiteralStem(name) && names.some((known) => globMatches(name, known))) return word;
+    }
+  }
+  return null;
+}
+function keepsLiteralStem(pattern) {
+  const dot = pattern.lastIndexOf(".");
+  const stem = dot > 0 ? pattern.slice(0, dot) : pattern;
+  return /[^*?[\]]/u.test(stem.replace(/\[[^\]]*\]/gu, ""));
+}
+function globMatches(pattern, name) {
+  let source = "";
+  for (let i = 0; i < pattern.length; i++) {
+    const char = pattern[i];
+    if (char === "*") source += ".*";
+    else if (char === "?") source += ".";
+    else if (char === "[") {
+      const end = pattern.indexOf("]", i + 1);
+      if (end === -1) {
+        source += "\\[";
+        continue;
+      }
+      const body = pattern.slice(i + 1, end).replace(/^!/u, "^").replace(/\\/gu, "\\\\");
+      source += `[${body}]`;
+      i = end;
+    } else source += char.replace(/[.+^${}()|\\]/gu, "\\$&");
+  }
+  try {
+    return new RegExp(`^${source}$`, "u").test(name);
+  } catch {
+    return false;
+  }
 }
 function memoryName(path) {
   return fold2(basename2(path.replace(/\\/gu, "/")));
@@ -12456,10 +12502,19 @@ function renderDecision(decision, mode) {
   if (decision.kind === "allow") return {};
   if (decision.kind === "rewrite") {
     if (mode === "autonomous") {
+      const removed = decision.removed.length > 0 ? decision.removed.join(", ") : "none";
       return {
+        // Nobody is asked in autonomous mode, and a cut nobody hears about
+        // is a damaged result behind a confident answer: on a live run a page
+        // summary was written with a sentence missing while the model
+        // reported the whole text saved. The model is told, so its answer
+        // matches what ran; the human sees it in the transcript. The text is
+        // Cordon's own — the reason and the argument names, never the cut.
+        systemMessage: `Cordon, argument quarantine: ${decision.reason}; arguments changed: ${removed}`,
         hookSpecificOutput: {
           hookEventName: "PreToolUse",
-          updatedInput: decision.args
+          updatedInput: decision.args,
+          additionalContext: `Cordon cut an untrusted fragment out of this call before it ran (${decision.reason}; arguments changed: ${removed}). What ran is not what you wrote: tell the user the result is incomplete rather than reporting it done in full.`
         }
       };
     }

@@ -40,11 +40,15 @@ export function memoryTarget(call: ToolCall, policy: Policy): string | null {
   if (MEMORY_TOOLS.has(call.tool) || declaredTools(policy).includes(call.tool)) return call.tool
 
   const verdict = classify(call, policy.tools)
+  const extra = declaredFiles(policy)
+  if (verdict.effects.includes('exec')) {
+    const named = namedInCommand(call, extra)
+    if (named !== null) return named
+  }
   if (!verdict.effects.some((effect) => effect === 'create' || effect === 'update')) return null
 
   // The same walk the gate does, nested objects and arrays included: a path
   // one level down is an ordinary MCP call, and the gate already judged it.
-  const extra = declaredFiles(policy)
   for (const { key, value } of fields(call.args ?? {})) {
     if (typeof value !== 'string' || !PATH_KEYS.has(fold(key))) continue
     // Every spelling that opens the same file: tilde expanded, links
@@ -56,6 +60,72 @@ export function memoryTarget(call: ToolCall, policy: Policy): string | null {
     }
   }
   return null
+}
+
+/**
+ * A memory file named anywhere in a command, or null.
+ *
+ * What a command will do cannot be read off its string: `>>`, tee, cp, sed -i,
+ * a script, an interpreter one-liner. Which files it names can be, so naming
+ * a memory file counts as writing it. A read recorded by mistake costs one
+ * "cordon: trust memory"; a write missed costs the next session, and review
+ * found exactly that miss — `echo ... >> CLAUDE.md` through Bash, with the
+ * ledger empty.
+ *
+ * Quotes and backslashes are dropped before comparing, because the shell
+ * joins `CLAU""DE.md` and `CLAUDE\.md` back into the name before opening
+ * anything. A glob counts when it matches a memory name and keeps a literal
+ * part of the name itself: `CLA*.md` does, `*.md` and `*` do not — those name
+ * every file, and `ls *` would otherwise mark every later session. What is
+ * not caught is a name the command assembles at run time: a variable, a
+ * `$(...)`, a script reading its path from a file. That limit is the
+ * shell's, and the answer to it is the exposure rule on exec, not this.
+ */
+function namedInCommand(call: ToolCall, extra: ReadonlySet<string>): string | null {
+  const names = [...MEMORY_FILES, ...extra]
+  for (const { value } of fields(call.args ?? {})) {
+    if (typeof value !== 'string') continue
+    for (const raw of value.split(/[\s;&|<>()`=]+/u)) {
+      const word = raw.replace(/["'\\]/gu, '')
+      if (word === '') continue
+      const name = memoryName(word)
+      if (names.includes(name)) return word
+      if (/[*?[]/u.test(name) && keepsLiteralStem(name) && names.some((known) => globMatches(name, known))) return word
+    }
+  }
+  return null
+}
+
+/** Whether the part before the extension has a character that is not a wildcard. */
+function keepsLiteralStem(pattern: string): boolean {
+  const dot = pattern.lastIndexOf('.')
+  const stem = dot > 0 ? pattern.slice(0, dot) : pattern
+  return /[^*?[\]]/u.test(stem.replace(/\[[^\]]*\]/gu, ''))
+}
+
+/** A shell glob against a folded name: *, ? and bracket classes. */
+function globMatches(pattern: string, name: string): boolean {
+  let source = ''
+  for (let i = 0; i < pattern.length; i++) {
+    const char = pattern[i]!
+    if (char === '*') source += '.*'
+    else if (char === '?') source += '.'
+    else if (char === '[') {
+      const end = pattern.indexOf(']', i + 1)
+      if (end === -1) { source += '\\['; continue }
+      const body = pattern.slice(i + 1, end).replace(/^!/u, '^').replace(/\\/gu, '\\\\')
+      source += `[${body}]`
+      i = end
+    } else source += char.replace(/[.+^${}()|\\]/gu, '\\$&')
+  }
+  try {
+    return new RegExp(`^${source}$`, 'u').test(name)
+  } catch {
+    // A class the shell cannot expand either — a range out of order — is
+    // taken literally by the shell, and a literal bracket never spells a
+    // memory file name. Not a match; the decision on the call is untouched.
+    return false
+  }
 }
 
 /**

@@ -88,3 +88,58 @@ describe('memoryTarget: which calls write into memory an agent reloads', () => {
       .toBe(join(homedir(), 'proj', 'CLAUDE.md'))
   })
 })
+
+describe('memoryTarget: a shell command that names a memory file', () => {
+  // A command string cannot be parsed into what it will do; what can be read
+  // is which files it names. Naming a memory file in a command is treated as
+  // a write — recording a read costs one "cordon: trust memory", missing a
+  // write costs the next session.
+  const bash = (command: string) => memoryTarget({ tool: 'Bash', args: { command } }, policy())
+
+  it('a redirect into CLAUDE.md', () => {
+    expect(bash("echo 'x' >> /srv/p/CLAUDE.md")).toBe('/srv/p/CLAUDE.md')
+  })
+
+  it('a redirect with no space before the name', () => {
+    expect(bash('echo x >>AGENTS.md')).toBe('AGENTS.md')
+  })
+
+  it('tee, cp and sed -i', () => {
+    expect(bash('printf x | tee -a ./GEMINI.md')).toBe('./GEMINI.md')
+    expect(bash('cp /tmp/notes.md /srv/p/CLAUDE.md')).toBe('/srv/p/CLAUDE.md')
+    expect(bash("sed -i '' 's/a/b/' CLAUDE.md")).toBe('CLAUDE.md')
+  })
+
+  it('a name split by quotes or a backslash', () => {
+    // The shell joins these back into CLAUDE.md before opening anything.
+    expect(bash('echo x >> CLAU""DE.md')).not.toBeNull()
+    expect(bash("echo x >> 'CLAUDE'.md")).not.toBeNull()
+    expect(bash('echo x >> CLAUDE\\.md')).not.toBeNull()
+  })
+
+  it('a glob that matches a memory file', () => {
+    expect(bash('echo x >> CLAUDE.m?')).not.toBeNull()
+    expect(bash('echo x >> CLA*.md')).not.toBeNull()
+    expect(bash('echo x >> [Cc]LAUDE.md')).not.toBeNull()
+  })
+
+  it('a declared memory file', () => {
+    expect(memoryTarget({ tool: 'Bash', args: { command: 'echo x >> NOTES.md' } }, policy({ files: ['NOTES.md'], tools: [] })))
+      .toBe('NOTES.md')
+  })
+
+  it('a command that names no memory file', () => {
+    expect(bash('npm test && git status')).toBeNull()
+    expect(bash('echo x >> README.md')).toBeNull()
+    // A bare * is every file, and a command with one is not a memory write
+    // by that alone: rm * or ls * would mark every session otherwise.
+    expect(bash('ls *')).toBeNull()
+  })
+})
+
+describe('memoryTarget: a glob the shell itself would reject', () => {
+  it('does not throw on a bracket range out of order', () => {
+    // An exception here is a refusal of an innocent command.
+    expect(() => memoryTarget({ tool: 'Bash', args: { command: 'ls CL[z-a]UDE.md' } }, policy())).not.toThrow()
+  })
+})

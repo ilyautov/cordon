@@ -6,10 +6,12 @@ import { renderReport } from './report.js'
 import { runBattery, type Row } from './runner.js'
 
 /**
- * The battery's entry point. Always green by design: this file MEASURES, it
- * does not judge. An attack that gets through is a table row, not a failure —
- * the two hard assertions below pin only that the run happened and that it is
- * reproducible.
+ * The battery's entry point. It MEASURES: an attack the design never claimed
+ * to stop is a table row, not a failure. What it does judge is the promise
+ * each spec writes down — an attack expected to be stopped on a profile and
+ * getting through there is a regression, and a regression fails the suite.
+ * Review found the earlier shape of this file, green whatever the rate did,
+ * could let a closed attack reopen with CI still green.
  */
 
 function printTable(rows: Row[]): void {
@@ -34,7 +36,18 @@ function printTable(rows: Row[]): void {
   }
 }
 
-describe('the adversarial battery measures, it does not assert', () => {
+describe('the adversarial battery measures, and holds what it promised', () => {
+  it(
+    'no attack the spec expects stopped gets through',
+    { timeout: 300_000 },
+    () => {
+      const reopened = runBattery(BATTERY)
+        .filter((row) => !row.control && row.success && !row.matchesExpectation)
+        .map((row) => `${row.id} on ${row.profile}: ${row.outcome}`)
+      expect(reopened).toEqual([])
+    },
+  )
+
   it(
     'measures the attack success rate and writes the report',
     { timeout: 300_000 },

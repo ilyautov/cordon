@@ -89,6 +89,21 @@ describe('renderDecision', () => {
     expect(out.hookSpecificOutput?.permissionDecision).toBeUndefined()
   })
 
+  it('in autonomous mode the model and the user are both told what was cut', () => {
+    // Live run: a page summary written into a file came out of quarantine
+    // with a sentence missing, and the model reported the whole text saved.
+    // The cut itself is right; saying nothing about it left a damaged file
+    // behind a confident answer.
+    const out = renderDecision(
+      { kind: 'rewrite', args: { text: 'clean' }, removed: ['text'], reason: 'it was cut out' },
+      'autonomous',
+    )
+    expect(out.hookSpecificOutput?.additionalContext).toContain('text')
+    expect(out.hookSpecificOutput?.additionalContext).toContain('it was cut out')
+    expect(out.hookSpecificOutput?.additionalContext).toMatch(/not what you wrote|tell the user/u)
+    expect(out.systemMessage).toContain('text')
+  })
+
   it('unchanged fields get into updatedInput too', () => {
     // The harness replaces the argument object whole rather than merging it
     // field by field. A lost field means a call with a missing argument.

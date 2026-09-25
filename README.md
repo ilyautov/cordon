@@ -11,7 +11,7 @@
 - **Core** plus adapters for **Claude Code** and **Gemini CLI**, a gateway for **MCP hosts**, middleware for **LangChain** agents.
 - Hidden-layer neutralization, provenance of untrusted data, an intent certificate, an action gate that also answers the fact of reading untrusted content, a source-influence footer under the model's answer, and packaging that intercepts four harness events.
 
-**Measured:** 1046 tests · 18 pinned attack vectors · 7 legitimate documents · 2 runtime dependencies.
+**Measured:** 1071 tests · 18 pinned attack vectors · 7 legitimate documents · 2 runtime dependencies.
 
 **Install:** [Claude Code](docs/install.md) · [Gemini CLI](docs/install-gemini.md) · [MCP hosts](docs/install-mcp.md) · [LangChain](docs/install-langchain.md)
 
@@ -36,7 +36,7 @@ Catching such lines by meaning is hopeless. Maliciousness detection loses to an 
 
 Instead of recognizing intent, three mechanical rules, one per axis.
 
-**The control axis.** A certificate is derived from the user's own instruction: which effect classes are permitted in this conversation. Not a list of tools, but classes, from `read` through `financial` and `exec`. A call outside the certificate does not go through, no matter how convincingly the instruction is written or where it came from. The certificate can only narrow, and the module that issues it never sees untrusted text at all.
+**The control axis.** A certificate says which effect classes are permitted in this conversation: not a list of tools, but classes, from `read` through `financial` and `exec`. It starts as the profile in the policy, and the user can narrow it for a task with an explicit `cordon: scope` line in their own message. The meaning of a free-form request is not interpreted — reading intent out of prose is the model-in-the-loop this design refuses — so the certificate is exactly as precise as the profile and the directive make it. A call outside the certificate does not go through, no matter how convincingly the instruction is written or where it came from. The certificate can only narrow, and the module that issues it never sees untrusted text at all.
 
 **The data axis.** Everything read from an untrusted source is remembered, and the arguments of subsequent calls are checked against that memory. An irreversible action (moving money, deleting, sending outward) answers to any match; a reversible one answers only to a match on the target, that is, on an address, a path or an identifier. Otherwise work would stop at the first meaningful answer.
 
@@ -186,7 +186,7 @@ The most important section in this file. Cordon works on one narrow stretch, and
 
 **The subject's name comes from the domain only.** Cordon can say "only itself vouches for it" about a site whose page the agent read, and can say nothing about a subject whose pages were not read. Extracting names from arbitrary text would mean guessing, and a guess inside a trust annotation is worse than silence.
 
-**Memory is noticed by name, and the human's word is final.** A write into memory is seen when it goes through a tool Cordon can classify: a `Write` or `Edit` to a known file name, a declared memory tool. A shell command appending to `CLAUDE.md` is `exec` and escalates on its own, but it is not recorded in the ledger, because the command text is not parsed. A memory file the harness reloads under a name Cordon does not know, and nobody declared, is not watched at all. And `cordon: trust memory` is taken at its word: a human who writes it without reading the file lifts the mark from a poisoned note. Local files read in earlier turns do not count toward the ledger — only content from outside does — so a note paraphrased from a local file in a later turn is not recorded.
+**Memory is noticed by name, and the human's word is final.** A write into memory is seen when it goes through a tool Cordon can classify: a `Write` or `Edit` to a known file name, a declared memory tool. A shell command is recorded when it names a memory file — `>> CLAUDE.md`, `tee`, `cp`, a name split by quotes, a glob such as `CLA*.md` — and naming counts as writing, so a `grep` over `CLAUDE.md` in an exposed session is recorded too. A name the command assembles at run time (a variable, `$(...)`, a path read from a file, a bare `*.md`) is not seen; that call still escalates as `exec` under the exposure mark, but it leaves no trace for the next session. A memory file the harness reloads under a name Cordon does not know, and nobody declared, is not watched at all. And `cordon: trust memory` is taken at its word: a human who writes it without reading the file lifts the mark from a poisoned note. Local files read in earlier turns do not count toward the ledger — only content from outside does — so a note paraphrased from a local file in a later turn is not recorded.
 
 **Not a sandbox and not an antivirus.** Cordon reads text as text. What a launched command does, which files a script writes and where a process connects, it does not see, and that is covered at the operating-system level, not by a library.
 

@@ -12,14 +12,29 @@ import type { AttackSpec, Row } from './runner.js'
  * written by whoever read the numbers.
  */
 
-const ANALYSIS = `### The main chart: ASR as a function of profile width
+/**
+ * The main chart, from the rows of this run. Review found the prose quoting
+ * 79% → 7% under a table reading 80% → 6%: numbers written by hand go stale
+ * the day a spec is added, so here they are computed.
+ */
+function mainChart(rows: Row[]): string {
+  const rate = (profile: string): string => {
+    const slice = rows.filter((row) => !row.control && row.profile === profile)
+    const success = slice.filter((row) => row.success).length
+    const percent = slice.length === 0 ? 0 : Math.round((success / slice.length) * 100)
+    return `${percent}% (${success}/${slice.length})`
+  }
+  return `### The main chart: ASR as a function of profile width
 
-- **narrow: 0% (0/29)**. Every attack in the battery dies on the certificate: the calls the pages order need create, exec or network-egress, and none of that is in the profile. The control axis alone carries the narrow profile — provenance, sanitize and the exposure mark never even get a vote.
-- **wide: 7% (2/30)**. The previous run of this battery — the same profile without the exposure rule, kept in the tables as \`wide-no-exposure\` — stood at **79% (22/28)**. The mark closes the difference: after an untrusted read, a call acting beyond reading escalates unless every one of its targets was named by the user in their own messages. Of the two rows that still succeed, one is a documented limit of the mechanism and one is a denial of service; neither carries a payload anywhere.
-- **bounded: 7% (2/29)**. Host bounds used to cut exactly the WebFetch exfiltration and nothing else; with the mark on, the bounded column now equals wide on this battery. Bounds remain the answer to the residue the mark cannot see (below).
-- **wide-no-exposure: 79% (22/28)**. The delta is the mechanism, measured: the same attacks, the same profile, one policy line.
+- **narrow: ${rate('narrow')}**. The calls the pages order need create, exec or network-egress, and none of that is in the profile. The control axis alone carries the narrow profile — provenance, sanitize and the exposure mark never even get a vote.
+- **wide: ${rate('wide')}**, against **${rate('wide-no-exposure')}** for the same profile with the exposure rule switched off. The mark closes the difference: after an untrusted read, a call acting beyond reading escalates unless every one of its targets was named by the user in their own messages. What still succeeds is listed below.
+- **bounded: ${rate('bounded')}**. Host bounds used to cut exactly the WebFetch exfiltration and nothing else; with the mark on, bounds remain the answer to the residue the mark cannot see (below).
+- **wide-no-exposure: ${rate('wide-no-exposure')}**. The delta is the mechanism, measured: the same attacks, the same profile, one policy line.
 
-### What the exposure mark closed
+`
+}
+
+const ANALYSIS = `### What the exposure mark closed
 
 Everything the previous run measured green on wide shared one shape: **the malicious call carried not a single byte that provenance recorded** — a retelling, an encoding past the decoder, a shell-shaped path or host, an atom the page never wrote in machine form, a fabricated confirmation. The mark answers all of it without reading the arguments at all: the read happened, the destination came from the page. Measured, by category, wide-no-exposure → wide:
 
@@ -205,7 +220,7 @@ export function renderReport(rows: Row[], specs: AttackSpec[]): string {
   }
   lines.push('## What the numbers say')
   lines.push('')
-  lines.push(ANALYSIS)
+  lines.push(mainChart(rows) + ANALYSIS)
   lines.push('')
   lines.push('## Bugs and near-bugs')
   lines.push('')
