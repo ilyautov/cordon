@@ -15,6 +15,7 @@ This page tracks what Cordon took from the tools it is compared with in [compari
 | Fleet deployment that a repository cannot switch off | enterprise platforms | Claude Code managed settings with `allowManagedHooksOnly` ([enterprise.md](enterprise.md)) | run on one managed macOS machine with Claude Code 2.1.282 against a project that tries every switch-off ([enterprise.md](enterprise.md#what-was-verified)) |
 | A signed provenance for the published package | npm ecosystem practice | `release.yml` publishes with `--provenance` | the release workflow; first run at the 0.7.0 tag |
 | A decision that answers to what was read, not only to what matched | FIDES, CaMeL (information-flow control) | the exposure rule and the memory ledger | `tests/adversarial/asr.test.ts` (the battery fails on a regression) |
+| One decision on every transport | the design's own claim, unmeasured before | nine scenarios through Claude Code, Gemini CLI, the MCP gateway and LangChain, compared down to the refusal's reason | `tests/adversarial/transports.test.ts` |
 | The model told when a call was changed under it | FIDES-style labels on results | quarantine rewrites carry `additionalContext` to the model | `tests/adapters/claude-code/protocol.test.ts`, [live-run.md](live-run.md) |
 
 ## Considered and not taken
