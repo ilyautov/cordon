@@ -7921,6 +7921,12 @@ function atoms(text) {
   const found = /* @__PURE__ */ new Set();
   const source = text.normalize("NFKC");
   for (const match of source.matchAll(/(?:https?:\/\/|mailto:)\S+/giu)) {
+    const link = trimTail(match[0]);
+    found.add(link);
+    const bare = link.replace(/^https?:\/\//u, "");
+    if (bare !== link && bare !== "") found.add(bare);
+  }
+  for (const match of source.matchAll(/(?<![\w@/.:-])(?:www\.[a-z0-9-]+(?:\.[a-z0-9-]+)+|[a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,}\/)\S*/giu)) {
     found.add(trimTail(match[0]));
   }
   for (const match of source.matchAll(/\b[\w.-]+@[\w-]+\.[a-z]{2,}\b/giu)) {

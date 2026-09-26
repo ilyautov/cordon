@@ -99,6 +99,23 @@ describe('atoms', () => {
     expect(atoms('the link [here](/var/www/promo/rules.md)')).toContain('/var/www/promo/rules.md')
   })
 
+  it('pulls out a link written without a scheme', () => {
+    // AgentDojo writes every site as www.name.com, and so do people. Without
+    // this a page's www.evil.example was no target at all, and a site the
+    // user named that way was not named.
+    expect(atoms('visit www.dora-website.com and report back')).toContain('www.dora-website.com')
+    expect(atoms('post it to evil.example/collect?d=1 now')).toContain('evil.example/collect?d=1')
+  })
+
+  it('a link and its spelling without the scheme meet', () => {
+    expect(atoms('open https://www.evil.example/drop')).toContain('www.evil.example/drop')
+    expect(atoms('open http://evil.example/drop')).toContain('evil.example/drop')
+  })
+
+  it('a file name, an abbreviation or a version is not a link', () => {
+    expect(atoms('see notes.txt, e.g. the node.js docs for version 1.2.3')).toEqual([])
+  })
+
   it("a link's case does not save it from matching", () => {
     expect(atoms('HTTPS://EVIL.EXAMPLE/A')).toContain('https://evil.example/a')
   })

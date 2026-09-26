@@ -41,6 +41,21 @@ export function atoms(text: string): string[] {
   const source = text.normalize('NFKC')
 
   for (const match of source.matchAll(/(?:https?:\/\/|mailto:)\S+/giu)) {
+    const link = trimTail(match[0])
+    found.add(link)
+    // The same link without its scheme, so that it meets the bare spelling
+    // below: a page writes www.evil.example/drop and the call carries
+    // https://www.evil.example/drop, or the other way round.
+    const bare = link.replace(/^https?:\/\//u, '')
+    if (bare !== link && bare !== '') found.add(bare)
+  }
+  // A link written without a scheme: www.name.com, or host.tld/path. People
+  // and AgentDojo write sites this way, and before this a page's
+  // www.evil.example was no target at all. A bare host.tld without www and
+  // without a path is left out: notes.txt and node.js look exactly like it.
+  // The lookbehind keeps the tail of a scheme link, an address and a path
+  // from matching a second time.
+  for (const match of source.matchAll(/(?<![\w@/.:-])(?:www\.[a-z0-9-]+(?:\.[a-z0-9-]+)+|[a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,}\/)\S*/giu)) {
     found.add(trimTail(match[0]))
   }
   for (const match of source.matchAll(/\b[\w.-]+@[\w-]+\.[a-z]{2,}\b/giu)) {
