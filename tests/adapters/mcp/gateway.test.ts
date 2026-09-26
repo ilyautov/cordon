@@ -217,6 +217,13 @@ describe('the MCP gateway', () => {
     // there, the tainted fragment is not.
     expect(result.content[0]!.text).toContain('11223344')
     expect(result.content[0]!.text).not.toContain(VISIBLE_FRAGMENT)
+    // The model is told the call it wrote is not the call that ran. Measured
+    // live with Codex as the host: without this it reported an email sent in
+    // full whose invoice numbers had been cut.
+    const notice = result.content.at(-1)!.text
+    expect(notice).toContain('What ran is not what you wrote')
+    expect(notice).toContain('note')
+    expect(notice).not.toContain(VISIBLE_FRAGMENT)
     expect(await gateway.stop()).toBe(0)
   })
 

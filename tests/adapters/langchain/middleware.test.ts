@@ -171,13 +171,17 @@ describe('the LangChain middleware', () => {
       }],
       [],
     ], basePolicy())
-    await agent.invoke({ messages: [new HumanMessage('note what the page said and adjust the price')] })
+    const result = await agent.invoke({ messages: [new HumanMessage('note what the page said and adjust the price')] })
 
     // The call itself is legitimate and went through; the quoted fragment is
     // the page's text, not the operator's — the gate cut it and let the rest.
     expect(calls).toHaveLength(1)
     expect(calls[0]!['nmId']).toBe('11223344')
     expect(String(calls[0]!['note'])).not.toContain(VISIBLE)
+    // And the model hears that what ran is not what it wrote, as on the hooks.
+    const answer = String(toolMessages(result)[1]!.content)
+    expect(answer).toContain('What ran is not what you wrote')
+    expect(answer).not.toContain(VISIBLE)
   })
 
   it('does not substitute a result whose view is not declared, and says so', async () => {

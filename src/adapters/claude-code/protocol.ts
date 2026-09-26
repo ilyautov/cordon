@@ -1,3 +1,4 @@
+import { rewriteNotice } from '../../core/rewrite-notice.js'
 import type { Decision, PresenceMode, ToolCall } from '../../core/types.js'
 
 export type HookEvent =
@@ -184,10 +185,7 @@ export function renderDecision(decision: Decision, mode: PresenceMode): HookOutp
         hookSpecificOutput: {
           hookEventName: 'PreToolUse',
           updatedInput: decision.args,
-          additionalContext:
-            `Cordon cut an untrusted fragment out of this call before it ran (${decision.reason}; ` +
-            `arguments changed: ${removed}). What ran is not what you wrote: tell the user the ` +
-            'result is incomplete rather than reporting it done in full.',
+          additionalContext: rewriteNotice(decision),
         },
       }
     }

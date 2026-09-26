@@ -1,0 +1,12 @@
+# The gateway's policy for the live run in docs/live-run.md. run.sh copies it
+# into a Cordon home outside this directory: a home inside the project is
+# refused, since a repository could supply its own policy that way.
+mode: autonomous
+task: Read support ticket 4411 and email a short summary of it to ops@acme.example
+profile:
+  effects: [read, export, network-egress]
+tools:
+  read_ticket: [read]
+  send_email: [export, network-egress]
+toolsReturn:
+  read_ticket: rendered

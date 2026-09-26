@@ -4,6 +4,7 @@ import { createMiddleware, ToolMessage } from 'langchain'
 import { isHumanMessage, type BaseMessage, type MessageContent } from '@langchain/core/messages'
 import { Cordon } from '../../cordon.js'
 import { sourceLabel } from '../../core/argument-keys.js'
+import { rewriteNotice } from '../../core/rewrite-notice.js'
 import type { Source, ToolCall } from '../../core/types.js'
 import type { Policy } from '../../policy/defaults.js'
 import { classifySource } from '../../provenance/trust.js'
@@ -138,7 +139,8 @@ export function createCordonMiddleware(options: CordonMiddlewareOptions) {
         : request
       const result = await handler(effective)
 
-      return observeResult(result, call, cordon, policy)
+      const observed = observeResult(result, call, cordon, policy)
+      return decision.kind === 'rewrite' ? withNotice(observed, rewriteNotice(decision)) : observed
     },
   })
 }
@@ -225,6 +227,20 @@ function observeText(text: string, tool: string, source: Source, cordon: Cordon)
  * is not shown, so nothing the model reads keeps the hidden layer. Dropping
  * it would take data from the application for no defensive gain.
  */
+/**
+ * Appends Cordon's note to what the tool returned, after observation: it is
+ * not the tool's content and is not read as such. A result that is not a
+ * ToolMessage was already marked; there is nothing to append to.
+ */
+function withNotice<R>(result: R, notice: string): R {
+  if (!ToolMessage.isInstance(result)) return result
+  const content = result.content
+  const next: MessageContent = typeof content === 'string'
+    ? `${content}\n\n${notice}`
+    : [...content, { type: 'text', text: notice }] as MessageContent
+  return withContent(result, next) as R
+}
+
 function withContent(message: ToolMessage, content: MessageContent): ToolMessage {
   return new ToolMessage({
     content,

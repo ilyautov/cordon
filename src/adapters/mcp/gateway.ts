@@ -7,6 +7,7 @@ import type { Readable, Writable } from 'node:stream'
 import { Cordon } from '../../cordon.js'
 import { sourceLabel } from '../../core/argument-keys.js'
 import { makeDirectory } from '../../core/mkdir.js'
+import { rewriteNotice } from '../../core/rewrite-notice.js'
 import type { Source, ToolCall } from '../../core/types.js'
 import type { Policy } from '../../policy/defaults.js'
 import { homeProblem, projectDir } from '../../policy/home.js'
@@ -36,6 +37,8 @@ interface Pending {
   call?: ToolCall
   /** The request's own name for the content, for resources/read and prompts/get. */
   label?: string
+  /** Set when the call ran with arguments Cordon cut: the model is told so with the result. */
+  notice?: string
 }
 
 /**
@@ -207,7 +210,8 @@ export function runGateway(options: GatewayOptions): Promise<number> {
         return
       }
       if (entry.method === 'tools/call' && entry.call !== undefined) {
-        sendToHost(observeToolResult(message.value, entry.call, cordon, options.policy))
+        const observed = observeToolResult(message.value, entry.call, cordon, options.policy)
+        sendToHost(entry.notice === undefined ? observed : withNotice(observed, entry.notice))
         return
       }
       if (entry.method === 'resources/read') {
@@ -275,13 +279,14 @@ function gateCall(
     return
   }
 
-  pending.set(pendingKey(message.id), { method: message.method, call })
   if (decision.kind === 'rewrite') {
+    pending.set(pendingKey(message.id), { method: message.method, call, notice: rewriteNotice(decision) })
     // The forwarded request is reserialized: the original line carries the
     // arguments the model wrote, and they are exactly what was cut.
     sendUpstream({ ...message.value, params: { ...params, arguments: decision.args } })
     return
   }
+  pending.set(pendingKey(message.id), { method: message.method, call })
   sendUpstream(message.value)
 }
 
@@ -375,6 +380,18 @@ function observeDescription(entry: Record<string, unknown>, key: string, tool: s
  * happened, so the session is marked, and the gate answers from there: the
  * next call beyond reading escalates.
  */
+/**
+ * Appends Cordon's own note to a tool result, after observation: it is not
+ * content from the server and is not read as such. An error response carries
+ * no result to append to, and the model already hears that the call failed.
+ */
+function withNotice(value: Record<string, unknown>, notice: string): Record<string, unknown> {
+  const result = asRecord(value['result'])
+  if (result === null) return value
+  const content = Array.isArray(result['content']) ? result['content'] : []
+  return { ...value, result: { ...result, content: [...content, { type: 'text', text: notice }] } }
+}
+
 function observeToolResult(
   value: Record<string, unknown>,
   call: ToolCall,

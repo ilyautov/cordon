@@ -38,6 +38,8 @@ An outside review of the credential rule and of MCP shadowing found five problem
 
 A second outside review, by Codex, found four more. The credential rule now covers every call but a local write: a tool declared as a `read`, such as an MCP search, sends its query to the server. Property names are checked along with values. A private key is recognized by its header together with the first line of the key, so a grep for the header is no longer a leaking key, and a key the user pasted is exempt, that key alone. And in tool names a lookalike of a lookalike is caught: Greek capital Iota read as I and stopped there, while I reads as l.
 
+The MCP gateway and the LangChain middleware now tell the model when a call ran with arguments Cordon cut, as the Claude Code adapter already did. A live run with Codex as the MCP host found the gap: an email went out without the invoice numbers it quoted from a ticket, and the model told the user they had been sent. The note is Cordon's own text, appended to the tool result after observation. It names the reason and the arguments, never the cut. The run itself is in `docs/live-run.md`, and `bench/codex-mcp/` reproduces it.
+
 ## [0.7.0] - 2026-09-26
 
 The release for teams: `cordon audit` before deployment, MCP tool pinning at run time, `cordon init` profiles, `cordon log`, a managed-settings deployment guide, and npm provenance on the published package. Refusals on Claude Code now also leave with exit code 2.

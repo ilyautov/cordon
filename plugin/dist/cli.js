@@ -13092,6 +13092,12 @@ function roleOf(key, value) {
   return "unknown";
 }
 
+// src/core/rewrite-notice.ts
+function rewriteNotice(decision) {
+  const removed = decision.removed.length > 0 ? decision.removed.join(", ") : "none";
+  return `Cordon cut an untrusted fragment out of this call before it ran (${decision.reason}; arguments changed: ${removed}). What ran is not what you wrote: tell the user the result is incomplete rather than reporting it done in full.`;
+}
+
 // src/adapters/claude-code/protocol.ts
 function parseEvent(stdin) {
   let raw;
@@ -13155,7 +13161,7 @@ function renderDecision(decision, mode) {
         hookSpecificOutput: {
           hookEventName: "PreToolUse",
           updatedInput: decision.args,
-          additionalContext: `Cordon cut an untrusted fragment out of this call before it ran (${decision.reason}; arguments changed: ${removed}). What ran is not what you wrote: tell the user the result is incomplete rather than reporting it done in full.`
+          additionalContext: rewriteNotice(decision)
         }
       };
     }
@@ -13798,7 +13804,8 @@ function runGateway(options) {
         return;
       }
       if (entry.method === "tools/call" && entry.call !== void 0) {
-        sendToHost(observeToolResult(message.value, entry.call, cordon, options.policy));
+        const observed = observeToolResult(message.value, entry.call, cordon, options.policy);
+        sendToHost(entry.notice === void 0 ? observed : withNotice(observed, entry.notice));
         return;
       }
       if (entry.method === "resources/read") {
@@ -13841,11 +13848,12 @@ function gateCall(message, cordon, policy, pending, sendToHost, sendUpstream) {
     sendToHost(toolError(message.id, `Cordon refused the call to ${name || "(no tool named)"}: ${decision.reason}`));
     return;
   }
-  pending.set(pendingKey(message.id), { method: message.method, call });
   if (decision.kind === "rewrite") {
+    pending.set(pendingKey(message.id), { method: message.method, call, notice: rewriteNotice(decision) });
     sendUpstream({ ...message.value, params: { ...params, arguments: decision.args } });
     return;
   }
+  pending.set(pendingKey(message.id), { method: message.method, call });
   sendUpstream(message.value);
 }
 function observeToolList(value, cordon, policy, command) {
@@ -13895,6 +13903,12 @@ function observeDescription(entry, key, tool, source, cordon) {
   } else if (envelope.findings.length > 0) {
     cordon.notice(tool, `a hidden layer was found in the description of ${tool}; it was not substituted`, source);
   }
+}
+function withNotice(value, notice) {
+  const result = asRecord(value["result"]);
+  if (result === null) return value;
+  const content = Array.isArray(result["content"]) ? result["content"] : [];
+  return { ...value, result: { ...result, content: [...content, { type: "text", text: notice }] } };
 }
 function observeToolResult(value, call, cordon, policy) {
   const result = asRecord(value["result"]);
