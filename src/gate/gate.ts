@@ -1,6 +1,7 @@
 import { resolve, sep } from 'node:path'
 import type { Certificate, Decision, EffectClass, ExposureMark, Source, ToolCall } from '../core/types.js'
 import { fields, type Field } from './fields.js'
+import { secretKinds } from './secrets.js'
 import { memoryTarget } from './memory.js'
 import type { Policy } from '../policy/defaults.js'
 import { canonicalForms, touchesCordonItself } from '../policy/selfprotect.js'
@@ -130,6 +131,14 @@ function decide(call: ToolCall, ctx: GateContext): Decision {
   const outside = outOfBounds(parts, ctx.cert)
   if (outside) {
     return escalate(ctx, outside)
+  }
+
+  // A credential leaving the machine answers before provenance: it needs no
+  // page to be dangerous. The reason names the kind and never the value, so
+  // the key does not travel on into the journal or the model's context.
+  const leaving = credentialLeaving(verdict.effects, parts, ctx.userAtoms ?? [])
+  if (leaving) {
+    return escalate(ctx, leaving)
   }
 
   const scan = scanTaint(parts, ctx.taint, ctx.userAtoms ?? [])
@@ -354,6 +363,30 @@ function namesADestination(parts: readonly Field[], userNames: readonly string[]
   if (userNames.length === 0) return false
   const names = new Set(userNames)
   return parts.some(({ value }) => typeof value === 'string' && names.has(value.trim().normalize('NFKC').toLowerCase()))
+}
+
+/** Effect classes by which data leaves the machine: a credential in them is gone. */
+const LEAVING: ReadonlySet<EffectClass> = new Set(['network-egress', 'export', 'exec'])
+
+/**
+ * A credential in a call that sends data out. A credential the user pasted
+ * into their own message is theirs to send, so it is exempt, compared as
+ * the atom extraction wrote it down: lower case.
+ */
+function credentialLeaving(
+  effects: readonly EffectClass[],
+  parts: readonly Field[],
+  userAtoms: readonly string[],
+): string | null {
+  if (!effects.some((effect) => LEAVING.has(effect))) return null
+  const exempt = new Set(userAtoms)
+  const kinds: string[] = []
+  for (const { value } of parts) {
+    if (typeof value !== 'string') continue
+    for (const kind of secretKinds(value, exempt)) if (!kinds.includes(kind)) kinds.push(kind)
+  }
+  if (kinds.length === 0) return null
+  return `an argument carries what looks like a credential (${kinds.join(', ')}), and the call sends data off the machine`
 }
 
 /**

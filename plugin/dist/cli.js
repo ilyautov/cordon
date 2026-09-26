@@ -7684,6 +7684,31 @@ function fields(args) {
   return out;
 }
 
+// src/gate/secrets.ts
+var SHAPES = [
+  { kind: "GitHub token", pattern: /\b(?:gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{40,})\b/u },
+  { kind: "Anthropic API key", pattern: /\bsk-ant-[A-Za-z0-9_-]{32,}/u },
+  { kind: "OpenAI API key", pattern: /\bsk-(?:proj-|svcacct-)?[A-Za-z0-9_-]{40,}/u },
+  { kind: "AWS access key", pattern: /\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/u },
+  { kind: "Slack token", pattern: /\bxox[abprs]-[0-9]{6,}-[A-Za-z0-9-]{10,}/u },
+  { kind: "Google API key", pattern: /\bAIza[0-9A-Za-z_-]{35}\b/u },
+  { kind: "GitLab token", pattern: /\bglpat-[A-Za-z0-9_-]{20,}/u },
+  { kind: "Stripe secret key", pattern: /\b(?:sk|rk)_live_[A-Za-z0-9]{24,}/u },
+  { kind: "private key", pattern: /-----BEGIN (?:[A-Z]+ )?PRIVATE KEY-----/u }
+];
+function secretKinds(text, exempt = /* @__PURE__ */ new Set()) {
+  const kinds = [];
+  for (const { kind, pattern } of SHAPES) {
+    const global = new RegExp(pattern.source, "gu");
+    for (const match of text.matchAll(global)) {
+      if (exempt.has(match[0].toLowerCase())) continue;
+      if (kind === "OpenAI API key" && match[0].startsWith("sk-ant-")) continue;
+      if (!kinds.includes(kind)) kinds.push(kind);
+    }
+  }
+  return kinds;
+}
+
 // src/gate/memory.ts
 import { basename as basename2 } from "node:path";
 
@@ -8233,6 +8258,10 @@ function decide(call, ctx) {
   if (outside) {
     return escalate(ctx, outside);
   }
+  const leaving = credentialLeaving(verdict.effects, parts, ctx.userAtoms ?? []);
+  if (leaving) {
+    return escalate(ctx, leaving);
+  }
   const scan = scanTaint(parts, ctx.taint, ctx.userAtoms ?? []);
   if (!scan.tainted) {
     const exposed = exposedCall(verdict.effects, parts, ctx);
@@ -8344,6 +8373,18 @@ function namesADestination(parts, userNames) {
   if (userNames.length === 0) return false;
   const names2 = new Set(userNames);
   return parts.some(({ value }) => typeof value === "string" && names2.has(value.trim().normalize("NFKC").toLowerCase()));
+}
+var LEAVING = /* @__PURE__ */ new Set(["network-egress", "export", "exec"]);
+function credentialLeaving(effects, parts, userAtoms) {
+  if (!effects.some((effect) => LEAVING.has(effect))) return null;
+  const exempt = new Set(userAtoms);
+  const kinds = [];
+  for (const { value } of parts) {
+    if (typeof value !== "string") continue;
+    for (const kind of secretKinds(value, exempt)) if (!kinds.includes(kind)) kinds.push(kind);
+  }
+  if (kinds.length === 0) return null;
+  return `an argument carries what looks like a credential (${kinds.join(", ")}), and the call sends data off the machine`;
 }
 var IRREVERSIBLE = /* @__PURE__ */ new Set([
   "network-egress",

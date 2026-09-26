@@ -28,6 +28,8 @@ Cordon has AgentDojo numbers, with the methodology and the losses in [docs/agent
 
 Two holes in the class-hiding check, found in an outside review before release, are closed. An empty `<style></style>` inside a screen-reader span spent the span's own nesting level when it closed, and the span was never judged, so a message in it stayed whole. A class hidden on screen and re-shown only inside an at-rule, such as `@media print`, was treated as honest and left alone. It is now judged like a screen-reader span: a short print footer stays, and a message with a destination is cut. A stylesheet rule missing its last brace now applies, as it does in a browser. Both vectors join the attack corpus, which grows from 23 to 25.
 
+A credential in a call that sends data off the machine now escalates. GitHub, Anthropic, OpenAI, AWS, Slack, Google, GitLab and Stripe credentials and private key blocks are recognized by shape, each at the length a real one has, so `sk-learn` or a file called `ghp_notes` does not trip it. It applies to `network-egress`, `export` and `exec`, whether or not anything untrusted was read: this is the careless case, an agent pasting a token into a curl command on its own, and before this nothing answered it. The reason names the kind of credential and never its value. A credential the user pasted into their own message is exempt. Docker's MCP gateway, Lasso and Snyk ship a version of this check, and it needs no model.
+
 ## [0.7.0] - 2026-09-26
 
 The release for teams: `cordon audit` before deployment, MCP tool pinning at run time, `cordon init` profiles, `cordon log`, a managed-settings deployment guide, and npm provenance on the published package. Refusals on Claude Code now also leave with exit code 2.

@@ -11,7 +11,7 @@
 - **Core** plus adapters for **Claude Code** and **Gemini CLI**, a gateway for **MCP hosts**, middleware for **LangChain** agents.
 - Hidden-layer neutralization, provenance of untrusted data, an intent certificate, an action gate that also answers the fact of reading untrusted content, a source-influence footer under the model's answer, and packaging that intercepts four harness events.
 
-**Measured:** 1270 tests · 25 pinned attack vectors · 9 legitimate documents · 2 runtime dependencies.
+**Measured:** 1278 tests · 25 pinned attack vectors · 9 legitimate documents · 2 runtime dependencies.
 
 **AgentDojo:** an agent that obeys every injection got 0 attacks through with Cordon on all four suites (39–100% without it). Utility depends on the policy: 100% in interactive mode at 0.3–1.6 questions per task, 14–70% on a strict autonomous policy. Methodology and where it loses: [docs/agentdojo.md](docs/agentdojo.md).
 

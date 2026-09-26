@@ -183,6 +183,10 @@ The profile matches the task "answer reviews": read, and write an answer. Changi
 
 The `wb_update_price` tool is declared even though it is not meant to be used. The declaration exists exactly for that: an undeclared tool would also be blocked, but with the wording "not declared in the policy", whereas a declared one gives the journal an honest reason, "outside the certificate: update, financial".
 
+### A credential leaving the machine
+
+A call that sends data off the machine (`network-egress`, `export` or `exec`) and carries a credential escalates, read or no read: a refusal in autonomous mode, a question in interactive mode. It is recognized by shape: GitHub, Anthropic, OpenAI, AWS, Slack, Google, GitLab and Stripe credentials, and private key blocks. The reason names the kind and never the value, so the key goes neither into the journal nor back to the model. Writing it to a local file is not this rule. A credential you paste into your own message is exempt, since you named it. This covers the careless case, an agent putting a token into a curl command on its own; the injected case is the exposure rule's.
+
 ### Autonomous agents: declare what is a directory
 
 With `mode: autonomous` and nothing else declared, every tool result is untrusted, and after the first read the agent can act only on destinations the user named. On AgentDojo that left an obedient scripted agent 3 of 21 Slack tasks ([agentdojo.md](agentdojo.md)). Most of the refusals were not about injected text at all: the channel list came from `get_channels`, and `External_0` read from it counted as a destination the page chose.
