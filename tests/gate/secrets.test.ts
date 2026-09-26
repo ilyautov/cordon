@@ -10,7 +10,7 @@ import { issue } from '../../src/scope/certificate.js'
 // into a permanent finding; they are stage scenery, not keys.
 const GITHUB = ['ghp', 'A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8'].join('_')
 const ANTHROPIC = ['sk', 'ant', 'api03', 'Zx9Yw8Vu7Ts6Rq5Po4Nm3Lk2Ji1Hg0FeDcBa'].join('-')
-const AWS = ['AKIA', 'IOSFODNN7EXAMPLE'].join('')
+const AWS = ['AKIA', 'Q3ZT7XWP4LMN2RVB'].join('')
 const SLACK = ['xoxb', '123456789012', 'abcdefghijKLMNOP'].join('-')
 const PRIVATE = ['-----BEGIN', 'OPENSSH PRIVATE KEY-----'].join(' ')
 
@@ -28,6 +28,9 @@ describe('secret shapes', () => {
     // prose. The shapes demand the length a real credential has.
     expect(secretKinds('pip install scikit-learn; see sk-learn docs and the ghp_notes file')).toEqual([])
     expect(secretKinds('the AKIA prefix marks AWS keys; xoxb- marks Slack bots')).toEqual([])
+    // The key every AWS page prints as its example. Tutorials paste it into
+    // the very commands this rule watches.
+    expect(secretKinds(`aws configure set aws_access_key_id ${['AKIA', 'IOSFODNN7EXAMPLE'].join('')}`)).toEqual([])
   })
 })
 

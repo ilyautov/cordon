@@ -34,6 +34,8 @@ The MCP gateway now holds a tool whose name imitates another server's tool. Each
 
 A refusal no longer repeats a source label as it came. The label is a link or a path the model chose, often off the page itself, and the refusal is read by the model and, as a question, by the human. A newline or a markdown link in it put the page's words into Cordon's sentence. Labels and targets in a refusal now go through the same defanging as the footer's.
 
+An outside review of the credential rule and of MCP shadowing found five problems, fixed here. A credential the user pasted is exempt even when it has no digit in it; before, the exemption rode on atoms, which need one, and missed a share of real tokens. AWS's documentation key ending in `EXAMPLE` no longer counts as a credential. In a tool name, characters that render as nothing no longer hide an imitation, and script g, Armenian and Cherokee lookalikes are in the table. And the plain name of a pair is never the one held: an imitating server pinned first used to take the honest server's `read_file` away for good.
+
 ## [0.7.0] - 2026-09-26
 
 The release for teams: `cordon audit` before deployment, MCP tool pinning at run time, `cordon init` profiles, `cordon log`, a managed-settings deployment guide, and npm provenance on the published package. Refusals on Claude Code now also leave with exit code 2.

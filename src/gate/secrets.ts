@@ -25,17 +25,45 @@ const SHAPES: ReadonlyArray<{ kind: string; pattern: RegExp }> = [
   { kind: 'private key', pattern: /-----BEGIN (?:[A-Z]+ )?PRIVATE KEY-----/u },
 ]
 
-/** The kinds of credential found in a text; the credentials themselves are never returned. */
-export function secretKinds(text: string, exempt: ReadonlySet<string> = new Set()): string[] {
-  const kinds: string[] = []
+/**
+ * Values that have a credential's shape and are printed on every page about
+ * one: AWS documents its keys with ones ending in EXAMPLE. Tutorials paste
+ * them into the very commands this rule watches.
+ */
+const DOCUMENTED = /^AKIA[0-9A-Z]{9}EXAMPLE$/u
+
+function* found(text: string): Generator<{ kind: string; value: string }> {
   for (const { kind, pattern } of SHAPES) {
     const global = new RegExp(pattern.source, 'gu')
     for (const match of text.matchAll(global)) {
-      if (exempt.has(match[0].toLowerCase())) continue
       // Anthropic keys also fit the OpenAI shape; one credential, one name.
       if (kind === 'OpenAI API key' && match[0].startsWith('sk-ant-')) continue
-      if (!kinds.includes(kind)) kinds.push(kind)
+      if (DOCUMENTED.test(match[0])) continue
+      yield { kind, value: match[0] }
     }
   }
+}
+
+/** The kinds of credential found in a text; the credentials themselves are never returned. */
+export function secretKinds(text: string, exempt: ReadonlySet<string> = new Set()): string[] {
+  const kinds: string[] = []
+  for (const { kind, value } of found(text)) {
+    if (exempt.has(value.toLowerCase())) continue
+    if (!kinds.includes(kind)) kinds.push(kind)
+  }
   return kinds
+}
+
+/**
+ * The credentials in the user's own message, lower-cased, for the exemption.
+ * Atoms alone missed them: an identifier atom needs a digit, and a token or a
+ * key may have none. A private key is left out: its shape is the BEGIN line,
+ * the same for every key, and remembering it would let any other key leave.
+ */
+export function pastedSecrets(text: string): string[] {
+  const values: string[] = []
+  for (const { kind, value } of found(text)) {
+    if (kind !== 'private key') values.push(value.toLowerCase())
+  }
+  return values
 }

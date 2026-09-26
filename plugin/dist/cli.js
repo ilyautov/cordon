@@ -653,19 +653,19 @@ var require_Alias = __commonJS({
           if (ctx)
             ctx.aliasResolveCache = nodes;
         }
-        let found = void 0;
+        let found2 = void 0;
         for (const node of nodes) {
           if (node === this)
             break;
           if (node.anchor === this.source)
-            found = node;
+            found2 = node;
         }
-        if (found && ctx) {
+        if (found2 && ctx) {
           const { anchors: anchors2, doc: doc2, maxAliasCount } = ctx;
-          let data = anchors2.get(found);
+          let data = anchors2.get(found2);
           if (!data) {
-            toJS.toJS(found, null, ctx);
-            data = anchors2.get(found);
+            toJS.toJS(found2, null, ctx);
+            data = anchors2.get(found2);
           }
           if (data?.res === void 0) {
             const msg = "This should not happen: Alias anchor was not resolved?";
@@ -674,14 +674,14 @@ var require_Alias = __commonJS({
           if (maxAliasCount >= 0) {
             data.count += 1;
             if (data.aliasCount === 0)
-              data.aliasCount = getAliasCount(doc2, found, anchors2);
+              data.aliasCount = getAliasCount(doc2, found2, anchors2);
             if (data.count * data.aliasCount > maxAliasCount) {
               const msg = "Excessive alias count indicates a resource exhaustion attack";
               throw new ReferenceError(msg);
             }
           }
         }
-        return found;
+        return found2;
       }
       toJSON(_arg, ctx) {
         if (!ctx)
@@ -3787,7 +3787,7 @@ var require_resolve_props = __commonJS({
       let tag = null;
       let newlineAfterProp = null;
       let comma = null;
-      let found = null;
+      let found2 = null;
       let start = null;
       for (const token of tokens) {
         if (reqSpace) {
@@ -3824,7 +3824,7 @@ var require_resolve_props = __commonJS({
             if (atNewline) {
               if (comment)
                 comment += token.source;
-              else if (!found || indicator !== "seq-item-ind")
+              else if (!found2 || indicator !== "seq-item-ind")
                 spaceBefore = true;
             } else
               commentSep += token.source;
@@ -3858,9 +3858,9 @@ var require_resolve_props = __commonJS({
           case indicator:
             if (anchor || tag)
               onError(token, "BAD_PROP_ORDER", `Anchors and tags must be after the ${token.source} indicator`);
-            if (found)
+            if (found2)
               onError(token, "UNEXPECTED_TOKEN", `Unexpected ${token.source} in ${flow ?? "collection"}`);
-            found = token;
+            found2 = token;
             atNewline = indicator === "seq-item-ind" || indicator === "explicit-key-ind";
             hasSpace = false;
             break;
@@ -3889,7 +3889,7 @@ var require_resolve_props = __commonJS({
         onError(tab, "TAB_AS_INDENT", "Tabs are not allowed as indentation");
       return {
         comma,
-        found,
+        found: found2,
         spaceBefore,
         comment,
         hasNewline,
@@ -7696,17 +7696,31 @@ var SHAPES = [
   { kind: "Stripe secret key", pattern: /\b(?:sk|rk)_live_[A-Za-z0-9]{24,}/u },
   { kind: "private key", pattern: /-----BEGIN (?:[A-Z]+ )?PRIVATE KEY-----/u }
 ];
-function secretKinds(text, exempt = /* @__PURE__ */ new Set()) {
-  const kinds = [];
+var DOCUMENTED = /^AKIA[0-9A-Z]{9}EXAMPLE$/u;
+function* found(text) {
   for (const { kind, pattern } of SHAPES) {
     const global = new RegExp(pattern.source, "gu");
     for (const match of text.matchAll(global)) {
-      if (exempt.has(match[0].toLowerCase())) continue;
       if (kind === "OpenAI API key" && match[0].startsWith("sk-ant-")) continue;
-      if (!kinds.includes(kind)) kinds.push(kind);
+      if (DOCUMENTED.test(match[0])) continue;
+      yield { kind, value: match[0] };
     }
   }
+}
+function secretKinds(text, exempt = /* @__PURE__ */ new Set()) {
+  const kinds = [];
+  for (const { kind, value } of found(text)) {
+    if (exempt.has(value.toLowerCase())) continue;
+    if (!kinds.includes(kind)) kinds.push(kind);
+  }
   return kinds;
+}
+function pastedSecrets(text) {
+  const values = [];
+  for (const { kind, value } of found(text)) {
+    if (kind !== "private key") values.push(value.toLowerCase());
+  }
+  return values;
 }
 
 // src/gate/memory.ts
@@ -7953,32 +7967,32 @@ function normalize(text) {
   return text.normalize("NFKC").toLowerCase().replace(/\s+/gu, " ").trim();
 }
 function atoms(text) {
-  const found = /* @__PURE__ */ new Set();
+  const found2 = /* @__PURE__ */ new Set();
   const source = text.normalize("NFKC");
   for (const match of source.matchAll(/(?:https?:\/\/|mailto:)\S+/giu)) {
     const link = trimTail(match[0]);
-    found.add(link);
+    found2.add(link);
     const bare = link.replace(/^https?:\/\//u, "");
-    if (bare !== link && bare !== "") found.add(bare);
+    if (bare !== link && bare !== "") found2.add(bare);
   }
   for (const match of source.matchAll(/(?<![\w@/.:-])(?:www\.[a-z0-9-]+(?:\.[a-z0-9-]+)+|[a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,}\/)\S*/giu)) {
-    found.add(trimTail(match[0]));
+    found2.add(trimTail(match[0]));
   }
   for (const match of source.matchAll(/\b[\w.-]+@[\w-]+\.[a-z]{2,}\b/giu)) {
-    found.add(match[0].toLowerCase());
+    found2.add(match[0].toLowerCase());
   }
   const shell = source.replace(/\$(?:HOME\b|\{HOME\})/gu, "~");
   for (const match of shell.matchAll(/(?<![\w/])[/~][\w./-]{4,}/gu)) {
     const path = trimTail(match[0]);
-    found.add(path);
+    found2.add(path);
     const relativeTail = match.index > 0 && shell[match.index - 1] === ".";
-    if (!relativeTail) for (const other of otherSpellings(path)) found.add(other);
+    if (!relativeTail) for (const other of otherSpellings(path)) found2.add(other);
   }
   for (const match of source.matchAll(/\b[a-z0-9][a-z0-9_-]{7,}\b/giu)) {
     const token = match[0].toLowerCase();
-    if (/\d/u.test(token)) found.add(token);
+    if (/\d/u.test(token)) found2.add(token);
   }
-  return [...found];
+  return [...found2];
 }
 function otherSpellings(path) {
   const home = homedir4().toLowerCase().replace(/\/+$/u, "");
@@ -8688,28 +8702,54 @@ var LOOKALIKE = /* @__PURE__ */ new Map([
   ["\u03A4", "T"],
   ["\u03A5", "Y"],
   ["\u03A7", "X"],
+  // Latin letters outside ASCII that NFKC leaves alone, Armenian and Cherokee:
+  // an outside review named script g, Armenian vo and se as passing.
+  ["\u0261", "g"],
+  ["\u0251", "a"],
+  ["\u0269", "i"],
+  ["\u0131", "i"],
+  ["\u0237", "j"],
+  ["\u0578", "n"],
+  ["\u057D", "u"],
+  ["\u0570", "h"],
+  ["\u0581", "g"],
+  ["\u0585", "o"],
+  ["\u13A0", "D"],
+  ["\u13A2", "T"],
+  ["\u13AA", "A"],
+  ["\u13AC", "E"],
+  ["\u13B3", "W"],
+  ["\u13BB", "H"],
+  ["\u13DA", "S"],
+  ["\u13DF", "C"],
   ["0", "o"],
   ["1", "l"],
   ["I", "l"]
 ]);
+var IGNORABLE = /[\p{Cf}\p{Default_Ignorable_Code_Point}]/gu;
 function skeleton(name) {
   let out = "";
-  for (const char of name.normalize("NFKC")) out += LOOKALIKE.get(char) ?? char;
+  for (const char of name.normalize("NFKC").replace(IGNORABLE, "")) out += LOOKALIKE.get(char) ?? char;
   return out;
 }
+function plain(name) {
+  return skeleton(name) === name;
+}
 function shadows(listed, others) {
-  const found = [];
+  const found2 = [];
   for (const tool of listed) {
     const own2 = skeleton(tool.name);
     for (const other of others) {
-      const imitated = other.names.find((name) => name !== tool.name && skeleton(name) === own2);
+      const imitated = other.names.find(
+        (name) => name !== tool.name && skeleton(name) === own2 && !(plain(tool.name) && !plain(name))
+      );
       if (imitated !== void 0) {
-        found.push({ name: tool.name, imitates: imitated, server: other.server });
+        found2.push({ name: tool.name, imitates: imitated, server: other.server });
         break;
       }
     }
   }
-  return found;
+  return found2;
 }
 
 // src/notify/notifier.ts
@@ -8744,20 +8784,20 @@ var TOKEN = /^[\p{L}\p{N}][\p{L}\p{N}_.#@-]*$/u;
 var CAPITALIZED = new RegExp("\\p{Lu}[\\p{L}\\p{N}_-]{2,}", "gu");
 var SENTENCE_END = /[.!?:;\n]\s*$/u;
 function names(text) {
-  const found = /* @__PURE__ */ new Set();
+  const found2 = /* @__PURE__ */ new Set();
   const source = text.normalize("NFKC");
   for (const match of source.matchAll(QUOTED)) {
     const token = match.slice(1).find((group) => group !== void 0);
-    if (token !== void 0 && TOKEN.test(token)) found.add(token.toLowerCase());
+    if (token !== void 0 && TOKEN.test(token)) found2.add(token.toLowerCase());
   }
   for (const match of source.matchAll(CAPITALIZED)) {
     const at = match.index;
     if (at > 0 && /[\p{L}\p{N}_-]/u.test(source[at - 1])) continue;
     const before = source.slice(0, at).replace(/["'`\u2018\u201C(]+$/u, "");
     if (before.trim() === "" || SENTENCE_END.test(before)) continue;
-    found.add(match[0].toLowerCase());
+    found2.add(match[0].toLowerCase());
   }
-  return [...found];
+  return [...found2];
 }
 
 // src/sanitize/types.ts
@@ -11724,7 +11764,7 @@ var TaintStore = class _TaintStore {
     const hits = /* @__PURE__ */ new Set();
     const spans = [];
     const perSource = /* @__PURE__ */ new Map();
-    const found = [];
+    const found2 = [];
     const map = mapWords(value);
     const normalized = map.exact ? map.text : normalize(value);
     for (let at = 0; at + SHINGLE_WINDOW <= normalized.length; at++) {
@@ -11746,7 +11786,7 @@ var TaintStore = class _TaintStore {
       const sourceId = this.byAtom.get(atom);
       if (sourceId === void 0) continue;
       hits.add(sourceId);
-      found.push(atom);
+      found2.push(atom);
       let at = lowered.indexOf(atom);
       if (at < 0) {
         const whole = [0, value.length];
@@ -11771,14 +11811,14 @@ var TaintStore = class _TaintStore {
         hits.add(id);
         perSource.set(id, [...perSource.get(id) ?? [], whole]);
       }
-      found.push(...extra.atoms);
+      found2.push(...extra.atoms);
     }
     return {
       tainted: hits.size > 0,
       sources: [...hits].map((id) => this.sources.get(id)).filter((s) => Boolean(s)),
       spans: merge(spans),
       bySource: [...perSource].map(([id, own2]) => ({ id, spans: merge(own2) })),
-      atoms: [...new Set(found)]
+      atoms: [...new Set(found2)]
     };
   }
   /**
@@ -11790,7 +11830,7 @@ var TaintStore = class _TaintStore {
    */
   probe(value) {
     const ids = /* @__PURE__ */ new Set();
-    const found = [];
+    const found2 = [];
     const normalized = normalize(value);
     for (let at = 0; at + SHINGLE_WINDOW <= normalized.length; at++) {
       const codes = hashCodes(normalized, at, at + SHINGLE_WINDOW);
@@ -11803,9 +11843,9 @@ var TaintStore = class _TaintStore {
       const sourceId = this.byAtom.get(atom);
       if (sourceId === void 0) continue;
       ids.add(sourceId);
-      found.push(atom);
+      found2.push(atom);
     }
-    return { ids: [...ids], atoms: found };
+    return { ids: [...ids], atoms: found2 };
   }
   /**
    * Groups of sources whose text matches verbatim.
@@ -12587,7 +12627,7 @@ var Cordon = class {
    * without bound.
    */
   rememberNamed(text) {
-    for (const atom of atoms(text)) {
+    for (const atom of [...atoms(text), ...pastedSecrets(text)]) {
       if (!this.userAtoms.includes(atom)) this.userAtoms.push(atom);
     }
     for (const name of names(text)) {
@@ -12889,8 +12929,8 @@ function isTrusted(origin2, policy) {
   });
 }
 function climbs(label) {
-  const plain = label.replace(/%2e/giu, ".");
-  return plain.split(/[/\\]/u).includes("..");
+  const plain2 = label.replace(/%2e/giu, ".");
+  return plain2.split(/[/\\]/u).includes("..");
 }
 
 // src/adapters/claude-code/output.ts
@@ -12980,8 +13020,8 @@ function extractText(tool, response) {
   return scan.known ? { known: true, parts: scan.parts } : { known: false, parts: [] };
 }
 function replaceText(tool, response, parts) {
-  const found = extractText(tool, response);
-  if (!found.known || found.parts.length !== parts.length) return response;
+  const found2 = extractText(tool, response);
+  if (!found2.known || found2.parts.length !== parts.length) return response;
   if (typeof response === "string") return parts[0] ?? response;
   if (TEXTLESS.has(tool)) return response;
   return rebuild(response, "", 0, parts, { at: 0 });
@@ -13227,15 +13267,15 @@ function observe(cordon, event, env) {
   );
   let changed = false;
   let substitute = true;
-  const found = [];
+  const found2 = [];
   const cleaned = extracted.parts.map((part) => {
     const envelope = cordon.observe(part.text, source, part.content ? "content" : "label");
-    found.push(...envelope.findings);
+    found2.push(...envelope.findings);
     if (!envelope.substitute) substitute = false;
     if (envelope.text !== part.text) changed = true;
     return envelope.text;
   });
-  if (!substitute) return report(cordon, event.call.tool, source, found);
+  if (!substitute) return report(cordon, event.call.tool, source, found2);
   if (!changed) return {};
   const updated = replaceText(event.call.tool, event.response, cleaned);
   if (updated === event.response) {
@@ -14022,9 +14062,9 @@ function instructionFinding(path, base, add) {
   const text = readSmall(path);
   if (text === null) return;
   const file = base.label + relative2(base.dir, path);
-  const found = sanitize(text).findings;
+  const found2 = sanitize(text).findings;
   for (const { code, kinds, why } of INSTRUCTION_CODES) {
-    const matching = found.filter((finding) => kinds.has(finding.kind));
+    const matching = found2.filter((finding) => kinds.has(finding.kind));
     if (matching.length === 0) continue;
     const details = [...new Set(matching.map((finding) => finding.detail))].join(", ");
     const samples = code === "CA104" ? `: ${[...new Set(matching.map((finding) => finding.sample))].slice(0, 3).join(", ")}` : "";

@@ -94,8 +94,20 @@ function stable(value: unknown): string {
  */
 const LOOKALIKE: ReadonlyMap<string, string> = new Map([
   ['\u0430', 'a'], ['\u0435', 'e'], ['\u043e', 'o'], ['\u0440', 'p'], ['\u0441', 'c'], ['\u0443', 'y'], ['\u0445', 'x'], ['\u0456', 'i'], ['\u0458', 'j'], ['\u0455', 's'], ['\u04bb', 'h'], ['\u0501', 'd'], ['\u051b', 'q'], ['\u051d', 'w'], ['\u0410', 'A'], ['\u0412', 'B'], ['\u0415', 'E'], ['\u041a', 'K'], ['\u041c', 'M'], ['\u041d', 'H'], ['\u041e', 'O'], ['\u0420', 'P'], ['\u0421', 'C'], ['\u0422', 'T'], ['\u0425', 'X'], ['\u0406', 'I'], ['\u0408', 'J'], ['\u0405', 'S'], ['\u03b1', 'a'], ['\u03bf', 'o'], ['\u03c1', 'p'], ['\u03bd', 'v'], ['\u03b9', 'i'], ['\u03ba', 'k'], ['\u03c5', 'u'], ['\u0391', 'A'], ['\u0392', 'B'], ['\u0395', 'E'], ['\u0396', 'Z'], ['\u0397', 'H'], ['\u0399', 'I'], ['\u039a', 'K'], ['\u039c', 'M'], ['\u039d', 'N'], ['\u039f', 'O'], ['\u03a1', 'P'], ['\u03a4', 'T'], ['\u03a5', 'Y'], ['\u03a7', 'X'],
+  // Latin letters outside ASCII that NFKC leaves alone, Armenian and Cherokee:
+  // an outside review named script g, Armenian vo and se as passing.
+  ['\u0261', 'g'], ['\u0251', 'a'], ['\u0269', 'i'], ['\u0131', 'i'], ['\u0237', 'j'],
+  ['\u0578', 'n'], ['\u057d', 'u'], ['\u0570', 'h'], ['\u0581', 'g'], ['\u0585', 'o'],
+  ['\u13a0', 'D'], ['\u13a2', 'T'], ['\u13aa', 'A'], ['\u13ac', 'E'], ['\u13b3', 'W'], ['\u13bb', 'H'], ['\u13da', 'S'], ['\u13df', 'C'],
   ['0', 'o'], ['1', 'l'], ['I', 'l'],
 ])
+
+/**
+ * Characters that render as nothing: zero-width spaces and joiners, soft
+ * hyphens, variation selectors. NFKC keeps them, and read_fi<ZWSP>le reads as
+ * read_file in every host.
+ */
+const IGNORABLE = /[\p{Cf}\p{Default_Ignorable_Code_Point}]/gu
 
 /**
  * A tool name as it reads at a glance. Case and separators are kept: two
@@ -104,8 +116,13 @@ const LOOKALIKE: ReadonlyMap<string, string> = new Map([
  */
 export function skeleton(name: string): string {
   let out = ''
-  for (const char of name.normalize('NFKC')) out += LOOKALIKE.get(char) ?? char
+  for (const char of name.normalize('NFKC').replace(IGNORABLE, '')) out += LOOKALIKE.get(char) ?? char
   return out
+}
+
+/** A name with nothing in it that passes for something else. */
+function plain(name: string): boolean {
+  return skeleton(name) === name
 }
 
 export interface Shadow {
@@ -129,7 +146,12 @@ export function shadows(
   for (const tool of listed) {
     const own = skeleton(tool.name)
     for (const other of others) {
-      const imitated = other.names.find((name) => name !== tool.name && skeleton(name) === own)
+      // The plain side of a pair is not the imitation. Otherwise an imitating
+      // server pinned first would take the honest server's read_file away on
+      // every start, for good; its own gateway meets the honest pin instead.
+      const imitated = other.names.find(
+        (name) => name !== tool.name && skeleton(name) === own && !(plain(tool.name) && !plain(name)),
+      )
       if (imitated !== undefined) {
         found.push({ name: tool.name, imitates: imitated, server: other.server })
         break

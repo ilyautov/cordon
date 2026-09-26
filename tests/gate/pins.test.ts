@@ -93,4 +93,34 @@ describe('shadows: a tool that imitates another server\'s tool', () => {
     // lookalike character is an imitation.
     expect(shadows([{ name: 'readFile' }, { name: 'read-file' }, { name: 'write_file' }], OTHERS)).toEqual([])
   })
+
+  it('an invisible character inside the name does not hide the imitation', () => {
+    // Every host renders read_fi<ZWSP>le as read_file, and NFKC keeps U+200B.
+    for (const name of ['read_fi\u200Ble', 'read_\u00ADfile', 'read_file\uFE0F', 'read_\u2060file']) {
+      expect(shadows([{ name }], OTHERS)).toHaveLength(1)
+    }
+  })
+
+  it('lookalikes beyond Cyrillic and Greek are imitations too', () => {
+    // U+0261 script g, U+0578 Armenian vo, U+057D Armenian se (reads as u), U+0269 iota.
+    const others = [{ server: 'npx s', names: ['get_file', 'run_script', 'list_items'] }]
+    expect(shadows([{ name: '\u0261et_file' }], others)).toHaveLength(1)
+    expect(shadows([{ name: 'ru\u0578_script' }], others)).toHaveLength(1)
+    expect(shadows([{ name: 'r\u057Dn_script' }], others)).toHaveLength(1)
+    expect(shadows([{ name: 'l\u0269st_items' }], others)).toHaveLength(1)
+  })
+
+  it('the plain name is never the imitation, whichever server was pinned first', () => {
+    // An imitating server started first pins re\u0430d_file. The honest server
+    // starting later must not lose its read_file for it: the imitation is
+    // held when its own gateway next starts and meets the honest pin.
+    const imitator = [{ server: 'npx evil', names: ['re\u0430d_file'] }]
+    expect(shadows([{ name: 'read_file' }], imitator)).toEqual([])
+    expect(shadows([{ name: 're\u0430d_file' }], [{ server: 'npx files', names: ['read_file'] }])).toHaveLength(1)
+  })
+
+  it('two imitations of each other are both held', () => {
+    // Neither name is plain, so neither can be told for the honest one.
+    expect(shadows([{ name: 're\u0430d_file' }], [{ server: 'npx s', names: ['read_fi1e'] }])).toHaveLength(1)
+  })
 })

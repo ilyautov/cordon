@@ -185,7 +185,9 @@ The `wb_update_price` tool is declared even though it is not meant to be used. T
 
 ### A credential leaving the machine
 
-A call that sends data off the machine (`network-egress`, `export` or `exec`) and carries a credential escalates, read or no read: a refusal in autonomous mode, a question in interactive mode. It is recognized by shape: GitHub, Anthropic, OpenAI, AWS, Slack, Google, GitLab and Stripe credentials, and private key blocks. The reason names the kind and never the value, so the key goes neither into the journal nor back to the model. Writing it to a local file is not this rule. A credential you paste into your own message is exempt, since you named it. This covers the careless case, an agent putting a token into a curl command on its own; the injected case is the exposure rule's.
+A call that sends data off the machine (`network-egress`, `export` or `exec`) and carries a credential escalates, read or no read: a refusal in autonomous mode, a question in interactive mode. It is recognized by shape: GitHub, Anthropic, OpenAI, AWS, Slack, Google, GitLab and Stripe credentials, and private key blocks. The reason names the kind and never the value, so the key goes neither into the journal nor back to the model. Writing it to a local file is not this rule. A credential you paste into your own message is exempt, since you named it; a private key is not, since its recognizable part is the same for every key. The key AWS prints in its documentation, ending in `EXAMPLE`, is not a credential. This covers the careless case, an agent putting a token into a curl command on its own; the injected case is the exposure rule's.
+
+What the shape check does not see: a credential passed by reference (`$GITHUB_TOKEN` in a command), a credential written to a file and sent in a later call, and credentials without a fixed prefix, such as JWTs and passwords inside connection strings. After an untrusted read, the exposure rule escalates both calls in the first two cases. Without one, only the literal is caught.
 
 ### Autonomous agents: declare what is a directory
 

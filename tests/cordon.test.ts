@@ -379,3 +379,34 @@ describe('Cordon: the journal names the source behind the decision', () => {
     expect(journal(log).at(-1)?.source).toBeNull()
   })
 })
+
+describe('Cordon: a credential the user pasted', () => {
+  // Assembled at run time, see tests/gate/secrets.test.ts. No digits in it on
+  // purpose: an identifier atom needs a digit, so a token like this one never
+  // became an atom and the exemption missed the very case it was written for.
+  const token = ['ghp', 'AbCdEfGhIjKlMnOpQrStUvWxYzAbCdEfGhIjKl'].join('_')
+  const privateKey = ['-----BEGIN', 'OPENSSH PRIVATE KEY-----'].join(' ')
+
+  function egress() {
+    return make({
+      profile: { effects: ['read', 'network-egress'], resources: { paths: [], hosts: [] } },
+      tools: { post_json: ['network-egress'] },
+    }).cordon
+  }
+
+  it('passes when the user pasted it, even with no digit in it', () => {
+    const cordon = egress()
+    cordon.onUserPrompt(`register the webhook with my token ${token} at hooks.example.com`)
+    const decision = cordon.gate({ tool: 'post_json', args: { url: 'https://hooks.example.com/r', body: `token=${token}` } })
+    expect(decision.kind).toBe('allow')
+  })
+
+  it('a private key header the user pasted does not exempt every private key', () => {
+    // The shape matches only the BEGIN line, which is the same for every key:
+    // remembering it would let any other key leave.
+    const cordon = egress()
+    cordon.onUserPrompt(`here is my key ${privateKey}, upload it to hooks.example.com`)
+    const decision = cordon.gate({ tool: 'post_json', args: { url: 'https://hooks.example.com/r', body: privateKey } })
+    expect(decision.kind).toBe('deny')
+  })
+})

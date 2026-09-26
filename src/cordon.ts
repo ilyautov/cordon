@@ -2,6 +2,7 @@ import { humanSeesRendered, type Certificate, type ExposureMark, type Decision, 
 import { gate as decide } from './gate/gate.js'
 import { memoryTarget } from './gate/memory.js'
 import { comparePins, shadows, type HeldTool, type ListedTool } from './gate/pins.js'
+import { pastedSecrets } from './gate/secrets.js'
 import { FileNotifier, SILENT, type Notifier } from './notify/notifier.js'
 import type { Policy } from './policy/defaults.js'
 import { names } from './provenance/names.js'
@@ -479,7 +480,7 @@ export class Cordon {
    * without bound.
    */
   private rememberNamed(text: string): void {
-    for (const atom of atoms(text)) {
+    for (const atom of [...atoms(text), ...pastedSecrets(text)]) {
       if (!this.userAtoms.includes(atom)) this.userAtoms.push(atom)
     }
     for (const name of names(text)) {
