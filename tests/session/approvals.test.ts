@@ -81,3 +81,45 @@ describe('ApprovalStore: one approval, one call', () => {
     expect(approvals.pending()).toEqual([expect.objectContaining({ id, tool: 'send_email', reason: 'r' })])
   })
 })
+
+describe('ApprovalStore: what both reviews found', () => {
+  it('the owner sees the arguments they approve', () => {
+    const approvals = store()
+    const call = { tool: 'send_email', args: { to: 'attacker@example.com', body: 'confidential report' } }
+    const id = approvalId('s', call)
+    approvals.request(id, { tool: call.tool, reason: 'r', args: call.args })
+    const [waiting] = approvals.pending()
+    expect(waiting!.args).toContain('attacker@example.com')
+    expect(approvals.approve(id)!.args).toContain('confidential report')
+  })
+
+  it('a __proto__ key is part of the call like any other', () => {
+    // Codex review: JSON.parse keeps "__proto__" as an own key, and a plain
+    // object built for hashing dropped it into the prototype.
+    const a = JSON.parse('{"path":"x","data":{"__proto__":{"to":"boss@example.com"}}}') as Record<string, unknown>
+    const b = JSON.parse('{"path":"x","data":{"__proto__":{"to":"attacker@example.com"}}}') as Record<string, unknown>
+    expect(approvalId('s', { tool: 'write_json', args: a })).not.toBe(approvalId('s', { tool: 'write_json', args: b }))
+  })
+
+  it('a request past its hour is replaced by a fresh one the owner can approve', () => {
+    const approvals = store()
+    const id = approvalId('s', CALL)
+    approvals.request(id, { tool: CALL.tool, reason: 'r' })
+    const old = new Date(Date.now() - APPROVAL_TTL_MS - 1000)
+    utimesSync(approvals.pendingPath(id), old, old)
+    approvals.request(id, { tool: CALL.tool, reason: 'r' })
+    expect(approvals.approve(id)).not.toBeNull()
+  })
+
+  it('a stale approval does not survive the renewal of its request', () => {
+    const approvals = store()
+    const id = approvalId('s', CALL)
+    approvals.request(id, { tool: CALL.tool, reason: 'r' })
+    approvals.approve(id)
+    const old = new Date(Date.now() - APPROVAL_TTL_MS - 1000)
+    utimesSync(approvals.pendingPath(id), old, old)
+    utimesSync(approvals.approvedPath(id), old, old)
+    approvals.request(id, { tool: CALL.tool, reason: 'r' })
+    expect(approvals.consume(id)).toBe(false)
+  })
+})

@@ -7812,7 +7812,18 @@ var DESTINATION_KEYS = /* @__PURE__ */ new Set([
   "reviewer",
   "reviewers"
 ]);
-var RESOURCE_KEYS = /* @__PURE__ */ new Set(["repo", "repository", "repositories", "repos"]);
+var RESOURCE_KEYS = /* @__PURE__ */ new Set([
+  "repo",
+  "repository",
+  "repositories",
+  "repos",
+  // The account a repository lives under: pacman named, owner switched to
+  // another account, was a second route to someone else's private code.
+  "owner",
+  "org",
+  "organization",
+  "namespace"
+]);
 function roleOf(tool, key, declared) {
   const table = Object.hasOwn(declared, tool) ? declared[tool] : void 0;
   if (table !== void 0 && Object.hasOwn(table, key)) return table[key];
@@ -8420,6 +8431,8 @@ function decide(call, ctx) {
   if (leaving) {
     return escalate(ctx, leaving);
   }
+  const stray = strayResource(call.tool, parts, ctx);
+  if (stray) return escalate(ctx, stray, ctx.exposure?.source);
   const scan = scanTaint(parts, ctx.taint, ctx.userAtoms ?? []);
   if (!scan.tainted) {
     const exposed = exposedCall(call.tool, verdict.effects, parts, ctx);
@@ -8476,7 +8489,7 @@ function selfProtection(parts, ctx) {
       }
     }
     if (COMMAND_KEYS.has(folded) && typeof value === "string") {
-      if (APPROVES.test(value)) {
+      if (APPROVES.test(value.replace(/["'\\]/gu, ""))) {
         return { kind: "deny", reason: "self-protection: the command gives an approval only the owner may give" };
       }
       for (const marker of selfMarkers(ctx.cordonHome)) {
@@ -8496,27 +8509,43 @@ var AGENT_CONFIG = [
   [".mcp.json"],
   [".windsurf", "mcp.json"],
   [".continue", "config.json"],
-  [".zed", "settings.json"]
+  [".zed", "settings.json"],
+  [".zed", "tasks.json"],
+  // Not an agent's, but it runs commands when the container is built, the
+  // same shape as a folder-open task.
+  [".devcontainer", "devcontainer.json"]
 ];
 var CONFIG_WRITES = /* @__PURE__ */ new Set(["create", "update", "delete"]);
 function agentConfigWrite(effects, parts, ctx) {
   if (ctx.exposure === void 0 || ctx.exposure === null) return null;
-  if (!effects.some((effect) => CONFIG_WRITES.has(effect))) return null;
+  const exec = effects.includes("exec");
+  if (!exec && !effects.some((effect) => CONFIG_WRITES.has(effect))) return null;
+  const refuse = (hit) => `this session read untrusted content (${ctx.exposure.source}); ${hit.join("/")} is agent configuration, and a page that edits it can switch confirmations off or start a server \u2014 edit it yourself, or ask again after your next message`;
   for (const { key, value } of parts) {
-    if (!PATH_KEYS.has(fold(key))) continue;
-    for (const path of asPaths(value) ?? []) {
-      for (const form of canonicalForms(path)) {
-        const segments2 = form.split(sep3).map(fold2);
-        const hit = AGENT_CONFIG.find(
-          (tail) => tail.length <= segments2.length && tail.every((part, offset) => segments2[segments2.length - tail.length + offset] === part)
-        );
-        if (hit !== void 0) {
-          return `this session read untrusted content (${ctx.exposure.source}); ${hit.join("/")} is agent configuration, and a page that edits it can switch confirmations off or start a server \u2014 edit it yourself, or ask again after your next message`;
+    const folded = fold(key);
+    if (PATH_KEYS.has(folded)) {
+      for (const path of asPaths(value) ?? []) {
+        for (const form of canonicalForms(path)) {
+          const hit = configTail(form);
+          if (hit !== void 0) return refuse(hit);
         }
+      }
+    }
+    if (exec && COMMAND_KEYS.has(folded) && typeof value === "string") {
+      for (const raw of value.split(/[\s;&|<>()`=]+/u)) {
+        const hit = configTail(raw.replace(/["'\\]/gu, ""));
+        if (hit !== void 0) return refuse(hit);
       }
     }
   }
   return null;
+}
+function configTail(path) {
+  if (path === "") return void 0;
+  const segments2 = path.split(/[\\/]/u).map(fold2);
+  return AGENT_CONFIG.find(
+    (tail) => tail.length <= segments2.length && tail.every((part, offset) => segments2[segments2.length - tail.length + offset] === part)
+  );
 }
 function asPaths(value) {
   if (typeof value === "string") return [value];
@@ -8533,7 +8562,7 @@ function asPaths(value) {
   }
   return null;
 }
-var APPROVES = /(?:\bcordon|\bcli\.m?js)["']?\s+(?:mcp\s+)?approve\b/iu;
+var APPROVES = /(?:\bcordon(?:@[\w.^~-]+)?|\bcli\.m?js)\s+(?:mcp\s+)?approve\b/iu;
 function selfMarkers(cordonHome2) {
   return [cordonHome2, ".cordon", ".claude/settings", ".claude/hooks", ".cursor", ".codex", ".gemini"];
 }
@@ -8545,10 +8574,6 @@ function exposedCall(tool, effects, parts, ctx) {
   if (ctx.policy.exposure === false) return null;
   const exposure = ctx.exposure;
   if (exposure === void 0 || exposure === null) return null;
-  const stray = unnamedResource(tool, parts, ctx);
-  if (stray !== null) {
-    return `this session read untrusted content (${exposure.source}); the call reaches ${safeLabel(stray)}, a resource you did not name \u2014 name it in your message, or add it to destinations in the policy`;
-  }
   if (!effects.some((effect) => EXPOSURE_SENSITIVE.has(effect))) return null;
   const targets = /* @__PURE__ */ new Set();
   for (const { value } of parts) {
@@ -8559,7 +8584,8 @@ function exposedCall(tool, effects, parts, ctx) {
   }
   const named = new Set(ctx.userAtoms ?? []);
   const mandate = ctx.policy.destinations ?? [];
-  const allNamed = [...targets].every((atom) => named.has(atom) || inMandate(atom, mandate));
+  const mandateApplies = !effects.includes("exec");
+  const allNamed = [...targets].every((atom) => named.has(atom) || mandateApplies && inMandate(atom, mandate));
   if (targets.size > 0 && allNamed) return null;
   if (exposure.memory !== true && allNamed && !effects.includes("exec") && namesADestination(tool, parts, ctx.userNames ?? [], mandate, ctx.policy.arguments ?? {})) return null;
   if (exposure.memory === true) {
@@ -8567,11 +8593,18 @@ function exposedCall(tool, effects, parts, ctx) {
   }
   return `this session read untrusted content (${exposure.source}) since your last message; the call acts beyond reading and its destination was not named by you \u2014 name the destination in your message, or declare it under destinations in the policy`;
 }
+function strayResource(tool, parts, ctx) {
+  if (ctx.policy.exposure === false) return null;
+  const exposure = ctx.exposure;
+  if (exposure === void 0 || exposure === null) return null;
+  const stray = unnamedResource(tool, parts, ctx);
+  if (stray === null) return null;
+  return `this session read untrusted content (${exposure.source}); the call reaches ${safeLabel(stray)}, a resource you did not name \u2014 name it in your message, or add it to destinations in the policy`;
+}
 function namesADestination(tool, parts, userNames, mandate, roles) {
   const names2 = new Set(userNames);
-  return parts.some(({ key, value, depth }) => {
-    if (depth !== 0 || typeof value !== "string") return false;
-    if (roleOf(tool, key, roles) !== "destination") return false;
+  const destinations = parts.filter(({ key, value }) => typeof value === "string" && roleOf(tool, key, roles) === "destination");
+  return destinations.length > 0 && destinations.every(({ value }) => {
     const whole = value.trim().normalize("NFKC").toLowerCase();
     return names2.has(whole) || inMandate(whole, mandate);
   });
@@ -8936,13 +8969,14 @@ var SILENT = { notify: () => {
 } };
 
 // src/output/egress.ts
-function outbound(answer, known) {
+function outbound(answer, known, userHost = () => false) {
   const found2 = [];
   for (const candidate of candidates(answer)) {
     const who = known(candidate.url);
     if (who === "user") continue;
-    if (candidate.kind === "link" && (who === "source" || !carriesData(candidate.url))) continue;
-    found2.push({ ...candidate, host: hostOf(candidate.url) });
+    const host = hostOf(candidate.url);
+    if (candidate.kind === "link" && (who === "source" || userHost(host) && !carriesData(candidate.url))) continue;
+    found2.push({ ...candidate, host });
   }
   return found2;
 }
@@ -8951,12 +8985,14 @@ function outboundAfterRead(answer, session, policy) {
   const exposed = session.exposure !== void 0 && session.exposure !== null || session.unredacted === true;
   if (!exposed) return [];
   const named = new Set((session.userAtoms ?? []).map((atom) => atom.toLowerCase()));
+  const hosts = new Set([...named].map((atom) => hostOf(/^[a-z][a-z0-9+.-]*:\/\//iu.test(atom) ? atom : `https://${atom}`)));
   return outbound(answer, (url) => {
-    const forms = [url, url.replace(/^https?:\/\//iu, "")];
-    if (forms.some((form) => named.has(form.toLowerCase()))) return "user";
+    const lowered = url.toLowerCase();
+    const forms = [lowered, lowered.replace(/^https?:\/\//u, "")];
+    if (forms.some((form) => named.has(form))) return "user";
     if (forms.some((form) => session.taint.holds(form))) return "source";
     return null;
-  });
+  }, (host) => hosts.has(host));
 }
 function cutOutbound(answer, found2) {
   let result = answer;
@@ -8967,11 +9003,12 @@ function cutOutbound(answer, found2) {
   return result;
 }
 var TITLE = String.raw`(?:\s+(?:"[^"\n]*"|'[^'\n]*'))?`;
-var INLINE_IMAGE = new RegExp(String.raw`!\[([^\]\n]*)\]\(\s*<?([^\s)>]+)>?${TITLE}\s*\)`, "gu");
-var INLINE_LINK = new RegExp(String.raw`\[([^\]\n]*)\]\(\s*<?([^\s)>]+)>?${TITLE}\s*\)`, "gu");
-var HTML_IMAGE = /<img\b[^>]*?\bsrc\s*=\s*["']?([^"'\s>]+)["']?[^>]*>/giu;
+var LABEL = String.raw`((?:\\.|[^\]\\\n])*)`;
+var INLINE_IMAGE = new RegExp(String.raw`!\[${LABEL}\]\(\s*<?([^\s)>]+)>?${TITLE}\s*\)`, "gu");
+var INLINE_LINK = new RegExp(String.raw`\[${LABEL}\]\(\s*<?([^\s)>]+)>?${TITLE}\s*\)`, "gu");
+var HTML_IMAGE = /<(?:img|source|image)\b[^>]*>/giu;
 var DEFINITION = /^[ \t]{0,3}\[([^\]\n]+)\]:[ \t]*<?(\S+?)>?(?:[ \t]+[^\n]*)?$/gmu;
-var IMAGE_REFERENCE = /!\[([^\]\n]*)\]\[([^\]\n]*)\]/gu;
+var IMAGE_REFERENCE = new RegExp(String.raw`!\[${LABEL}\](?:\[([^\]\n]*)\])?`, "gu");
 var AUTOLINK = /<([a-z][a-z0-9+.-]*:\/\/[^\s>]+)>/giu;
 var BARE = /\b(?:https?|ftp):\/\/[^\s<>()[\]"'`]+/giu;
 function candidates(answer) {
@@ -8986,7 +9023,9 @@ function candidates(answer) {
     add({ kind: "image", url: match[2], start: match.index, end: match.index + match[0].length, text: match[1] });
   }
   for (const match of answer.matchAll(HTML_IMAGE)) {
-    add({ kind: "image", url: match[1], start: match.index, end: match.index + match[0].length, text: "" });
+    for (const address of match[0].matchAll(/(?:[a-z][a-z0-9+.-]*:|&#0*58;|&#x0*3a;|&colon;)?\/\/[^\s"'<>,]+/giu)) {
+      add({ kind: "image", url: address[0], start: match.index, end: match.index + match[0].length, text: "" });
+    }
   }
   const imageLabels = new Set([...answer.matchAll(IMAGE_REFERENCE)].map((match) => (match[2] || match[1]).toLowerCase()));
   for (const match of answer.matchAll(DEFINITION)) {
@@ -9003,7 +9042,36 @@ function candidates(answer) {
     const url = match[0].replace(/[.,;:!?]+$/u, "");
     add({ kind: "link", url, start: match.index, end: match.index + url.length, text: "" });
   }
-  return result.filter((candidate) => /^[a-z][a-z0-9+.-]*:\/\//iu.test(candidate.url) || candidate.url.startsWith("//"));
+  const code = codeRanges(answer);
+  return result.filter((candidate) => !code.some(([start, end]) => candidate.start < end && start < candidate.end)).map((candidate) => ({ ...candidate, url: decodeEntities(candidate.url) })).filter((candidate) => /^[a-z][a-z0-9+.-]*:\/\//iu.test(candidate.url) || candidate.url.startsWith("//"));
+}
+function codeRanges(answer) {
+  const ranges = [];
+  const fence = /^[ \t]{0,3}(`{3,}|~{3,})[^\n]*$/gmu;
+  let open = null;
+  for (const match of answer.matchAll(fence)) {
+    const marker = match[1];
+    if (open === null) open = { at: match.index, marker };
+    else if (marker[0] === open.marker[0] && marker.length >= open.marker.length) {
+      ranges.push([open.at, match.index + match[0].length]);
+      open = null;
+    }
+  }
+  if (open !== null) ranges.push([open.at, answer.length]);
+  for (const match of answer.matchAll(/(`+)(?!`)[\s\S]*?[^`]\1(?!`)/gu)) {
+    if (!ranges.some(([start, end]) => match.index >= start && match.index < end)) {
+      ranges.push([match.index, match.index + match[0].length]);
+    }
+  }
+  return ranges;
+}
+var NAMED = { colon: ":", sol: "/", period: ".", quest: "?", amp: "&", num: "#", equals: "=" };
+function decodeEntities(url) {
+  return url.replace(/&(?:#(\d+)|#x([0-9a-f]+)|([a-z]+));?/giu, (whole, dec, hex, name) => {
+    if (dec !== void 0) return String.fromCodePoint(Math.min(Number(dec), 1114111));
+    if (hex !== void 0) return String.fromCodePoint(Math.min(Number.parseInt(hex, 16), 1114111));
+    return NAMED[name.toLowerCase()] ?? whole;
+  });
 }
 function carriesData(url) {
   const hash2 = url.indexOf("#");
@@ -9764,10 +9832,10 @@ var Tokenizer = class {
   decodeEntities;
   recognizeSelfClosing;
   entityDecoder;
-  constructor({ xmlMode = false, decodeEntities = true, recognizeSelfClosing = xmlMode }, cbs) {
+  constructor({ xmlMode = false, decodeEntities: decodeEntities2 = true, recognizeSelfClosing = xmlMode }, cbs) {
     this.cbs = cbs;
     this.xmlMode = xmlMode;
-    this.decodeEntities = decodeEntities;
+    this.decodeEntities = decodeEntities2;
     this.recognizeSelfClosing = recognizeSelfClosing;
     this.entityDecoder = new EntityDecoder(xmlMode ? xmlDecodeTree : htmlDecodeTree, (cp, consumed) => this.emitCodePoint(cp, consumed));
   }
@@ -11774,10 +11842,11 @@ function approvalId(sessionId, call) {
 function sorted(value) {
   if (Array.isArray(value)) return value.map(sorted);
   if (typeof value !== "object" || value === null) return value;
-  const result = {};
+  const result = /* @__PURE__ */ Object.create(null);
   for (const key of Object.keys(value).sort()) result[key] = sorted(value[key]);
   return result;
 }
+var MAX_SHOWN_ARGS = 4e3;
 var ApprovalStore = class {
   dir;
   constructor(cordonHome2) {
@@ -11792,7 +11861,17 @@ var ApprovalStore = class {
   /** Records that a call waits for the owner. A request already waiting is left as it is. */
   request(id, request) {
     makeDirectory(this.dir, 448);
-    const body = JSON.stringify({ tool: request.tool, reason: request.reason, at: (/* @__PURE__ */ new Date()).toISOString() });
+    const shown2 = JSON.stringify(sorted(request.args ?? {})) ?? "";
+    const args = shown2.length > MAX_SHOWN_ARGS ? `${shown2.slice(0, MAX_SHOWN_ARGS)}\u2026 (${shown2.length} characters in all)` : shown2;
+    const body = JSON.stringify({ tool: request.tool, reason: request.reason, args, at: (/* @__PURE__ */ new Date()).toISOString() });
+    if (this.stale(this.pendingPath(id))) {
+      for (const path of [this.pendingPath(id), this.approvedPath(id)]) {
+        try {
+          unlinkSync(path);
+        } catch {
+        }
+      }
+    }
     try {
       writeFileSync2(this.pendingPath(id), body, { encoding: "utf8", mode: 384, flag: "wx" });
     } catch (error) {
@@ -11807,7 +11886,14 @@ var ApprovalStore = class {
     const request = this.read(id);
     if (request === null) return null;
     writeFileSync2(this.approvedPath(id), "", { mode: 384 });
-    return { tool: request.tool, reason: request.reason };
+    return { tool: request.tool, reason: request.reason, args: request.args };
+  }
+  stale(path) {
+    try {
+      return Date.now() - statSync2(path).mtimeMs > APPROVAL_TTL_MS;
+    } catch {
+      return false;
+    }
   }
   /**
    * Whether an approval for this call is waiting, taking it if so.
@@ -11853,9 +11939,9 @@ var ApprovalStore = class {
       if (Date.now() - statSync2(path).mtimeMs > APPROVAL_TTL_MS) return null;
       const parsed = JSON.parse(readFileSync3(path, "utf8"));
       if (typeof parsed !== "object" || parsed === null) return null;
-      const { tool, reason, at } = parsed;
+      const { tool, reason, at, args } = parsed;
       if (typeof tool !== "string" || typeof reason !== "string" || typeof at !== "string") return null;
-      return { tool, reason, at };
+      return { tool, reason, at, args: typeof args === "string" ? args : "" };
     } catch {
       return null;
     }
@@ -12891,7 +12977,7 @@ var Cordon = class {
       });
       return { kind: "allow" };
     }
-    approvals.request(id, { tool: call.tool, reason: decision.reason });
+    approvals.request(id, { tool: call.tool, reason: decision.reason, args: call.args });
     this.notifier.notify({
       at: (/* @__PURE__ */ new Date()).toISOString(),
       decision: "approval-requested",
@@ -14695,7 +14781,7 @@ function endpointEnv(env, file, add) {
   }
 }
 function vscodeFindings(root, add) {
-  const settings = readJsonc(join12(root, ".vscode", "settings.json"));
+  const settings = readJsonc(join12(root, ".vscode", "settings.json"), ".vscode/settings.json", add);
   if (isRecord3(settings)) {
     for (const [key, value] of Object.entries(settings)) {
       if (/autoapprove/iu.test(key) && value !== false && value !== null) {
@@ -14703,7 +14789,7 @@ function vscodeFindings(root, add) {
       }
     }
   }
-  const tasks = readJsonc(join12(root, ".vscode", "tasks.json"));
+  const tasks = readJsonc(join12(root, ".vscode", "tasks.json"), ".vscode/tasks.json", add);
   const list = isRecord3(tasks) && Array.isArray(tasks["tasks"]) ? tasks["tasks"] : [];
   for (const task of list) {
     if (!isRecord3(task)) continue;
@@ -14714,13 +14800,18 @@ function vscodeFindings(root, add) {
     }
   }
 }
-function readJsonc(path) {
+function readJsonc(path, file, add) {
+  if (!isFile(path)) return null;
   const text = readSmall(path);
-  if (text === null) return null;
-  const stripped = text.replace(/("(?:\\.|[^"\\])*")|\/\/[^\n]*|\/\*[\s\S]*?\*\//gu, (_, string) => string ?? "").replace(/,(\s*[}\]])/gu, "$1");
+  if (text === null) {
+    add("CA901", file, "too large or unreadable");
+    return null;
+  }
+  const stripped = text.replace(/("(?:\\.|[^"\\])*")|\/\/[^\n]*|\/\*[\s\S]*?\*\//gu, (_, string) => string ?? "").replace(/("(?:\\.|[^"\\])*")|,(?=\s*[}\]])/gu, (_, string) => string ?? "");
   try {
     return JSON.parse(stripped);
-  } catch {
+  } catch (error) {
+    add("CA901", file, `not valid JSON with comments: ${error.message}`);
     return null;
   }
 }
@@ -15412,6 +15503,7 @@ function approveCall(args) {
     }
     for (const item of waiting) {
       process.stdout.write(`${item.id}  ${visible(item.at)}  ${visible(item.tool)}
+    arguments: ${visible(item.args)}
     ${visible(item.reason)}
 `);
     }
@@ -15431,6 +15523,7 @@ ${USAGE}
     return 1;
   }
   process.stdout.write(`approved once: ${visible(approved.tool)}
+    arguments: ${visible(approved.args)}
     ${visible(approved.reason)}
 the agent's next identical call goes through, and only that one
 `);

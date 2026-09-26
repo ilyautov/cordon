@@ -362,7 +362,7 @@ function endpointEnv(env: unknown, file: string, add: Add): void {
 
 /** VS Code's own files, JSON with comments and trailing commas. */
 function vscodeFindings(root: string, add: Add): void {
-  const settings = readJsonc(join(root, '.vscode', 'settings.json'))
+  const settings = readJsonc(join(root, '.vscode', 'settings.json'), '.vscode/settings.json', add)
   if (isRecord(settings)) {
     for (const [key, value] of Object.entries(settings)) {
       // CVE-2025-53773: chat.tools.autoApprove let an injection run commands
@@ -372,7 +372,7 @@ function vscodeFindings(root: string, add: Add): void {
       }
     }
   }
-  const tasks = readJsonc(join(root, '.vscode', 'tasks.json'))
+  const tasks = readJsonc(join(root, '.vscode', 'tasks.json'), '.vscode/tasks.json', add)
   const list = isRecord(tasks) && Array.isArray(tasks['tasks']) ? tasks['tasks'] : []
   for (const task of list) {
     if (!isRecord(task)) continue
@@ -384,17 +384,26 @@ function vscodeFindings(root: string, add: Add): void {
   }
 }
 
-function readJsonc(path: string): unknown {
+function readJsonc(path: string, file: string, add: Add): unknown {
+  if (!isFile(path)) return null
   const text = readSmall(path)
-  if (text === null) return null
-  // Comments go first, outside strings only; then trailing commas.
+  // Said out loud rather than skipped: padding past the size limit hid an
+  // autoApprove from the audit once, and silence read as a clean file.
+  if (text === null) {
+    add('CA901', file, 'too large or unreadable')
+    return null
+  }
+  // Comments, then trailing commas, each outside strings only: a string is
+  // matched first and kept, so `"a,]"` is never rewritten.
   const stripped = text
     .replace(/("(?:\\.|[^"\\])*")|\/\/[^\n]*|\/\*[\s\S]*?\*\//gu, (_, string: string | undefined) => string ?? '')
-    .replace(/,(\s*[}\]])/gu, '$1')
+    .replace(/("(?:\\.|[^"\\])*")|,(?=\s*[}\]])/gu, (_, string: string | undefined) => string ?? '')
   try {
     return JSON.parse(stripped) as unknown
-  } catch {
-    // A file VS Code cannot parse applies no settings either.
+  } catch (error) {
+    // VS Code's own parser forgives more than this one, so a file this one
+    // cannot read may still apply settings: a finding, not an absence.
+    add('CA901', file, `not valid JSON with comments: ${(error as Error).message}`)
     return null
   }
 }

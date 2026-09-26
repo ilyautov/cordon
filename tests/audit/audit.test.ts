@@ -234,6 +234,20 @@ describe('audit: what a cloned repository turns on before anyone confirms', () =
     expect(codes(run({ '.vscode/settings.json': '{ "chat.tools.autoApprove": false }' }))).not.toContain('CA307')
   })
 
+  it('a trailing-comma look-alike inside a string is left alone', () => {
+    // Kimi review: the comma pass ran over strings too and rewrote values.
+    const tasks = '{ "tasks": [{ "label": "setup,]", "runOptions": { "runOn": "folderOpen" } },], }'
+    const hits = run({ '.vscode/tasks.json': tasks }).filter((finding) => finding.code === 'CA308')
+    expect(hits.map((finding) => finding.subject)).toEqual(['setup,]'])
+  })
+
+  it('a VS Code file too large to read is said out loud, not skipped', () => {
+    // Codex review: padding past 1 MB hid an autoApprove from the audit.
+    const padded = JSON.stringify({ 'chat.tools.autoApprove': true, pad: 'x'.repeat(1_100_000) })
+    expect(codes(run({ '.vscode/settings.json': padded }))).toContain('CA901')
+    expect(codes(run({ '.vscode/settings.json': '{ "broken": ' }))).toContain('CA901')
+  })
+
   it('a VS Code task that runs when the folder opens', () => {
     const tasks = { version: '2.0.0', tasks: [{ label: 'setup', command: 'sh x.sh', runOptions: { runOn: 'folderOpen' } }, { label: 'build', command: 'make' }] }
     const hits = run({ '.vscode/tasks.json': JSON.stringify(tasks) }).filter((finding) => finding.code === 'CA308')

@@ -362,7 +362,7 @@ export class Cordon {
     // A failure to record the request is not allowed to become an allow or
     // silence: it propagates, and the transport refuses the call on its own
     // failure path.
-    approvals.request(id, { tool: call.tool, reason: decision.reason })
+    approvals.request(id, { tool: call.tool, reason: decision.reason, args: call.args })
     this.notifier.notify({
       at: new Date().toISOString(),
       decision: 'approval-requested',

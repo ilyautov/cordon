@@ -47,18 +47,22 @@ interface Candidate {
 /**
  * Everything in the answer that would send data out.
  *
- * An image counts unless the user named its address. A link counts when the
- * address carries something beyond a place: a query, an identifier in the
- * path or fragment. A plain address is how an answer cites a page, and one
- * copied verbatim from what was read carries only what the page already had.
+ * An image counts unless the user named its address. A link passes when it
+ * was copied whole from the user or from what was read, and otherwise only
+ * when the user named its host and the address carries nothing beyond a
+ * place: no query, no userinfo, no identifier in the path or fragment. A
+ * host seen only in what was read vouches for nothing, because the page can
+ * name its own collector; and a host the model composed can carry data in
+ * itself, `secret123.evil.example`.
  */
-export function outbound(answer: string, known: Known): Outbound[] {
+export function outbound(answer: string, known: Known, userHost: (host: string) => boolean = () => false): Outbound[] {
   const found: Outbound[] = []
   for (const candidate of candidates(answer)) {
     const who = known(candidate.url)
     if (who === 'user') continue
-    if (candidate.kind === 'link' && (who === 'source' || !carriesData(candidate.url))) continue
-    found.push({ ...candidate, host: hostOf(candidate.url) })
+    const host = hostOf(candidate.url)
+    if (candidate.kind === 'link' && (who === 'source' || (userHost(host) && !carriesData(candidate.url)))) continue
+    found.push({ ...candidate, host })
   }
   return found
 }
@@ -81,15 +85,17 @@ export function outboundAfterRead(answer: string, session: AnswerSession, policy
   const exposed = (session.exposure !== undefined && session.exposure !== null) || session.unredacted === true
   if (!exposed) return []
   const named = new Set((session.userAtoms ?? []).map((atom) => atom.toLowerCase()))
+  const hosts = new Set([...named].map((atom) => hostOf(/^[a-z][a-z0-9+.-]*:\/\//iu.test(atom) ? atom : `https://${atom}`)))
   return outbound(answer, (url) => {
-    // The whole address only, with and without its scheme. Every atom of it
-    // would let a composed link borrow its standing from one identifier in
-    // it that the page happened to say.
-    const forms = [url, url.replace(/^https?:\/\//iu, '')]
-    if (forms.some((form) => named.has(form.toLowerCase()))) return 'user'
+    // The whole address only, with and without its scheme, lower-cased as
+    // atoms are. Every atom of it would let a composed link borrow its
+    // standing from one identifier in it that the page happened to say.
+    const lowered = url.toLowerCase()
+    const forms = [lowered, lowered.replace(/^https?:\/\//u, '')]
+    if (forms.some((form) => named.has(form))) return 'user'
     if (forms.some((form) => session.taint.holds(form))) return 'source'
     return null
-  })
+  }, (host) => hosts.has(host))
 }
 
 /** The answer with every found item replaced by a note naming its host. */
@@ -105,11 +111,14 @@ export function cutOutbound(answer: string, found: readonly Outbound[]): string 
 }
 
 const TITLE = String.raw`(?:\s+(?:"[^"\n]*"|'[^'\n]*'))?`
-const INLINE_IMAGE = new RegExp(String.raw`!\[([^\]\n]*)\]\(\s*<?([^\s)>]+)>?${TITLE}\s*\)`, 'gu')
-const INLINE_LINK = new RegExp(String.raw`\[([^\]\n]*)\]\(\s*<?([^\s)>]+)>?${TITLE}\s*\)`, 'gu')
-const HTML_IMAGE = /<img\b[^>]*?\bsrc\s*=\s*["']?([^"'\s>]+)["']?[^>]*>/giu
+// Link text may hold an escaped bracket: `![a\]b](url)` is one image.
+const LABEL = String.raw`((?:\\.|[^\]\\\n])*)`
+const INLINE_IMAGE = new RegExp(String.raw`!\[${LABEL}\]\(\s*<?([^\s)>]+)>?${TITLE}\s*\)`, 'gu')
+const INLINE_LINK = new RegExp(String.raw`\[${LABEL}\]\(\s*<?([^\s)>]+)>?${TITLE}\s*\)`, 'gu')
+const HTML_IMAGE = /<(?:img|source|image)\b[^>]*>/giu
 const DEFINITION = /^[ \t]{0,3}\[([^\]\n]+)\]:[ \t]*<?(\S+?)>?(?:[ \t]+[^\n]*)?$/gmu
-const IMAGE_REFERENCE = /!\[([^\]\n]*)\]\[([^\]\n]*)\]/gu
+// Full, collapsed and shortcut forms: `![a][r]`, `![a][]`, `![a]`.
+const IMAGE_REFERENCE = new RegExp(String.raw`!\[${LABEL}\](?:\[([^\]\n]*)\])?`, 'gu')
 const AUTOLINK = /<([a-z][a-z0-9+.-]*:\/\/[^\s>]+)>/giu
 const BARE = /\b(?:https?|ftp):\/\/[^\s<>()[\]"'`]+/giu
 
@@ -130,7 +139,11 @@ function candidates(answer: string): Candidate[] {
     add({ kind: 'image', url: match[2]!, start: match.index, end: match.index + match[0].length, text: match[1]! })
   }
   for (const match of answer.matchAll(HTML_IMAGE)) {
-    add({ kind: 'image', url: match[1]!, start: match.index, end: match.index + match[0].length, text: '' })
+    // Every address in the tag: src, srcset, data-src, href. One unnamed
+    // address is enough for the fetch, so the tag goes whole.
+    for (const address of match[0].matchAll(/(?:[a-z][a-z0-9+.-]*:|&#0*58;|&#x0*3a;|&colon;)?\/\/[^\s"'<>,]+/giu)) {
+      add({ kind: 'image', url: address[0], start: match.index, end: match.index + match[0].length, text: '' })
+    }
   }
   // A reference definition is where a reference-style image gets its
   // address; the definition line is what goes.
@@ -150,7 +163,50 @@ function candidates(answer: string): Candidate[] {
     const url = match[0].replace(/[.,;:!?]+$/u, '')
     add({ kind: 'link', url, start: match.index, end: match.index + url.length, text: '' })
   }
-  return result.filter((candidate) => /^[a-z][a-z0-9+.-]*:\/\//iu.test(candidate.url) || candidate.url.startsWith('//'))
+  const code = codeRanges(answer)
+  return result
+    // Inside code nothing is rendered or fetched, and cutting there would
+    // destroy an example.
+    .filter((candidate) => !code.some(([start, end]) => candidate.start < end && start < candidate.end))
+    // A renderer decodes character references before it reads the scheme:
+    // `https&#58;//evil.example` is fetched like `https://evil.example`.
+    .map((candidate) => ({ ...candidate, url: decodeEntities(candidate.url) }))
+    .filter((candidate) => /^[a-z][a-z0-9+.-]*:\/\//iu.test(candidate.url) || candidate.url.startsWith('//'))
+}
+
+/**
+ * Fenced blocks and inline code spans. An unclosed fence runs to the end, as
+ * a renderer reads it.
+ */
+function codeRanges(answer: string): Array<[number, number]> {
+  const ranges: Array<[number, number]> = []
+  const fence = /^[ \t]{0,3}(`{3,}|~{3,})[^\n]*$/gmu
+  let open: { at: number; marker: string } | null = null
+  for (const match of answer.matchAll(fence)) {
+    const marker = match[1]!
+    if (open === null) open = { at: match.index, marker }
+    else if (marker[0] === open.marker[0] && marker.length >= open.marker.length) {
+      ranges.push([open.at, match.index + match[0].length])
+      open = null
+    }
+  }
+  if (open !== null) ranges.push([open.at, answer.length])
+  for (const match of answer.matchAll(/(`+)(?!`)[\s\S]*?[^`]\1(?!`)/gu)) {
+    if (!ranges.some(([start, end]) => match.index >= start && match.index < end)) {
+      ranges.push([match.index, match.index + match[0].length])
+    }
+  }
+  return ranges
+}
+
+const NAMED: Readonly<Record<string, string>> = { colon: ':', sol: '/', period: '.', quest: '?', amp: '&', num: '#', equals: '=' }
+
+function decodeEntities(url: string): string {
+  return url.replace(/&(?:#(\d+)|#x([0-9a-f]+)|([a-z]+));?/giu, (whole, dec: string | undefined, hex: string | undefined, name: string | undefined) => {
+    if (dec !== undefined) return String.fromCodePoint(Math.min(Number(dec), 0x10ffff))
+    if (hex !== undefined) return String.fromCodePoint(Math.min(Number.parseInt(hex, 16), 0x10ffff))
+    return NAMED[name!.toLowerCase()] ?? whole
+  })
 }
 
 /**

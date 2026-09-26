@@ -838,7 +838,7 @@ function approveCall(args: string[]): number {
       return 0
     }
     for (const item of waiting) {
-      process.stdout.write(`${item.id}  ${visible(item.at)}  ${visible(item.tool)}\n    ${visible(item.reason)}\n`)
+      process.stdout.write(`${item.id}  ${visible(item.at)}  ${visible(item.tool)}\n    arguments: ${visible(item.args)}\n    ${visible(item.reason)}\n`)
     }
     process.stdout.write('approve one call with: cordon approve <id>\n')
     return 0
@@ -852,7 +852,7 @@ function approveCall(args: string[]): number {
     process.stderr.write(`nothing waits under ${id}: it was never asked for, was already used, or is older than an hour\n`)
     return 1
   }
-  process.stdout.write(`approved once: ${visible(approved.tool)}\n    ${visible(approved.reason)}\nthe agent's next identical call goes through, and only that one\n`)
+  process.stdout.write(`approved once: ${visible(approved.tool)}\n    arguments: ${visible(approved.args)}\n    ${visible(approved.reason)}\nthe agent's next identical call goes through, and only that one\n`)
   return 0
 }
 

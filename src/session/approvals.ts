@@ -31,7 +31,10 @@ export function approvalId(sessionId: string, call: ToolCall): string {
 function sorted(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(sorted)
   if (typeof value !== 'object' || value === null) return value
-  const result: Record<string, unknown> = {}
+  // No prototype: JSON.parse keeps "__proto__" as an own key, and on a plain
+  // object the assignment below would set the prototype instead, dropping
+  // that subtree from the hash while the upstream still receives it.
+  const result: Record<string, unknown> = Object.create(null) as Record<string, unknown>
   for (const key of Object.keys(value).sort()) result[key] = sorted((value as Record<string, unknown>)[key])
   return result
 }
@@ -39,12 +42,24 @@ function sorted(value: unknown): unknown {
 export interface ApprovalRequest {
   tool: string
   reason: string
+  /** The call's arguments, so the owner approves what they can read. */
+  args?: unknown
 }
 
-export interface PendingApproval extends ApprovalRequest {
+/** A request as the owner is shown it: the arguments already serialized. */
+export interface ShownRequest {
+  tool: string
+  reason: string
+  args: string
+}
+
+export interface PendingApproval extends ShownRequest {
   id: string
   at: string
 }
+
+/** Enough of the arguments to judge them, not a whole attached file. */
+const MAX_SHOWN_ARGS = 4000
 
 /**
  * One-time approvals for transports with no one to ask: the MCP gateway and
@@ -75,7 +90,21 @@ export class ApprovalStore {
   /** Records that a call waits for the owner. A request already waiting is left as it is. */
   request(id: string, request: ApprovalRequest): void {
     makeDirectory(this.dir, 0o700)
-    const body = JSON.stringify({ tool: request.tool, reason: request.reason, at: new Date().toISOString() })
+    const shown = JSON.stringify(sorted(request.args ?? {})) ?? ''
+    const args = shown.length > MAX_SHOWN_ARGS ? `${shown.slice(0, MAX_SHOWN_ARGS)}… (${shown.length} characters in all)` : shown
+    const body = JSON.stringify({ tool: request.tool, reason: request.reason, args, at: new Date().toISOString() })
+    // A request past its hour can no longer be approved, so it is replaced
+    // rather than left to block the id forever; an approval left over from it
+    // goes too, so the renewal cannot revive it.
+    if (this.stale(this.pendingPath(id))) {
+      for (const path of [this.pendingPath(id), this.approvedPath(id)]) {
+        try {
+          unlinkSync(path)
+        } catch {
+          // Already gone: nothing to retire.
+        }
+      }
+    }
     try {
       writeFileSync(this.pendingPath(id), body, { encoding: 'utf8', mode: 0o600, flag: 'wx' })
     } catch (error) {
@@ -89,11 +118,19 @@ export class ApprovalStore {
    * The owner's approval of a waiting request, or null when there is none to
    * approve. Returns what was approved, so the owner sees it said back.
    */
-  approve(id: string): ApprovalRequest | null {
+  approve(id: string): ShownRequest | null {
     const request = this.read(id)
     if (request === null) return null
     writeFileSync(this.approvedPath(id), '', { mode: 0o600 })
-    return { tool: request.tool, reason: request.reason }
+    return { tool: request.tool, reason: request.reason, args: request.args }
+  }
+
+  private stale(path: string): boolean {
+    try {
+      return Date.now() - statSync(path).mtimeMs > APPROVAL_TTL_MS
+    } catch {
+      return false
+    }
   }
 
   /**
@@ -138,15 +175,15 @@ export class ApprovalStore {
   }
 
   /** A waiting request that is still fresh, or null. */
-  private read(id: string): (ApprovalRequest & { at: string }) | null {
+  private read(id: string): (ShownRequest & { at: string }) | null {
     const path = this.pendingPath(id)
     try {
       if (Date.now() - statSync(path).mtimeMs > APPROVAL_TTL_MS) return null
       const parsed: unknown = JSON.parse(readFileSync(path, 'utf8'))
       if (typeof parsed !== 'object' || parsed === null) return null
-      const { tool, reason, at } = parsed as Record<string, unknown>
+      const { tool, reason, at, args } = parsed as Record<string, unknown>
       if (typeof tool !== 'string' || typeof reason !== 'string' || typeof at !== 'string') return null
-      return { tool, reason, at }
+      return { tool, reason, at, args: typeof args === 'string' ? args : '' }
     } catch {
       // Absent or damaged: nothing the owner could be shown, so nothing to approve.
       return null

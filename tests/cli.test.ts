@@ -344,7 +344,7 @@ describe('cordon approve', () => {
   function waiting() {
     const home = mkdtempSync(join(tmpdir(), 'cordon-approve-'))
     const id = approvalId('s', { tool: 'send_email', args: { to: 'a@example.com' } })
-    new ApprovalStore(home).request(id, { tool: 'send_email', reason: 'outside the certificate' })
+    new ApprovalStore(home).request(id, { tool: 'send_email', reason: 'outside the certificate', args: { to: 'a@example.com' } })
     return { home, id }
   }
 
@@ -355,6 +355,7 @@ describe('cordon approve', () => {
     expect(stdout).toContain(id)
     expect(stdout).toContain('send_email')
     expect(stdout).toContain('outside the certificate')
+    expect(stdout).toContain('a@example.com')
   })
 
   it('says so when nothing waits', () => {

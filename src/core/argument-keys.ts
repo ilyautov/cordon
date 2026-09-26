@@ -55,7 +55,12 @@ export const DESTINATION_KEYS: ReadonlySet<string> = new Set([
  * resource changed. After an untrusted read, a resource the user did not name
  * escalates.
  */
-export const RESOURCE_KEYS: ReadonlySet<string> = new Set(['repo', 'repository', 'repositories', 'repos'])
+export const RESOURCE_KEYS: ReadonlySet<string> = new Set([
+  'repo', 'repository', 'repositories', 'repos',
+  // The account a repository lives under: pacman named, owner switched to
+  // another account, was a second route to someone else's private code.
+  'owner', 'org', 'organization', 'namespace',
+])
 
 /** The role of an argument: the policy's declaration first, then the name. */
 export function roleOf(

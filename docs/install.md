@@ -140,7 +140,7 @@ memory:
   tools: [mem0_add]
 ```
 
-**`arguments`**: the role of a tool's arguments, by tool and argument name: `destination` (who receives the call: a recipient, a channel), `resource` (what the call reaches: a repository) or `content` (what it carries). Only a destination field can carry a name that exempts a call from the exposure rule, and a resource field is what the resource rule reads. Undeclared arguments get a role from their name: `to`, `recipient`, `channel`, `email`, `user` and similar are destinations; `repo` and `repository` are resources; everything else is content.
+**`arguments`**: the role of a tool's arguments, by tool and argument name: `destination` (who receives the call: a recipient, a channel), `resource` (what the call reaches: a repository) or `content` (what it carries). Only a destination field can carry a name that exempts a call from the exposure rule, and a resource field is what the resource rule reads. Undeclared arguments get a role from their name: `to`, `recipient`, `channel`, `email`, `user` and similar are destinations; `repo`, `repository`, `owner`, `org`, `organization` and `namespace` are resources; everything else is content.
 
 ```yaml
 arguments:
@@ -345,7 +345,7 @@ The footer can say four things and no more: which sources the answer matched ver
 
 ### Links and images that would carry data out
 
-After an untrusted read, the footer also names the addresses in the answer that would send something out when the answer is shown or opened: every image the user did not name, and every link that carries data (a query, userinfo, an identifier in the path or the fragment) and was not copied verbatim from what was read or from the user's message. An image in a viewer that renders markdown is fetched with no click, which is how EchoLeak (CVE-2025-32711) and the Slack AI and ChatGPT image leaks worked. An allowlist of image hosts is no answer: CamoLeak went through GitHub's own image proxy, one pre-signed address per character, so an image copied from the page counts too.
+After an untrusted read, the footer also names the addresses in the answer that would send something out when the answer is shown or opened: every image the user did not name, and every link not copied whole from what was read or from the user's message, unless the user named its host and it carries no data (no query, userinfo, or identifier in the path or the fragment). A host that only the page mentioned vouches for nothing: the page can name its own collector, and a composed host carries data by itself, as in `secret123.evil.example`. Addresses inside code blocks and code spans are left alone, since nothing there is fetched, and character references such as `https&#58;//` are decoded first, as a renderer does. An image in a viewer that renders markdown is fetched with no click, which is how EchoLeak (CVE-2025-32711) and the Slack AI and ChatGPT image leaks worked. An allowlist of image hosts is no answer: CamoLeak went through GitHub's own image proxy, one pre-signed address per character, so an image copied from the page counts too.
 
 ```
 Cordon: this answer was written after an untrusted read and carries addresses that would send data out when shown or opened:

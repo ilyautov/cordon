@@ -156,6 +156,11 @@ function decide(call: ToolCall, ctx: GateContext): Decision {
     return escalate(ctx, leaving)
   }
 
+  // Before provenance, so that no exit below can carry the call past it: a
+  // quarantine rewrite kept the repository an outside review aimed it at.
+  const stray = strayResource(call.tool, parts, ctx)
+  if (stray) return escalate(ctx, stray, ctx.exposure?.source)
+
   const scan = scanTaint(parts, ctx.taint, ctx.userAtoms ?? [])
   if (!scan.tainted) {
     const exposed = exposedCall(call.tool, verdict.effects, parts, ctx)
@@ -268,7 +273,7 @@ function selfProtection(parts: readonly Field[], ctx: GateContext): Decision | n
       // An approval is the owner's word, and a shell can say it for them:
       // a pending call approved, a changed MCP server re-pinned. The same
       // substring crudeness as below, and the same answer to its limit.
-      if (APPROVES.test(value)) {
+      if (APPROVES.test(value.replace(/["'\\]/gu, ''))) {
         return { kind: 'deny', reason: 'self-protection: the command gives an approval only the owner may give' }
       }
       for (const marker of selfMarkers(ctx.cordonHome)) {
@@ -293,30 +298,49 @@ function selfProtection(parts: readonly Field[], ctx: GateContext): Decision | n
 const AGENT_CONFIG: readonly (readonly string[])[] = [
   ['.vscode', 'settings.json'], ['.vscode', 'tasks.json'], ['.vscode', 'mcp.json'], ['.vscode', 'launch.json'],
   ['.mcp.json'], ['.windsurf', 'mcp.json'], ['.continue', 'config.json'], ['.zed', 'settings.json'],
+  ['.zed', 'tasks.json'],
+  // Not an agent's, but it runs commands when the container is built, the
+  // same shape as a folder-open task.
+  ['.devcontainer', 'devcontainer.json'],
 ]
 const CONFIG_WRITES: ReadonlySet<EffectClass> = new Set(['create', 'update', 'delete'])
 
 function agentConfigWrite(effects: readonly EffectClass[], parts: readonly Field[], ctx: GateContext): string | null {
   if (ctx.exposure === undefined || ctx.exposure === null) return null
-  if (!effects.some((effect) => CONFIG_WRITES.has(effect))) return null
+  const exec = effects.includes('exec')
+  if (!exec && !effects.some((effect) => CONFIG_WRITES.has(effect))) return null
+  const refuse = (hit: readonly string[]): string =>
+    `this session read untrusted content (${ctx.exposure!.source}); ${hit.join('/')} is agent configuration, ` +
+    'and a page that edits it can switch confirmations off or start a server — edit it yourself, or ask again after your next message'
   for (const { key, value } of parts) {
-    if (!PATH_KEYS.has(fold(key))) continue
-    for (const path of asPaths(value) ?? []) {
-      for (const form of canonicalForms(path)) {
-        const segments = form.split(sep).map(foldSegment)
-        const hit = AGENT_CONFIG.find((tail) =>
-          tail.length <= segments.length && tail.every((part, offset) => segments[segments.length - tail.length + offset] === part),
-        )
-        if (hit !== undefined) {
-          return (
-            `this session read untrusted content (${ctx.exposure.source}); ${hit.join('/')} is agent configuration, ` +
-            'and a page that edits it can switch confirmations off or start a server — edit it yourself, or ask again after your next message'
-          )
+    const folded = fold(key)
+    if (PATH_KEYS.has(folded)) {
+      for (const path of asPaths(value) ?? []) {
+        for (const form of canonicalForms(path)) {
+          const hit = configTail(form)
+          if (hit !== undefined) return refuse(hit)
         }
+      }
+    }
+    // A shell reaches the same files with `>` or `tee`, and what a command
+    // does cannot be read off it; which files it names can. Naming one under
+    // the mark counts as writing it, as for memory files.
+    if (exec && COMMAND_KEYS.has(folded) && typeof value === 'string') {
+      for (const raw of value.split(/[\s;&|<>()`=]+/u)) {
+        const hit = configTail(raw.replace(/["'\\]/gu, ''))
+        if (hit !== undefined) return refuse(hit)
       }
     }
   }
   return null
+}
+
+function configTail(path: string): readonly string[] | undefined {
+  if (path === '') return undefined
+  const segments = path.split(/[\\/]/u).map(foldSegment)
+  return AGENT_CONFIG.find((tail) =>
+    tail.length <= segments.length && tail.every((part, offset) => segments[segments.length - tail.length + offset] === part),
+  )
 }
 
 /**
@@ -343,7 +367,7 @@ function asPaths(value: unknown): string[] | null {
 
 /** Substrings whose mention in a shell command means an attempt to reach Cordon. */
 /** `cordon approve`, `cordon mcp approve`, and the same through the bundle's path. */
-const APPROVES = /(?:\bcordon|\bcli\.m?js)["']?\s+(?:mcp\s+)?approve\b/iu
+const APPROVES = /(?:\bcordon(?:@[\w.^~-]+)?|\bcli\.m?js)\s+(?:mcp\s+)?approve\b/iu
 
 function selfMarkers(cordonHome: string): string[] {
   return [cordonHome, '.cordon', '.claude/settings', '.claude/hooks', '.cursor', '.codex', '.gemini']
@@ -385,18 +409,6 @@ function exposedCall(
   const exposure = ctx.exposure
   if (exposure === undefined || exposure === null) return null
 
-  // Before the effect filter: a read of a resource the user never named is
-  // the step that matters. GitHub's MCP server was led from an issue in the
-  // public repository the user asked about into their private ones, and
-  // every call on the way was a read or aimed at the named repository.
-  const stray = unnamedResource(tool, parts, ctx)
-  if (stray !== null) {
-    return (
-      `this session read untrusted content (${exposure.source}); the call reaches ${safeLabel(stray)}, ` +
-      'a resource you did not name — name it in your message, or add it to destinations in the policy'
-    )
-  }
-
   if (!effects.some((effect) => EXPOSURE_SENSITIVE.has(effect))) return null
 
   // The call's targets are the atoms of its arguments, extracted by the same
@@ -414,7 +426,11 @@ function exposedCall(
   }
   const named = new Set(ctx.userAtoms ?? [])
   const mandate = ctx.policy.destinations ?? []
-  const allNamed = [...targets].every((atom) => named.has(atom) || inMandate(atom, mandate))
+  // The mandate names where a task sends things, and a command is not sent
+  // anywhere: `rm -rf build # ops@acme.example` matched a mandated address
+  // in its comment. The user's own atoms still count for exec.
+  const mandateApplies = !effects.includes('exec')
+  const allNamed = [...targets].every((atom) => named.has(atom) || (mandateApplies && inMandate(atom, mandate)))
   if (targets.size > 0 && allNamed) return null
   // A field whose whole value is a name the user wrote — "send it to Alice"
   // — is a destination the user named, as a link or an address would be.
@@ -441,7 +457,26 @@ function exposedCall(
 }
 
 /**
- * A top-level destination field whose whole value the user said or the policy
+ * The resource rule, answered before anything else under the mark. A read of
+ * a resource the user never named is the step that matters: GitHub's MCP
+ * server was led from an issue in the public repository the user asked about
+ * into their private ones, and every call on the way was a read or aimed at
+ * the named repository.
+ */
+function strayResource(tool: string, parts: readonly Field[], ctx: GateContext): string | null {
+  if (ctx.policy.exposure === false) return null
+  const exposure = ctx.exposure
+  if (exposure === undefined || exposure === null) return null
+  const stray = unnamedResource(tool, parts, ctx)
+  if (stray === null) return null
+  return (
+    `this session read untrusted content (${exposure.source}); the call reaches ${safeLabel(stray)}, ` +
+    'a resource you did not name — name it in your message, or add it to destinations in the policy'
+  )
+}
+
+/**
+ * Destination fields whose whole values the user said or the policy
  * declares. Only a destination: a name in Bash's `description` field vouched
  * for a whole command once. A shell command is never aimed by a name at all;
  * the caller keeps exec out.
@@ -454,10 +489,12 @@ function namesADestination(
   roles: Readonly<Record<string, Readonly<Record<string, ArgumentRole>>>>,
 ): boolean {
   const names = new Set(userNames)
-  return parts.some(({ key, value, depth }) => {
-    if (depth !== 0 || typeof value !== 'string') return false
-    if (roleOf(tool, key, roles) !== 'destination') return false
-    const whole = value.trim().normalize('NFKC').toLowerCase()
+  // Every destination the call names, at any depth: an element of
+  // `recipients` carries its field's key. All of them must be named, so a
+  // named Alice cannot carry an unnamed Eve along in the same list.
+  const destinations = parts.filter(({ key, value }) => typeof value === 'string' && roleOf(tool, key, roles) === 'destination')
+  return destinations.length > 0 && destinations.every(({ value }) => {
+    const whole = (value as string).trim().normalize('NFKC').toLowerCase()
     return names.has(whole) || inMandate(whole, mandate)
   })
 }
