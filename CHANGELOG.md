@@ -30,6 +30,8 @@ Two holes in the class-hiding check, found in an outside review before release, 
 
 A credential in a call that sends data off the machine now escalates. GitHub, Anthropic, OpenAI, AWS, Slack, Google, GitLab and Stripe credentials and private key blocks are recognized by shape, each at the length a real one has, so `sk-learn` or a file called `ghp_notes` does not trip it. It applies to `network-egress`, `export` and `exec`, whether or not anything untrusted was read: this is the careless case, an agent pasting a token into a curl command on its own, and before this nothing answered it. The reason names the kind of credential and never its value. A credential the user pasted into their own message is exempt. Docker's MCP gateway, Lasso and Snyk ship a version of this check, and it needs no model.
 
+The MCP gateway now holds a tool whose name imitates another server's tool. Each gateway fronts one server, but they all pin into one directory, so on start a gateway compares its tool names with every other server's pinned names. The comparison is by a lookalike skeleton: NFKC, Cyrillic and Greek letters that read as Latin, and 0, 1 and I for o and l. `re\u0430d_file` next to `read_file` is held, refused with its own reason and journaled, and `cordon mcp approve` does not release it. The same name on two servers, or `readFile` next to `read_file`, is not held, since honest servers choose those. Docker's gateway blocks exact collisions only.
+
 ## [0.7.0] - 2026-09-26
 
 The release for teams: `cordon audit` before deployment, MCP tool pinning at run time, `cordon init` profiles, `cordon log`, a managed-settings deployment guide, and npm provenance on the published package. Refusals on Claude Code now also leave with exit code 2.

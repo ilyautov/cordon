@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { makeDirectory } from '../core/mkdir.js'
 import type { Pins } from '../gate/pins.js'
@@ -89,6 +89,45 @@ export class PinStore {
     }
     rmSync(path, { force: true })
     return true
+  }
+
+  /**
+   * The tool names every other server was pinned with, for the shadow check.
+   *
+   * A file that cannot be read throws, as `load` does: skipping it would
+   * leave that server's names out of the comparison, and an imitation of
+   * exactly those names would pass with nobody told.
+   */
+  others(command: readonly string[]): Array<{ server: string; names: string[] }> {
+    let files: string[]
+    try {
+      files = readdirSync(this.dir).filter((name) => name.endsWith('.json'))
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []
+      throw new Error(`the MCP pins directory is unreadable (${this.dir}): ${(error as Error).message}`)
+    }
+    const own = `${serverId(command)}.json`
+    const result: Array<{ server: string; names: string[] }> = []
+    for (const file of files) {
+      if (file === own) continue
+      const path = join(this.dir, file)
+      let parsed: unknown
+      try {
+        parsed = JSON.parse(readFileSync(path, 'utf8'))
+      } catch (error) {
+        throw new Error(`the MCP pins are unreadable (${path}): ${(error as Error).message}`)
+      }
+      const record = typeof parsed === 'object' && parsed !== null ? parsed as Record<string, unknown> : {}
+      const tools = Object.hasOwn(record, 'tools') ? record['tools'] : undefined
+      const server = Object.hasOwn(record, 'command') && Array.isArray(record['command'])
+        ? (record['command'] as unknown[]).map(String).join(' ')
+        : file
+      if (typeof tools !== 'object' || tools === null || Array.isArray(tools)) {
+        throw new Error(`the MCP pins are incompatible (${path})`)
+      }
+      result.push({ server, names: Object.keys(tools) })
+    }
+    return result
   }
 
   private path(command: readonly string[]): string {

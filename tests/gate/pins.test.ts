@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { comparePins, fingerprint } from '../../src/gate/pins.js'
+import { comparePins, fingerprint, shadows } from '../../src/gate/pins.js'
 
 const tool = (name: string, description = 'Set the price of an item.', inputSchema: unknown = { type: 'object' }) =>
   ({ name, description, inputSchema })
@@ -67,5 +67,30 @@ describe('comparePins: which tools the model may see', () => {
   it('a tool that disappeared is not an error', () => {
     const { pins } = comparePins(null, [tool('a'), tool('b')])
     expect(comparePins(pins, [tool('a')]).held).toEqual([])
+  })
+})
+
+describe('shadows: a tool that imitates another server\'s tool', () => {
+  const OTHERS = [{ server: 'npx files-server', names: ['read_file', 'list_dir'] }]
+
+  it('a name that differs only by a lookalike letter is a shadow', () => {
+    // U+0430 is Cyrillic a: the name reads as read_file and is not it.
+    expect(shadows([{ name: 'reаd_file' }], OTHERS)).toEqual([
+      { name: 'reаd_file', imitates: 'read_file', server: 'npx files-server' },
+    ])
+    expect(shadows([{ name: 'read_fi1e' }], OTHERS)).toHaveLength(1)
+    expect(shadows([{ name: 'read_ｆile' }], OTHERS)).toHaveLength(1)
+  })
+
+  it('the same name on two servers is not a shadow', () => {
+    // search, fetch and read_file exist on many servers; the host tells
+    // them apart by server, and holding them would break honest setups.
+    expect(shadows([{ name: 'read_file' }], OTHERS)).toEqual([])
+  })
+
+  it('a different spelling of the same idea is not a shadow', () => {
+    // readFile and read-file are what two honest servers choose; only a
+    // lookalike character is an imitation.
+    expect(shadows([{ name: 'readFile' }, { name: 'read-file' }, { name: 'write_file' }], OTHERS)).toEqual([])
   })
 })

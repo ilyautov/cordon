@@ -7367,7 +7367,7 @@ var require_dist = __commonJS({
 });
 
 // src/cli.ts
-import { accessSync as accessSync4, constants as constants4, existsSync, mkdtempSync, readdirSync as readdirSync5, readFileSync as readFileSync6, realpathSync as realpathSync3, rmSync as rmSync5, writeFileSync as writeFileSync5 } from "node:fs";
+import { accessSync as accessSync4, constants as constants4, existsSync, mkdtempSync, readdirSync as readdirSync6, readFileSync as readFileSync6, realpathSync as realpathSync3, rmSync as rmSync5, writeFileSync as writeFileSync5 } from "node:fs";
 import { homedir as homedir6, tmpdir } from "node:os";
 import { join as join13 } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -8228,6 +8228,12 @@ function decide(call, ctx) {
   }
   const own2 = args;
   const held = ctx.heldTools?.get(call.tool);
+  if (held !== void 0 && held.why === "shadow") {
+    return {
+      kind: "deny",
+      reason: `the MCP tool ${call.tool} imitates ${held.imitates ?? "another server's tool"} with lookalike characters (${held.server}); approving the server does not release it, remove the server or ask its author to rename the tool`
+    };
+  }
   if (held !== void 0) {
     return {
       kind: "deny",
@@ -8581,6 +8587,79 @@ function stable(value) {
     return `{${entries.join(",")}}`;
   }
   return JSON.stringify(value) ?? "null";
+}
+var LOOKALIKE = /* @__PURE__ */ new Map([
+  ["\u0430", "a"],
+  ["\u0435", "e"],
+  ["\u043E", "o"],
+  ["\u0440", "p"],
+  ["\u0441", "c"],
+  ["\u0443", "y"],
+  ["\u0445", "x"],
+  ["\u0456", "i"],
+  ["\u0458", "j"],
+  ["\u0455", "s"],
+  ["\u04BB", "h"],
+  ["\u0501", "d"],
+  ["\u051B", "q"],
+  ["\u051D", "w"],
+  ["\u0410", "A"],
+  ["\u0412", "B"],
+  ["\u0415", "E"],
+  ["\u041A", "K"],
+  ["\u041C", "M"],
+  ["\u041D", "H"],
+  ["\u041E", "O"],
+  ["\u0420", "P"],
+  ["\u0421", "C"],
+  ["\u0422", "T"],
+  ["\u0425", "X"],
+  ["\u0406", "I"],
+  ["\u0408", "J"],
+  ["\u0405", "S"],
+  ["\u03B1", "a"],
+  ["\u03BF", "o"],
+  ["\u03C1", "p"],
+  ["\u03BD", "v"],
+  ["\u03B9", "i"],
+  ["\u03BA", "k"],
+  ["\u03C5", "u"],
+  ["\u0391", "A"],
+  ["\u0392", "B"],
+  ["\u0395", "E"],
+  ["\u0396", "Z"],
+  ["\u0397", "H"],
+  ["\u0399", "I"],
+  ["\u039A", "K"],
+  ["\u039C", "M"],
+  ["\u039D", "N"],
+  ["\u039F", "O"],
+  ["\u03A1", "P"],
+  ["\u03A4", "T"],
+  ["\u03A5", "Y"],
+  ["\u03A7", "X"],
+  ["0", "o"],
+  ["1", "l"],
+  ["I", "l"]
+]);
+function skeleton(name) {
+  let out = "";
+  for (const char of name.normalize("NFKC")) out += LOOKALIKE.get(char) ?? char;
+  return out;
+}
+function shadows(listed, others) {
+  const found = [];
+  for (const tool of listed) {
+    const own2 = skeleton(tool.name);
+    for (const other of others) {
+      const imitated = other.names.find((name) => name !== tool.name && skeleton(name) === own2);
+      if (imitated !== void 0) {
+        found.push({ name: tool.name, imitates: imitated, server: other.server });
+        break;
+      }
+    }
+  }
+  return found;
 }
 
 // src/notify/notifier.ts
@@ -11333,7 +11412,7 @@ function isEntry(value) {
 
 // src/session/pins.ts
 import { createHash as createHash2 } from "node:crypto";
-import { readFileSync as readFileSync3, renameSync as renameSync3, rmSync as rmSync2, writeFileSync as writeFileSync2 } from "node:fs";
+import { readdirSync as readdirSync2, readFileSync as readFileSync3, renameSync as renameSync3, rmSync as rmSync2, writeFileSync as writeFileSync2 } from "node:fs";
 import { join as join4 } from "node:path";
 function serverId(command) {
   return createHash2("sha256").update(JSON.stringify(command), "utf8").digest("hex").slice(0, 24);
@@ -11391,6 +11470,42 @@ var PinStore = class {
     rmSync2(path, { force: true });
     return true;
   }
+  /**
+   * The tool names every other server was pinned with, for the shadow check.
+   *
+   * A file that cannot be read throws, as `load` does: skipping it would
+   * leave that server's names out of the comparison, and an imitation of
+   * exactly those names would pass with nobody told.
+   */
+  others(command) {
+    let files;
+    try {
+      files = readdirSync2(this.dir).filter((name) => name.endsWith(".json"));
+    } catch (error) {
+      if (error.code === "ENOENT") return [];
+      throw new Error(`the MCP pins directory is unreadable (${this.dir}): ${error.message}`);
+    }
+    const own2 = `${serverId(command)}.json`;
+    const result = [];
+    for (const file of files) {
+      if (file === own2) continue;
+      const path = join4(this.dir, file);
+      let parsed;
+      try {
+        parsed = JSON.parse(readFileSync3(path, "utf8"));
+      } catch (error) {
+        throw new Error(`the MCP pins are unreadable (${path}): ${error.message}`);
+      }
+      const record = typeof parsed === "object" && parsed !== null ? parsed : {};
+      const tools = Object.hasOwn(record, "tools") ? record["tools"] : void 0;
+      const server2 = Object.hasOwn(record, "command") && Array.isArray(record["command"]) ? record["command"].map(String).join(" ") : file;
+      if (typeof tools !== "object" || tools === null || Array.isArray(tools)) {
+        throw new Error(`the MCP pins are incompatible (${path})`);
+      }
+      result.push({ server: server2, names: Object.keys(tools) });
+    }
+    return result;
+  }
   path(command) {
     return join4(this.dir, `${serverId(command)}.json`);
   }
@@ -11398,7 +11513,7 @@ var PinStore = class {
 
 // src/session/store.ts
 import { createHash as createHash3, randomBytes as randomBytes2 } from "node:crypto";
-import { readFileSync as readFileSync4, readdirSync as readdirSync2, renameSync as renameSync4, rmSync as rmSync3, writeFileSync as writeFileSync3 } from "node:fs";
+import { readFileSync as readFileSync4, readdirSync as readdirSync3, renameSync as renameSync4, rmSync as rmSync3, writeFileSync as writeFileSync3 } from "node:fs";
 import { join as join5 } from "node:path";
 
 // src/provenance/decode.ts
@@ -11895,7 +12010,7 @@ var SessionStore = class {
     const prefix = safeName(sessionId);
     let names2;
     try {
-      names2 = readdirSync2(dir);
+      names2 = readdirSync3(dir);
     } catch (error) {
       if (error.code === "ENOENT") return [];
       throw new Error(`the session state ${shown(sessionId)} is unreadable: ${error.message}`);
@@ -12225,18 +12340,25 @@ var Cordon = class {
     const store = new PinStore(this.cordonHome);
     const result = comparePins(store.load(command), listed);
     if (result.firstSight) store.save(command, result.pins);
+    const imitations = shadows(listed, store.others(command));
+    const shadowed = new Set(imitations.map((shadow) => shadow.name));
+    const held = [
+      ...imitations.map((shadow) => ({ name: shadow.name, why: "shadow", imitates: shadow.imitates })),
+      ...result.held.filter((tool) => !shadowed.has(tool.name))
+    ];
     const server2 = command.join(" ");
-    this.heldTools = new Map(result.held.map((tool) => [tool.name, { why: tool.why, server: server2 }]));
-    for (const tool of result.held) {
+    this.heldTools = new Map(held.map((tool) => [tool.name, { why: tool.why, server: server2, ...tool.imitates === void 0 ? {} : { imitates: tool.imitates } }]));
+    for (const tool of held) {
+      const other = imitations.find((shadow) => shadow.name === tool.name);
       this.notifier.notify({
         at: (/* @__PURE__ */ new Date()).toISOString(),
         decision: "mcp-drift",
         tool: tool.name,
-        reason: `the tool ${tool.why === "new" ? "appeared" : "changed"} after ${server2} was approved; it is hidden from the model and refused until "cordon mcp approve"`,
+        reason: other !== void 0 ? `the tool on ${server2} imitates ${other.imitates} of ${other.server} with lookalike characters; it is hidden from the model and refused, and approving the server does not release it` : `the tool ${tool.why === "new" ? "appeared" : "changed"} after ${server2} was approved; it is hidden from the model and refused until "cordon mcp approve"`,
         source: null
       });
     }
-    return result.held;
+    return held;
   }
   /** The owner's approval: the server's next start pins its tools afresh. */
   static approveServer(cordonHome2, command) {
@@ -12651,7 +12773,7 @@ function renderFooter(marks) {
 }
 
 // src/session/sweep.ts
-import { lstatSync, readdirSync as readdirSync3, rmSync as rmSync4, writeFileSync as writeFileSync4 } from "node:fs";
+import { lstatSync, readdirSync as readdirSync4, rmSync as rmSync4, writeFileSync as writeFileSync4 } from "node:fs";
 import { join as join7 } from "node:path";
 var SESSION_TTL_MS = 24 * 60 * 60 * 1e3;
 var DRAFT_TTL_MS = 60 * 60 * 1e3;
@@ -12687,7 +12809,7 @@ function sweepDir(dir, ttl, keep, now) {
   let entries;
   try {
     if (!lstatSync(dir).isDirectory()) return;
-    entries = readdirSync3(dir, { withFileTypes: true });
+    entries = readdirSync4(dir, { withFileTypes: true });
   } catch {
     return;
   }
@@ -13807,7 +13929,7 @@ function ensureUsableHome3(home) {
 }
 
 // src/audit/audit.ts
-import { readdirSync as readdirSync4, readFileSync as readFileSync5, statSync as statSync2 } from "node:fs";
+import { readdirSync as readdirSync5, readFileSync as readFileSync5, statSync as statSync2 } from "node:fs";
 import { join as join11, relative as relative2 } from "node:path";
 var CODES = {
   CA101: { severity: "high", owasp: "LLM01 Prompt Injection", title: "invisible characters in a file the agent loads as instruction" },
@@ -13871,7 +13993,7 @@ function markdownUnder(dir, depth) {
   if (depth < 0) return [];
   let names2;
   try {
-    names2 = readdirSync4(dir);
+    names2 = readdirSync5(dir);
   } catch {
     return [];
   }
@@ -14449,7 +14571,7 @@ function doctor(home = cordonHome()) {
 }
 function pinnedServers(home) {
   try {
-    return readdirSync5(join13(home, "mcp-pins")).filter((name) => name.endsWith(".json")).length;
+    return readdirSync6(join13(home, "mcp-pins")).filter((name) => name.endsWith(".json")).length;
   } catch {
     return 0;
   }

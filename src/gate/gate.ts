@@ -47,7 +47,7 @@ export interface GateContext {
    * MCP tools held back because they changed or appeared after the owner
    * approved the server. Optional: only the MCP gateway lists tools.
    */
-  heldTools?: ReadonlyMap<string, { why: 'changed' | 'new'; server: string }>
+  heldTools?: ReadonlyMap<string, { why: 'changed' | 'new' | 'shadow'; server: string; imitates?: string }>
 }
 
 /**
@@ -80,6 +80,13 @@ function decide(call: ToolCall, ctx: GateContext): Decision {
   // Before everything else: the model was never shown this tool, so a call
   // to it came from a description it read elsewhere or a name it guessed.
   const held = ctx.heldTools?.get(call.tool)
+  if (held !== undefined && held.why === 'shadow') {
+    return {
+      kind: 'deny',
+      reason: `the MCP tool ${call.tool} imitates ${held.imitates ?? 'another server\'s tool'} with lookalike characters ` +
+        `(${held.server}); approving the server does not release it, remove the server or ask its author to rename the tool`,
+    }
+  }
   if (held !== undefined) {
     return {
       kind: 'deny',

@@ -12,8 +12,13 @@ export type Pins = Record<string, string>
 
 export interface HeldTool {
   name: string
-  /** `changed`: the approved tool now reads differently. `new`: it was not there when approved. */
-  why: 'changed' | 'new'
+  /**
+   * `changed`: the approved tool now reads differently. `new`: it was not
+   * there when approved. `shadow`: its name imitates another server's tool.
+   */
+  why: 'changed' | 'new' | 'shadow'
+  /** For a shadow: the name it imitates. */
+  imitates?: string
 }
 
 export interface PinComparison {
@@ -79,4 +84,57 @@ function stable(value: unknown): string {
     return `{${entries.join(',')}}`
   }
   return JSON.stringify(value) ?? 'null'
+}
+
+/**
+ * Letters that read as Latin ones, mapped to the Latin letter they imitate,
+ * plus the digits and the capital that pass for l and o. Not a full
+ * confusables table: the Cyrillic and Greek lookalikes are what the
+ * mixed-script attacks are made of, and a name only has to fool a glance.
+ */
+const LOOKALIKE: ReadonlyMap<string, string> = new Map([
+  ['\u0430', 'a'], ['\u0435', 'e'], ['\u043e', 'o'], ['\u0440', 'p'], ['\u0441', 'c'], ['\u0443', 'y'], ['\u0445', 'x'], ['\u0456', 'i'], ['\u0458', 'j'], ['\u0455', 's'], ['\u04bb', 'h'], ['\u0501', 'd'], ['\u051b', 'q'], ['\u051d', 'w'], ['\u0410', 'A'], ['\u0412', 'B'], ['\u0415', 'E'], ['\u041a', 'K'], ['\u041c', 'M'], ['\u041d', 'H'], ['\u041e', 'O'], ['\u0420', 'P'], ['\u0421', 'C'], ['\u0422', 'T'], ['\u0425', 'X'], ['\u0406', 'I'], ['\u0408', 'J'], ['\u0405', 'S'], ['\u03b1', 'a'], ['\u03bf', 'o'], ['\u03c1', 'p'], ['\u03bd', 'v'], ['\u03b9', 'i'], ['\u03ba', 'k'], ['\u03c5', 'u'], ['\u0391', 'A'], ['\u0392', 'B'], ['\u0395', 'E'], ['\u0396', 'Z'], ['\u0397', 'H'], ['\u0399', 'I'], ['\u039a', 'K'], ['\u039c', 'M'], ['\u039d', 'N'], ['\u039f', 'O'], ['\u03a1', 'P'], ['\u03a4', 'T'], ['\u03a5', 'Y'], ['\u03a7', 'X'],
+  ['0', 'o'], ['1', 'l'], ['I', 'l'],
+])
+
+/**
+ * A tool name as it reads at a glance. Case and separators are kept: two
+ * honest servers choose read_file and readFile, and only a lookalike
+ * character is an imitation.
+ */
+export function skeleton(name: string): string {
+  let out = ''
+  for (const char of name.normalize('NFKC')) out += LOOKALIKE.get(char) ?? char
+  return out
+}
+
+export interface Shadow {
+  name: string
+  imitates: string
+  server: string
+}
+
+/**
+ * Tools whose name reads as another server's tool and is not it: `re\u0430d_file`
+ * next to a pinned `read_file`. A host that routes by name, or a model that
+ * picks by name, calls the imitation. The same name on two servers is not a
+ * shadow: search and read_file exist on many servers, and holding them would
+ * break honest setups.
+ */
+export function shadows(
+  listed: readonly ListedTool[],
+  others: ReadonlyArray<{ server: string; names: readonly string[] }>,
+): Shadow[] {
+  const found: Shadow[] = []
+  for (const tool of listed) {
+    const own = skeleton(tool.name)
+    for (const other of others) {
+      const imitated = other.names.find((name) => name !== tool.name && skeleton(name) === own)
+      if (imitated !== undefined) {
+        found.push({ name: tool.name, imitates: imitated, server: other.server })
+        break
+      }
+    }
+  }
+  return found
 }

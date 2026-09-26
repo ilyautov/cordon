@@ -1,7 +1,7 @@
 import { humanSeesRendered, type Certificate, type ExposureMark, type Decision, type EffectClass, type Source, type ToolCall } from './core/types.js'
 import { gate as decide } from './gate/gate.js'
 import { memoryTarget } from './gate/memory.js'
-import { comparePins, type HeldTool, type ListedTool } from './gate/pins.js'
+import { comparePins, shadows, type HeldTool, type ListedTool } from './gate/pins.js'
 import { FileNotifier, SILENT, type Notifier } from './notify/notifier.js'
 import type { Policy } from './policy/defaults.js'
 import { names } from './provenance/names.js'
@@ -82,7 +82,7 @@ export class Cordon {
    * MCP tools held back in this process. Not persisted: the pins on disk are
    * the state, and every start of the gateway compares against them afresh.
    */
-  private heldTools = new Map<string, { why: 'changed' | 'new'; server: string }>()
+  private heldTools = new Map<string, { why: HeldTool['why']; server: string; imitates?: string }>()
 
   /** The state key on disk. It comes from the harness, that is, from outside. */
   readonly sessionId: string
@@ -245,19 +245,34 @@ export class Cordon {
     const result = comparePins(store.load(command), listed)
     if (result.firstSight) store.save(command, result.pins)
 
+    // A shadow is held whatever the pins say, on every start: approving the
+    // server does not make its name a different name. It is checked against
+    // the other servers' pins, which is the only place one gateway can see
+    // the others from.
+    const imitations = shadows(listed, store.others(command))
+    const shadowed = new Set(imitations.map((shadow) => shadow.name))
+    const held: HeldTool[] = [
+      ...imitations.map((shadow) => ({ name: shadow.name, why: 'shadow' as const, imitates: shadow.imitates })),
+      ...result.held.filter((tool) => !shadowed.has(tool.name)),
+    ]
+
     const server = command.join(' ')
-    this.heldTools = new Map(result.held.map((tool) => [tool.name, { why: tool.why, server }]))
-    for (const tool of result.held) {
+    this.heldTools = new Map(held.map((tool) => [tool.name, { why: tool.why, server, ...(tool.imitates === undefined ? {} : { imitates: tool.imitates }) }]))
+    for (const tool of held) {
+      const other = imitations.find((shadow) => shadow.name === tool.name)
       this.notifier.notify({
         at: new Date().toISOString(),
         decision: 'mcp-drift',
         tool: tool.name,
-        reason: `the tool ${tool.why === 'new' ? 'appeared' : 'changed'} after ${server} was approved; ` +
-          'it is hidden from the model and refused until "cordon mcp approve"',
+        reason: other !== undefined
+          ? `the tool on ${server} imitates ${other.imitates} of ${other.server} with lookalike characters; ` +
+            'it is hidden from the model and refused, and approving the server does not release it'
+          : `the tool ${tool.why === 'new' ? 'appeared' : 'changed'} after ${server} was approved; ` +
+            'it is hidden from the model and refused until "cordon mcp approve"',
         source: null,
       })
     }
-    return result.held
+    return held
   }
 
   /** The owner's approval: the server's next start pins its tools afresh. */

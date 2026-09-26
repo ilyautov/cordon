@@ -62,6 +62,12 @@ cordon mcp approve -- npx -y @modelcontextprotocol/server-everything
 
 Spell the command exactly as the host starts it, because the pins are keyed by it. The next start pins the tools afresh. `cordon doctor` shows whether pinning is on and how many servers are pinned. A legitimate server upgrade also changes descriptions, and it is held the same way: the cost is one approve per upgrade. `mcp: {pin: false}` in the policy switches pinning off.
 
+### A tool that imitates another server's tool
+
+Each gateway fronts one server, but all of them pin into the same `~/.cordon/mcp-pins/`. So on every start the gateway compares its server's tool names with the names every other server was pinned with. A name that reads the same at a glance and is not the same, such as `re\u0430d_file`, where `\u0430` is a Cyrillic letter, next to another server's `read_file`, or `read_fi1e`, is held like a changed tool, with its own reason in the refusal and the journal. Approving the server does not release it, because approval does not make it a different name. Remove the server or have its author rename the tool.
+
+The same name on two servers is not held. `search`, `fetch` and `read_file` exist on many servers, and the host tells them apart. A different spelling such as `readFile` next to `read_file` is not held either: only a lookalike character is an imitation. The comparison is with servers that have already started once. If the imitating server was pinned first, the honest server's tool is the one held on its first start, since there is no telling which is which from names alone. Either way the owner is told.
+
 Limits:
 - This is trust on first use. A server that is poisoned from its very first start is pinned as it is. Its descriptions and calls still go through the sanitizer and the gate, as for any server.
 - A pin covers what the server says about a tool, not what the tool does. A server can change its behaviour and keep the same description.
