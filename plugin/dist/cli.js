@@ -8168,20 +8168,22 @@ function vouched(observations, voided, said, lookups, turn) {
   const out = /* @__PURE__ */ new Set();
   if (voided) return out;
   const current = observations.filter((o) => o.turn === turn && Object.hasOwn(lookups, o.tool));
+  const consumersOf = (o) => lookups[o.tool].values[o.field] ?? [];
   const seen = /* @__PURE__ */ new Map();
   const conflicted = /* @__PURE__ */ new Set();
   for (const o of current) {
-    const id = JSON.stringify([o.tool, o.field, o.key]);
     const set = JSON.stringify(o.values);
-    const before = seen.get(id);
-    if (before === void 0) seen.set(id, set);
-    else if (before !== set) conflicted.add(id);
+    for (const consumer of consumersOf(o)) {
+      const id = JSON.stringify([consumer, o.key]);
+      const before = seen.get(id);
+      if (before === void 0) seen.set(id, set);
+      else if (before !== set) conflicted.add(id);
+    }
   }
   for (const o of current) {
-    if (conflicted.has(JSON.stringify([o.tool, o.field, o.key]))) continue;
     if (o.query === "" || !said.has(o.key) || !said.has(o.query)) continue;
-    const consumers = lookups[o.tool].values[o.field] ?? [];
-    for (const consumer of consumers) {
+    for (const consumer of consumersOf(o)) {
+      if (conflicted.has(JSON.stringify([consumer, o.key]))) continue;
       for (const value of o.values) out.add(vouchKey(consumer, value));
     }
   }

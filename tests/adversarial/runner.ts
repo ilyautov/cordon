@@ -120,6 +120,11 @@ export interface AttackSpec {
   expect: 'success' | 'stopped' | Record<string, 'success' | 'stopped'>
   /** Control rows measure fidelity, not security, and stay out of the ASR. */
   control?: boolean
+  /**
+   * Policy the scenario needs on top of the profile: more tools with their
+   * effect classes, and top-level YAML lines such as `lookups:`.
+   */
+  policy?: { tools?: Record<string, string[]>; extra?: string[] }
   /** Prepares session state on disk before the events, e.g. a full store. */
   seed?: (home: string, session: string) => void
   /**
@@ -171,7 +176,7 @@ export interface Row {
   gateIfSeen: string
 }
 
-function writePolicy(home: string, profile: Profile): void {
+function writePolicy(home: string, profile: Profile, extra: AttackSpec['policy'] = {}): void {
   writeFileSync(
     join(home, 'policy.yaml'),
     [
@@ -184,6 +189,8 @@ function writePolicy(home: string, profile: Profile): void {
       'tools:',
       '  publish_note: [create]',
       '  get_file_contents: [read]',
+      ...Object.entries(extra.tools ?? {}).map(([tool, effects]) => `  ${tool}: [${effects.join(', ')}]`),
+      ...(extra.extra ?? []),
       // Absent means the default, and the default is on: only the comparison
       // profile spells the valve out.
       ...(profile.exposure === false ? ['exposure: false'] : []),
@@ -245,7 +252,7 @@ function expectedOn(spec: AttackSpec, profile: string): 'success' | 'stopped' {
 
 export function runAttack(spec: AttackSpec, profileName: string): Row {
   const home = mkdtempSync(join(tmpdir(), 'cordon-adv-'))
-  writePolicy(home, PROFILES[profileName]!)
+  writePolicy(home, PROFILES[profileName]!, spec.policy)
   const session = 'adv'
   const send = (event: object): Record<string, any> =>
     JSON.parse(runHook(JSON.stringify(event), home)) as Record<string, any>

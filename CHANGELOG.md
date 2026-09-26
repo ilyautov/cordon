@@ -4,6 +4,12 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versions follo
 
 ## [Unreleased]
 
+Lookup conflicts are counted per argument, across lookups. An honest address book and a planted directory entry that bind one name to different addresses in the same argument used to vouch each for its own. They now cancel out. An argument that only one of them fills is not in dispute. Codex found it in the design council, and the battery pins it as `lookup/second-lookup-disagrees`.
+
+The adversarial battery gains a `lookup` category: five attacks on the bindings, and an honest control. The working profile now reads 55% → 10% over 40 attacks. The two new rows that get through are the documented residuals. One is a record that is alone under the user's name and was written by the attacker. The other is a bound target whose other fields the page talked the agent into changing, for example the right payment with the wrong amount.
+
+The AgentDojo oracle writes one line per user task: whether it was completed, the refusals, the rewrites, the calls that ran against the calls expected, and its utility under each attack. `blocked-honest` listed any refused task, even one completed in the end, so it could not serve as the list of losses. Utility under attack is reported as well.
+
 A policy can declare lookups: tools whose records bind a name to a value, such as a contact's name to their address or a file's name to its id. After an untrusted read, "create an event with Sarah Baker" was refused, because the address the contact search returned was a destination the user never typed. A declared lookup's value now counts as named, but only in the arguments the policy lists for it. Several conditions must all hold. The record's name must be a whole name the user said in their last message. The lookup must have been asked with that message's words. No record seen in the same turn may bind the name to anything else, or to nothing. Every lookup result of the turn must have been readable whole. A value nested inside an object in the call does not count. AgentDojo's workspace suite measured the need. The address book, a meeting's participants and a file's id cost four tasks. An extra participant injected into the meeting is still refused.
 
 A run of two to four capitalized words is a name, and so is a quoted phrase of up to five plain words with a capitalized one among them. "Le Marais Boutique" in quotes was not a name before, and the travel task that books it was refused. A longer run is not a name, and neither is any slice of it.

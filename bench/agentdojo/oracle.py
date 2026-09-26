@@ -98,7 +98,11 @@ def episode(suite, user_task, injection_task, attack, defense, home, approve=Fal
             security = injection_task.security(output, pre, env)
     asked = executor.stats['asked'] if defense == 'cordon' else 0
     leaked = trusted_leak(messages, injection_task, attack, user_task) if injection_task is not None else False
-    return utility, security, blocked, asked, leaked
+    detail = {
+        'rewritten': executor.stats['rewritten'] if defense == 'cordon' else 0,
+        'ran': [c.function for c in executed],
+    }
+    return utility, security, blocked, asked, leaked, detail
 
 
 def trusted_leak(messages, injection_task, attack, user_task):
@@ -152,21 +156,39 @@ def main() -> int:
             home = HERE / 'work' / 'homes' / f'oracle-{defense}-{args.variant}-{args.order}-{name}'
             bench.write_policy(home, args.variant, name)
             utilities, securities, reasons, asks, leaks, asked_attacks = [], [], {}, [], 0, 0
+            under_attack = []
+            # One line per user task, kept whatever the outcome: a refusal
+            # that did not cost the task, and a task lost by a rewrite with
+            # no refusal at all, both have to be visible to count the losses.
+            tasks = {}
             for user_task in suite.user_tasks.values():
-                utility, _, blocked, asked, _ = episode(suite, user_task, None, attack, defense, home, approve=True)
+                utility, _, blocked, asked, _, detail = episode(suite, user_task, None, attack, defense, home, approve=True)
                 utilities.append(utility)
                 asks.append(asked)
                 if blocked:
                     reasons[user_task.ID] = blocked
+                attacked = []
                 for injection_task in suite.injection_tasks.values():
-                    _, security, _, attack_asks, leaked = episode(suite, user_task, injection_task, attack, defense,
-                                                                  home, approve=args.approve_attacks, order=args.order)
+                    kept, security, _, attack_asks, leaked, _ = episode(suite, user_task, injection_task, attack, defense,
+                                                                        home, approve=args.approve_attacks, order=args.order)
                     securities.append(security)
+                    under_attack.append(kept)
+                    attacked.append(kept)
                     asked_attacks += 1 if attack_asks else 0
                     leaks += leaked
+                tasks[user_task.ID] = {
+                    'utility': bool(utility),
+                    'refusals': blocked,
+                    'rewritten': detail['rewritten'],
+                    'questions': asked,
+                    'ran': detail['ran'],
+                    'expected': [c.function for c in user_task.ground_truth(suite.load_and_inject_default_environment({}))],
+                    'utility_under_attack': [sum(attacked), len(attacked)],
+                }
             row = {
                 'utility': [round(sum(utilities) / len(utilities), 3), sum(utilities), len(utilities)],
                 'attack_success': [round(sum(securities) / len(securities), 3), sum(securities), len(securities)],
+                'utility_under_attack': [round(sum(under_attack) / len(under_attack), 3), sum(under_attack), len(under_attack)],
                 'asks_per_task': round(sum(asks) / len(asks), 2),
                 'trusted_results_with_injection': leaks,
                 'attack_cases_with_a_question': asked_attacks,
@@ -174,6 +196,7 @@ def main() -> int:
             report[f'{defense}/{name}'] = row
             if defense == 'cordon':
                 report[f'blocked-honest/{name}'] = reasons
+            report[f'tasks/{defense}/{name}'] = tasks
             print(json.dumps({f'{defense}/{name}': row}), flush=True)
     Path(args.out).parent.mkdir(parents=True, exist_ok=True)
     Path(args.out).write_text(json.dumps(report, indent=2))

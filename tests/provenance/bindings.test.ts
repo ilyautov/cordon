@@ -223,6 +223,19 @@ describe('which bound values vouch for a call', () => {
     expect(vouched([obs({}), obs({ values: [] })], false, said, lookups, 1).size).toBe(0)
   })
 
+  it('refuses a name two lookups bind to different values in one argument', () => {
+    // Codex, design council: conflicts were counted per lookup tool, so an
+    // honest address book and a planted directory record each vouched for
+    // their own address in the same argument.
+    const directory: Lookup = { query: 'name', key: 'name', values: { mail: ['send_email.recipients'] } }
+    const both = [obs({}), obs({ tool: 'directory', field: 'mail', values: ['mark.black@evil.example'] })]
+    const found = vouched(both, false, said, { contacts, calendar, directory }, 1)
+    expect(found.has(vouchKey('send_email.recipients', 'sarah.baker@gmail.com'))).toBe(false)
+    expect(found.has(vouchKey('send_email.recipients', 'mark.black@evil.example'))).toBe(false)
+    // The argument only the address book fills is not in dispute.
+    expect(found.has(vouchKey('create_calendar_event.participants', 'sarah.baker@gmail.com'))).toBe(true)
+  })
+
   it('does not count the same record seen twice as a conflict', () => {
     expect(vouched([obs({}), obs({})], false, said, lookups, 1).size).toBe(2)
   })

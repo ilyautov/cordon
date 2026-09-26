@@ -195,23 +195,28 @@ export function vouched(
   const out = new Set<string>()
   if (voided) return out
   const current = observations.filter((o) => o.turn === turn && Object.hasOwn(lookups, o.tool))
-  // A name bound to two different value sets by the same tool and field is
-  // ambiguous whoever asked: the conflict counts even from a lookup the
-  // attacker steered, since that is where a second record would come from.
+  const consumersOf = (o: Observation): readonly string[] => lookups[o.tool]!.values[o.field] ?? []
+  // A name bound to two different value sets for the same argument is
+  // ambiguous whoever asked and whichever lookup said it: the conflict counts
+  // even from a lookup the attacker steered, since that is where a second
+  // record would come from, and across lookups, since an honest address book
+  // and a planted directory entry fill the same argument (Codex, design
+  // council). An argument no other lookup fills is not in dispute.
   const seen = new Map<string, string>()
   const conflicted = new Set<string>()
   for (const o of current) {
-    const id = JSON.stringify([o.tool, o.field, o.key])
     const set = JSON.stringify(o.values)
-    const before = seen.get(id)
-    if (before === undefined) seen.set(id, set)
-    else if (before !== set) conflicted.add(id)
+    for (const consumer of consumersOf(o)) {
+      const id = JSON.stringify([consumer, o.key])
+      const before = seen.get(id)
+      if (before === undefined) seen.set(id, set)
+      else if (before !== set) conflicted.add(id)
+    }
   }
   for (const o of current) {
-    if (conflicted.has(JSON.stringify([o.tool, o.field, o.key]))) continue
     if (o.query === '' || !said.has(o.key) || !said.has(o.query)) continue
-    const consumers = lookups[o.tool]!.values[o.field] ?? []
-    for (const consumer of consumers) {
+    for (const consumer of consumersOf(o)) {
+      if (conflicted.has(JSON.stringify([consumer, o.key]))) continue
       for (const value of o.values) out.add(vouchKey(consumer, value))
     }
   }
