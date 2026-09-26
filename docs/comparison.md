@@ -29,7 +29,7 @@ Cordon decides without reading for meaning. It strips what a human cannot see, r
 - **Discovery and inventory across a fleet, dashboards, SSO.** Enterprise platforms (Zenity, Noma, Pillar, HiddenLayer, Prompt Security at SentinelOne) sell this. Cordon writes JSON Lines for the log shipper you already run ([enterprise.md](enterprise.md)) and has no server of its own.
 - **Run MCP servers in a sandbox to see what they do.** Cisco's scanner does this at audit time. A pin records what a server says about a tool, not what the tool does.
 - **Secrets and PII in arguments.** Lasso and Presidio-based gateways mask these. Cordon's audit flags a literal secret in configuration, but nothing at run time scans arguments for credentials.
-- **Public benchmark numbers.** CaMeL, FIDES and LlamaFirewall report AgentDojo results. Cordon's battery ([adversarial-report.md](adversarial-report.md)) measures its own decision layer against scripted attacks. That checks the mechanism, and it is not comparable with AgentDojo. An AgentDojo run is open work.
+- **Public benchmark numbers.** CaMeL, FIDES and LlamaFirewall report AgentDojo results, and so does Cordon now ([agentdojo.md](agentdojo.md)): no attack through on any suite with an agent that obeys every injection, utility of 100% in interactive mode and 14–70% on a strict autonomous policy. The numbers are not one-to-one comparable with the others', because the attacking agent is a script and the live model is Claude Haiku 4.5, which resists this attack on its own; the page says why.
 
 ## Where to read more
 

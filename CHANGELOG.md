@@ -24,6 +24,8 @@ The journal at `notify.file` now rotates. At 50 MB it is renamed to `<file>.1`, 
 
 The source label now has one copy, in `src/core/argument-keys.ts`, instead of four identical ones in the adapters. It decides which declared trusted source a result counts as, which makes it a security rule, and the adapters are supposed to hold none. It still reads only top-level arguments, on purpose: a label found in a nested field would let a call carry a trusted link beside the one it actually fetches.
 
+Cordon has AgentDojo numbers, with the methodology and the losses in [docs/agentdojo.md](docs/agentdojo.md) and the scripts in `bench/agentdojo/`. An agent that obeys every injection got none through on any of the four suites, against 39–100% without Cordon. What it costs depends on the policy. In interactive mode the scripted agent completes every task but one of 97 and asks the human 0.3–1.6 questions per task; there, no attack succeeded without a human approving the call that carried it. On a strict autonomous policy it completes 14% of Slack tasks and 63–70% elsewhere. Claude Haiku 4.5 live: banking utility 56% with and without Cordon in interactive mode, Slack 90% against 95%. The run also fixed the benchmark's trace for defences that refuse calls, and it forced the four changes above.
+
 ## [0.7.0] - 2026-09-26
 
 The release for teams: `cordon audit` before deployment, MCP tool pinning at run time, `cordon init` profiles, `cordon log`, a managed-settings deployment guide, and npm provenance on the published package. Refusals on Claude Code now also leave with exit code 2.

@@ -129,7 +129,7 @@ No profile grants `delete`, `export` or `financial`, because those are irreversi
 
 **`notify.file`**: path to the event journal. It must be absolute or start with `~/`. A relative path stops the load, because it would resolve against whatever project the agent runs in. See the section on the journal.
 
-**`exposure`**: `true` or `false`, default `true`. While it is on, a session that read untrusted content is marked, and a call acting beyond reading — anything from the irreversible classes, plus `create` — escalates while the mark stands, unless the user named the call's destination (a link, a path, an identifier) in their own message. This is the rule that answers the attacks whose arguments share no byte with what was read: a paraphrase, an encoding, a clean shell command. The measured difference on the adversarial battery's working profile is a drop from 68% to 6% attack success rate over 33 attacks; see [adversarial-report.md](adversarial-report.md). The price is friction: in autonomous mode, after any untrusted read a consequential call is refused until the user's next message names its destination. `false` restores the previous behaviour and weakens no other axis, and `cordon doctor` names the off state out loud with its price — from the outside it is indistinguishable from a session that simply read nothing untrusted.
+**`exposure`**: `true` or `false`, default `true`. While it is on, a session that read untrusted content is marked, and a call acting beyond reading — anything from the irreversible classes, plus `create` — escalates while the mark stands, unless the user named the call's destination in their own message: a link, a path, an identifier, or a name (a capitalized word inside a sentence, such as Alice, or a single quoted word, such as 'general'). This is the rule that answers the attacks whose arguments share no byte with what was read: a paraphrase, an encoding, a clean shell command. The measured difference on the adversarial battery's working profile is a drop from 56% attack success (18 of 32) without the rule to 6% (2 of 34) with it; see [adversarial-report.md](adversarial-report.md). The price is friction: in autonomous mode, after any untrusted read a consequential call is refused until the user's next message names its destination. `false` restores the previous behaviour and weakens no other axis, and `cordon doctor` names the off state out loud with its price — from the outside it is indistinguishable from a session that simply read nothing untrusted.
 
 **`memory.files`** and **`memory.tools`**: memory the agent reloads in later sessions, beyond what Cordon knows by name. `files` are base names compared case-folded (`CLAUDE.md`, `CLAUDE.local.md`, `AGENTS.md`, `GEMINI.md`, `.cursorrules`, `.windsurfrules` and `copilot-instructions.md` are known already); `tools` are tool names as the harness calls them (`save_memory` is known already). A Mem0 store behind a tool is declared here. See the section on memory below.
 
@@ -182,6 +182,23 @@ The `toolsReturn` line here is not decoration. The seller sees a review rendered
 The profile matches the task "answer reviews": read, and write an answer. Changing a price is `update` and `financial`; neither is in the profile, so an instruction hidden in a review ends at the control axis regardless of how convincing it is.
 
 The `wb_update_price` tool is declared even though it is not meant to be used. The declaration exists exactly for that: an undeclared tool would also be blocked, but with the wording "not declared in the policy", whereas a declared one gives the journal an honest reason, "outside the certificate: update, financial".
+
+### Autonomous agents: declare what is a directory
+
+With `mode: autonomous` and nothing else declared, every tool result is untrusted, and after the first read the agent can act only on destinations the user named. On AgentDojo that left an obedient scripted agent 3 of 21 Slack tasks ([agentdojo.md](agentdojo.md)). Most of the refusals were not about injected text at all: the channel list came from `get_channels`, and `External_0` read from it counted as a destination the page chose.
+
+Some tools return the system's own records rather than text somebody wrote: a channel list, a user directory, a balance, a price list, an address book. Declare those trusted, by tool name:
+
+```yaml
+trustedSources:
+  - mcp__slack__get_channels
+  - mcp__slack__get_users_in_channel
+  - mcp__crm__search_contacts
+```
+
+Be strict about what goes on the list. A tool qualifies when every field it returns is written by your system, not by a person outside it. Message bodies, emails, documents, reviews, calendar descriptions and web pages never qualify, even from your own systems: that is where injections live. A trusted result sets no exposure mark and taints nothing, so a wrong entry here is a hole, not friction. On AgentDojo this declaration raised the scripted agent from 3 to 7 Slack tasks, and none of the trusted results carried an injection.
+
+If the agent can wait for a human, `mode: interactive` is the larger lever: the same refusals become questions. On the same benchmark, the scripted agent completed every Slack task with 1.6 questions per task on average.
 
 ## What a tool returns: source or rendered
 

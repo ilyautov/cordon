@@ -15,6 +15,7 @@ This page tracks what Cordon took from the tools it is compared with in [compari
 | Fleet deployment that a repository cannot switch off | enterprise platforms | Claude Code managed settings with `allowManagedHooksOnly` ([enterprise.md](enterprise.md)) | run on one managed macOS machine with Claude Code 2.1.282 against a project that tries every switch-off ([enterprise.md](enterprise.md#what-was-verified)) |
 | A signed provenance for the published package | npm ecosystem practice | `release.yml` publishes with `--provenance` | the release workflow; first run at the 0.7.0 tag |
 | A decision that answers to what was read, not only to what matched | FIDES, CaMeL (information-flow control) | the exposure rule and the memory ledger | `tests/adversarial/asr.test.ts` (the battery fails on a regression) |
+| A public benchmark run with its methodology | CaMeL, FIDES, LlamaFirewall | four AgentDojo suites, a scripted worst-case agent and Claude Haiku 4.5, three policies | [agentdojo.md](agentdojo.md), scripts in `bench/agentdojo/` |
 | One decision on every transport | the design's own claim, unmeasured before | nine scenarios through Claude Code, Gemini CLI, the MCP gateway and LangChain, compared down to the refusal's reason | `tests/adversarial/transports.test.ts` |
 | The model told when a call was changed under it | FIDES-style labels on results | quarantine rewrites carry `additionalContext` to the model | `tests/adapters/claude-code/protocol.test.ts`, [live-run.md](live-run.md) |
 
@@ -28,7 +29,8 @@ This page tracks what Cordon took from the tools it is compared with in [compari
 
 ## Open
 
-- **AgentDojo numbers.** The battery checks Cordon's own mechanism; it is not comparable with published AgentDojo results. A run needs model calls and a budget, and is the most useful missing number.
+- **AgentDojo on a vulnerable model, and under adaptive attack.** [agentdojo.md](agentdojo.md) has the scripted worst case and Claude Haiku 4.5. A model that falls for `important_instructions` and attacks beyond it are not measured.
+- **Autonomous utility on Slack-like work.** A strict autonomous policy completes 14% of AgentDojo's Slack tasks, 33% with directory tools declared trusted. What is left is links fetched from messages and destinations read from data, which is the attack's own shape.
 - **Secrets in arguments at run time.** `audit` flags a literal secret in configuration; nothing scans call arguments for credentials. The exposure rule escalates egress after an untrusted read, which covers the injected case, not the careless one.
 - **Cross-server tool shadowing.** One gateway fronts one server, and a description on server A that talks about a tool on server B is visible text. Pinning makes it stable; nothing judges it.
 - **Remote MCP servers.** The gateway is stdio only; `audit` reports a remote server as CA204.
