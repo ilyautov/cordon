@@ -110,6 +110,13 @@ describe('shadows: a tool that imitates another server\'s tool', () => {
     expect(shadows([{ name: 'l\u0269st_items' }], others)).toHaveLength(1)
   })
 
+  it('a lookalike of a lookalike is caught', () => {
+    // Greek and Cyrillic capital I read as I, and I reads as l. Found by an
+    // outside review: read_fi<Greek Iota>e mapped to read_fiIe and stopped.
+    expect(shadows([{ name: 'read_fi\u0399e' }], OTHERS)).toHaveLength(1)
+    expect(shadows([{ name: 'read_fi\u0406e' }], OTHERS)).toHaveLength(1)
+  })
+
   it('the plain name is never the imitation, whichever server was pinned first', () => {
     // An imitating server started first pins re\u0430d_file. The honest server
     // starting later must not lose its read_file for it: the imitation is

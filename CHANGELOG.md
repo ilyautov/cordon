@@ -36,6 +36,8 @@ A refusal no longer repeats a source label as it came. The label is a link or a 
 
 An outside review of the credential rule and of MCP shadowing found five problems, fixed here. A credential the user pasted is exempt even when it has no digit in it; before, the exemption rode on atoms, which need one, and missed a share of real tokens. AWS's documentation key ending in `EXAMPLE` no longer counts as a credential. In a tool name, characters that render as nothing no longer hide an imitation, and script g, Armenian and Cherokee lookalikes are in the table. And the plain name of a pair is never the one held: an imitating server pinned first used to take the honest server's `read_file` away for good.
 
+A second outside review, by Codex, found four more. The credential rule now covers every call but a local write: a tool declared as a `read`, such as an MCP search, sends its query to the server. Property names are checked along with values. A private key is recognized by its header together with the first line of the key, so a grep for the header is no longer a leaking key, and a key the user pasted is exempt, that key alone. And in tool names a lookalike of a lookalike is caught: Greek capital Iota read as I and stopped there, while I reads as l.
+
 ## [0.7.0] - 2026-09-26
 
 The release for teams: `cordon audit` before deployment, MCP tool pinning at run time, `cordon init` profiles, `cordon log`, a managed-settings deployment guide, and npm provenance on the published package. Refusals on Claude Code now also leave with exit code 2.

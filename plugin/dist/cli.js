@@ -7694,7 +7694,10 @@ var SHAPES = [
   { kind: "Google API key", pattern: /\bAIza[0-9A-Za-z_-]{35}\b/u },
   { kind: "GitLab token", pattern: /\bglpat-[A-Za-z0-9_-]{20,}/u },
   { kind: "Stripe secret key", pattern: /\b(?:sk|rk)_live_[A-Za-z0-9]{24,}/u },
-  { kind: "private key", pattern: /-----BEGIN (?:[A-Z]+ )?PRIVATE KEY-----/u }
+  // The header with the first body line: the header alone names a format and
+  // turns up in a grep for key files; the body line is also what tells one
+  // key from another, for the exemption.
+  { kind: "private key", pattern: /-----BEGIN (?:[A-Z]+ )?PRIVATE KEY-----\r?\n[A-Za-z0-9+/=]{40,}/u }
 ];
 var DOCUMENTED = /^AKIA[0-9A-Z]{9}EXAMPLE$/u;
 function* found(text) {
@@ -7716,11 +7719,7 @@ function secretKinds(text, exempt = /* @__PURE__ */ new Set()) {
   return kinds;
 }
 function pastedSecrets(text) {
-  const values = [];
-  for (const { kind, value } of found(text)) {
-    if (kind !== "private key") values.push(value.toLowerCase());
-  }
-  return values;
+  return [...found(text)].map(({ value }) => value.toLowerCase());
 }
 
 // src/gate/memory.ts
@@ -8444,17 +8443,18 @@ function namesADestination(parts, userNames) {
   const names2 = new Set(userNames);
   return parts.some(({ value }) => typeof value === "string" && names2.has(value.trim().normalize("NFKC").toLowerCase()));
 }
-var LEAVING = /* @__PURE__ */ new Set(["network-egress", "export", "exec"]);
+var LOCAL_WRITES = /* @__PURE__ */ new Set(["create", "update", "delete"]);
 function credentialLeaving(effects, parts, userAtoms) {
-  if (!effects.some((effect) => LEAVING.has(effect))) return null;
+  if (effects.every((effect) => LOCAL_WRITES.has(effect))) return null;
   const exempt = new Set(userAtoms);
   const kinds = [];
-  for (const { value } of parts) {
-    if (typeof value !== "string") continue;
-    for (const kind of secretKinds(value, exempt)) if (!kinds.includes(kind)) kinds.push(kind);
+  for (const { key, value } of parts) {
+    for (const text of typeof value === "string" ? [key, value] : [key]) {
+      for (const kind of secretKinds(text, exempt)) if (!kinds.includes(kind)) kinds.push(kind);
+    }
   }
   if (kinds.length === 0) return null;
-  return `an argument carries what looks like a credential (${kinds.join(", ")}), and the call sends data off the machine`;
+  return `an argument carries what looks like a credential (${kinds.join(", ")}), and the call hands it to something outside the machine`;
 }
 var IRREVERSIBLE = /* @__PURE__ */ new Set([
   "network-egress",
@@ -8729,7 +8729,10 @@ var LOOKALIKE = /* @__PURE__ */ new Map([
 var IGNORABLE = /[\p{Cf}\p{Default_Ignorable_Code_Point}]/gu;
 function skeleton(name) {
   let out = "";
-  for (const char of name.normalize("NFKC").replace(IGNORABLE, "")) out += LOOKALIKE.get(char) ?? char;
+  for (const char of name.normalize("NFKC").replace(IGNORABLE, "")) {
+    const once = LOOKALIKE.get(char) ?? char;
+    out += LOOKALIKE.get(once) ?? once;
+  }
   return out;
 }
 function plain(name) {

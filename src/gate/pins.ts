@@ -116,7 +116,11 @@ const IGNORABLE = /[\p{Cf}\p{Default_Ignorable_Code_Point}]/gu
  */
 export function skeleton(name: string): string {
   let out = ''
-  for (const char of name.normalize('NFKC').replace(IGNORABLE, '')) out += LOOKALIKE.get(char) ?? char
+  for (const char of name.normalize('NFKC').replace(IGNORABLE, '')) {
+    // Twice: Greek and Cyrillic capital I map to I, and I itself reads as l.
+    const once = LOOKALIKE.get(char) ?? char
+    out += LOOKALIKE.get(once) ?? once
+  }
   return out
 }
 

@@ -401,12 +401,15 @@ describe('Cordon: a credential the user pasted', () => {
     expect(decision.kind).toBe('allow')
   })
 
-  it('a private key header the user pasted does not exempt every private key', () => {
-    // The shape matches only the BEGIN line, which is the same for every key:
-    // remembering it would let any other key leave.
+  it('a private key the user pasted passes, and a different one does not', () => {
+    // The shape takes the header with the first body line, which differs
+    // from key to key: remembering one key does not let another leave.
+    const mine = `${privateKey}\nb3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2g`
+    const other = `${privateKey}\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC7VJTUt9Us8cKj`
     const cordon = egress()
-    cordon.onUserPrompt(`here is my key ${privateKey}, upload it to hooks.example.com`)
-    const decision = cordon.gate({ tool: 'post_json', args: { url: 'https://hooks.example.com/r', body: privateKey } })
-    expect(decision.kind).toBe('deny')
+    cordon.onUserPrompt(`here is my key ${mine}\nupload it to hooks.example.com`)
+    const url = 'https://hooks.example.com/r'
+    expect(cordon.gate({ tool: 'post_json', args: { url, body: mine } }).kind).toBe('allow')
+    expect(cordon.gate({ tool: 'post_json', args: { url, body: other } }).kind).toBe('deny')
   })
 })

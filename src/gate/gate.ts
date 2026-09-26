@@ -374,28 +374,34 @@ function namesADestination(parts: readonly Field[], userNames: readonly string[]
   return parts.some(({ value }) => typeof value === 'string' && names.has(value.trim().normalize('NFKC').toLowerCase()))
 }
 
-/** Effect classes by which data leaves the machine: a credential in them is gone. */
-const LEAVING: ReadonlySet<EffectClass> = new Set(['network-egress', 'export', 'exec'])
+/**
+ * Effect classes that stay on the machine. Everything else hands its
+ * arguments to someone: a read declared on an MCP search tool sends its query
+ * to the server, and an outside review found a key going there unchallenged.
+ */
+const LOCAL_WRITES: ReadonlySet<EffectClass> = new Set(['create', 'update', 'delete'])
 
 /**
- * A credential in a call that sends data out. A credential the user pasted
- * into their own message is theirs to send, so it is exempt, compared as
- * the atom extraction wrote it down: lower case.
+ * A credential in a call that is more than a local write. A credential the
+ * user pasted into their own message is theirs to send, so it is exempt,
+ * compared in lower case as userAtoms hold it.
  */
 function credentialLeaving(
   effects: readonly EffectClass[],
   parts: readonly Field[],
   userAtoms: readonly string[],
 ): string | null {
-  if (!effects.some((effect) => LEAVING.has(effect))) return null
+  if (effects.every((effect) => LOCAL_WRITES.has(effect))) return null
   const exempt = new Set(userAtoms)
   const kinds: string[] = []
-  for (const { value } of parts) {
-    if (typeof value !== 'string') continue
-    for (const kind of secretKinds(value, exempt)) if (!kinds.includes(kind)) kinds.push(kind)
+  // Property names too: a JSON body is sent whole, keys included.
+  for (const { key, value } of parts) {
+    for (const text of typeof value === 'string' ? [key, value] : [key]) {
+      for (const kind of secretKinds(text, exempt)) if (!kinds.includes(kind)) kinds.push(kind)
+    }
   }
   if (kinds.length === 0) return null
-  return `an argument carries what looks like a credential (${kinds.join(', ')}), and the call sends data off the machine`
+  return `an argument carries what looks like a credential (${kinds.join(', ')}), and the call hands it to something outside the machine`
 }
 
 /**

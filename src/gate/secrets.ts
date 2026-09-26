@@ -22,7 +22,10 @@ const SHAPES: ReadonlyArray<{ kind: string; pattern: RegExp }> = [
   { kind: 'Google API key', pattern: /\bAIza[0-9A-Za-z_-]{35}\b/u },
   { kind: 'GitLab token', pattern: /\bglpat-[A-Za-z0-9_-]{20,}/u },
   { kind: 'Stripe secret key', pattern: /\b(?:sk|rk)_live_[A-Za-z0-9]{24,}/u },
-  { kind: 'private key', pattern: /-----BEGIN (?:[A-Z]+ )?PRIVATE KEY-----/u },
+  // The header with the first body line: the header alone names a format and
+  // turns up in a grep for key files; the body line is also what tells one
+  // key from another, for the exemption.
+  { kind: 'private key', pattern: /-----BEGIN (?:[A-Z]+ )?PRIVATE KEY-----\r?\n[A-Za-z0-9+/=]{40,}/u },
 ]
 
 /**
@@ -57,13 +60,8 @@ export function secretKinds(text: string, exempt: ReadonlySet<string> = new Set(
 /**
  * The credentials in the user's own message, lower-cased, for the exemption.
  * Atoms alone missed them: an identifier atom needs a digit, and a token or a
- * key may have none. A private key is left out: its shape is the BEGIN line,
- * the same for every key, and remembering it would let any other key leave.
+ * key may have none.
  */
 export function pastedSecrets(text: string): string[] {
-  const values: string[] = []
-  for (const { kind, value } of found(text)) {
-    if (kind !== 'private key') values.push(value.toLowerCase())
-  }
-  return values
+  return [...found(text)].map(({ value }) => value.toLowerCase())
 }
