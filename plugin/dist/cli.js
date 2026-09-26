@@ -8210,6 +8210,55 @@ function introducesIdentity(before, after) {
   return atoms(after).some((atom) => !was.has(atom));
 }
 
+// src/output/footer.ts
+var MAX_LABEL = 120;
+var MAX_EXCERPT = 140;
+var MAX_INFLUENCES = 10;
+var CONTROL = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u;
+var FAKE_STRUCTURE = /[\u2500-\u257F\u2022\u00B7\u00AB\u00BB\u0022\u005B\u005D]/gu;
+function safeLabel(label) {
+  return flatten(label, MAX_LABEL) || "a source without a label";
+}
+function safeExcerpt(excerpt) {
+  return flatten(excerpt, MAX_EXCERPT);
+}
+function flatten(raw, max) {
+  const attack = raw.search(CONTROL);
+  const head = attack < 0 ? raw : raw.slice(0, attack);
+  const flat = head.replace(FAKE_STRUCTURE, " ").replace(/\s+/gu, " ").trim();
+  return flat.length > max ? flat.slice(0, max) + "..." : flat;
+}
+function renderFooter(marks) {
+  const lines = [];
+  const ranked = [...marks.influences].sort((a, b) => b.fragments - a.fragments);
+  for (const influence of ranked.slice(0, MAX_INFLUENCES)) {
+    const notes = [`matching spans: ${influence.fragments}`];
+    if (influence.selfReported) notes.push("only the source itself testifies about it");
+    if (influence.syndicated) notes.push("a syndication platform, the subject wrote the text");
+    lines.push(`  - "${safeLabel(influence.label)}": ${notes.join("; ")}`);
+  }
+  const hidden = ranked.length - MAX_INFLUENCES;
+  if (hidden > 0) {
+    lines.push(`  - and ${hidden} more sources with verbatim matches, not listed here`);
+  }
+  for (const group of marks.kinship) {
+    const named = group.labels.map((label) => `"${safeLabel(label)}"`).join(", ");
+    const excerpt = safeExcerpt(group.excerpt);
+    const shown2 = excerpt === "" ? "" : `; shared fragment, bounds approximate: "${excerpt}"`;
+    lines.push(`  - the sources are not independent, their text matches verbatim: ${named}${shown2}`);
+  }
+  if (marks.truncated) {
+    lines.push("  - the answer is long, not all of it was checked");
+  }
+  if (lines.length === 0) return "";
+  return [
+    "",
+    "Cordon, the influence of sources on this answer:",
+    ...lines,
+    "The absence of a mark confirms nothing: a retelling in other words is invisible here."
+  ].join("\n");
+}
+
 // src/gate/gate.ts
 function gate(call, ctx) {
   try {
@@ -8274,7 +8323,8 @@ function decide(call, ctx) {
     if (exposed) return escalate(ctx, exposed, ctx.exposure?.source);
     return { kind: "allow" };
   }
-  const blamed = scan.sources.map((source) => source.label).join(", ") || void 0;
+  const blamedLabels = scan.sources.map((source) => source.label);
+  const blamed = blamedLabels.join(", ") || void 0;
   if (!verdict.effects.some((effect) => IRREVERSIBLE.has(effect))) {
     const targets = scan.targets.filter((atom) => !isDate(atom));
     if (targets.length === 0 || identifierReadUnderMark(verdict.effects, targets, ctx)) {
@@ -8282,11 +8332,11 @@ function decide(call, ctx) {
       if (exposed) return escalate(ctx, exposed, ctx.exposure?.source);
       return { kind: "allow" };
     }
-    return escalate(ctx, `an argument carries a target from an untrusted source: ${targets.join(", ")}`, blamed);
+    return escalate(ctx, `an argument carries a target from an untrusted source: ${targets.map(safeLabel).join(", ")}`, blamed);
   }
   if (returnsToOrigin(scan.sources, parts, verdict.effects)) return { kind: "allow" };
   if (scan.nested) {
-    return escalate(ctx, `quarantine is impossible: the untrusted fragment sits inside a nested argument${origin(blamed)}`, blamed);
+    return escalate(ctx, `quarantine is impossible: the untrusted fragment sits inside a nested argument${origin(blamedLabels)}`, blamed);
   }
   const memory = memoryTarget(call, ctx.policy);
   if (memory !== null) {
@@ -8298,7 +8348,7 @@ function decide(call, ctx) {
   }
   const cleaned = quarantine(own2, scan.spans);
   if (!cleaned.possible) {
-    return escalate(ctx, `quarantine is impossible: ${cleaned.reason}${origin(blamed)}`, blamed);
+    return escalate(ctx, `quarantine is impossible: ${cleaned.reason}${origin(blamedLabels)}`, blamed);
   }
   return {
     kind: "rewrite",
@@ -8467,7 +8517,7 @@ function samePath(label, target) {
   return normalizePath(label) === target;
 }
 function origin(blamed) {
-  return blamed === void 0 ? "" : `; the value came from ${blamed}, not from you`;
+  return blamed.length === 0 ? "" : `; the value came from ${blamed.map(safeLabel).join(", ")}, not from you`;
 }
 function identifierReadUnderMark(effects, targets, ctx) {
   if (ctx.policy.exposure === false) return false;
@@ -12638,7 +12688,7 @@ function subjectOf(source) {
 
 // src/output/attribute.ts
 var MAX_ANSWER = 2e5;
-var MAX_EXCERPT = 120;
+var MAX_EXCERPT2 = 120;
 function attribute(answer, taint) {
   const truncated = answer.length > MAX_ANSWER;
   const text = truncated ? answer.slice(0, MAX_ANSWER) : answer;
@@ -12687,9 +12737,9 @@ function sharedFragments(bySource) {
   return pairs;
 }
 function excerptOf(text, from, to) {
-  const piece = text.slice(from, Math.min(to, from + MAX_EXCERPT)).trim();
+  const piece = text.slice(from, Math.min(to, from + MAX_EXCERPT2)).trim();
   if (piece === "") return "";
-  return to - from > MAX_EXCERPT ? `${piece}...` : piece;
+  return to - from > MAX_EXCERPT2 ? `${piece}...` : piece;
 }
 function overlap(left, right) {
   let i = 0;
@@ -12721,55 +12771,6 @@ function join6(groups, left, right, excerpt) {
     if (first.excerpt === "") first.excerpt = other.excerpt;
     groups.splice(groups.indexOf(other), 1);
   }
-}
-
-// src/output/footer.ts
-var MAX_LABEL = 120;
-var MAX_EXCERPT2 = 140;
-var MAX_INFLUENCES = 10;
-var CONTROL = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u;
-var FAKE_STRUCTURE = /[\u2500-\u257F\u2022\u00B7\u00AB\u00BB\u0022\u005B\u005D]/gu;
-function safeLabel(label) {
-  return flatten(label, MAX_LABEL) || "a source without a label";
-}
-function safeExcerpt(excerpt) {
-  return flatten(excerpt, MAX_EXCERPT2);
-}
-function flatten(raw, max) {
-  const attack = raw.search(CONTROL);
-  const head = attack < 0 ? raw : raw.slice(0, attack);
-  const flat = head.replace(FAKE_STRUCTURE, " ").replace(/\s+/gu, " ").trim();
-  return flat.length > max ? flat.slice(0, max) + "..." : flat;
-}
-function renderFooter(marks) {
-  const lines = [];
-  const ranked = [...marks.influences].sort((a, b) => b.fragments - a.fragments);
-  for (const influence of ranked.slice(0, MAX_INFLUENCES)) {
-    const notes = [`matching spans: ${influence.fragments}`];
-    if (influence.selfReported) notes.push("only the source itself testifies about it");
-    if (influence.syndicated) notes.push("a syndication platform, the subject wrote the text");
-    lines.push(`  - "${safeLabel(influence.label)}": ${notes.join("; ")}`);
-  }
-  const hidden = ranked.length - MAX_INFLUENCES;
-  if (hidden > 0) {
-    lines.push(`  - and ${hidden} more sources with verbatim matches, not listed here`);
-  }
-  for (const group of marks.kinship) {
-    const named = group.labels.map((label) => `"${safeLabel(label)}"`).join(", ");
-    const excerpt = safeExcerpt(group.excerpt);
-    const shown2 = excerpt === "" ? "" : `; shared fragment, bounds approximate: "${excerpt}"`;
-    lines.push(`  - the sources are not independent, their text matches verbatim: ${named}${shown2}`);
-  }
-  if (marks.truncated) {
-    lines.push("  - the answer is long, not all of it was checked");
-  }
-  if (lines.length === 0) return "";
-  return [
-    "",
-    "Cordon, the influence of sources on this answer:",
-    ...lines,
-    "The absence of a mark confirms nothing: a retelling in other words is invisible here."
-  ].join("\n");
 }
 
 // src/session/sweep.ts

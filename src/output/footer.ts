@@ -60,7 +60,7 @@ const FAKE_STRUCTURE = /[\u2500-\u257F\u2022\u00B7\u00AB\u00BB\u0022\u005B\u005D
  * arguments are legitimate labels, and cutting them would mean lying to the
  * human about what exactly influenced the answer.
  */
-function safeLabel(label: string): string {
+export function safeLabel(label: string): string {
   return flatten(label, MAX_LABEL) || 'a source without a label'
 }
 

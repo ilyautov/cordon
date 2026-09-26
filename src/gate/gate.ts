@@ -11,6 +11,7 @@ import { covers } from '../scope/certificate.js'
 import { classify } from '../scope/effects.js'
 import { quarantine } from './quarantine.js'
 import { COMMAND_KEYS, PATH_KEYS, URL_KEYS, fold } from '../core/argument-keys.js'
+import { safeLabel } from '../output/footer.js'
 
 export interface GateContext {
   policy: Policy
@@ -157,7 +158,8 @@ function decide(call: ToolCall, ctx: GateContext): Decision {
 
   // Which page aimed the call, for the owner's journal: the sources the
   // arguments matched, not whichever page happened to be read last.
-  const blamed = scan.sources.map((source) => source.label).join(', ') || undefined
+  const blamedLabels = scan.sources.map((source) => source.label)
+  const blamed = blamedLabels.join(', ') || undefined
 
   // The data axis answers differently in different cases, and that is not a
   // concession but a condition of usability. An agent that read a document
@@ -177,7 +179,7 @@ function decide(call: ToolCall, ctx: GateContext): Decision {
       if (exposed) return escalate(ctx, exposed, ctx.exposure?.source)
       return { kind: 'allow' }
     }
-    return escalate(ctx, `an argument carries a target from an untrusted source: ${targets.join(', ')}`, blamed)
+    return escalate(ctx, `an argument carries a target from an untrusted source: ${targets.map(safeLabel).join(', ')}`, blamed)
   }
 
   // Content returning to the very source it was read from is not subject to
@@ -193,7 +195,7 @@ function decide(call: ToolCall, ctx: GateContext): Decision {
   // works on a whole string argument, and we cannot parse somebody else's
   // argument schema. Hence escalation.
   if (scan.nested) {
-    return escalate(ctx, `quarantine is impossible: the untrusted fragment sits inside a nested argument${origin(blamed)}`, blamed)
+    return escalate(ctx, `quarantine is impossible: the untrusted fragment sits inside a nested argument${origin(blamedLabels)}`, blamed)
   }
 
   // A memory file is the one place a silent cut costs most: the harness
@@ -213,7 +215,7 @@ function decide(call: ToolCall, ctx: GateContext): Decision {
 
   const cleaned = quarantine(own, scan.spans)
   if (!cleaned.possible) {
-    return escalate(ctx, `quarantine is impossible: ${cleaned.reason}${origin(blamed)}`, blamed)
+    return escalate(ctx, `quarantine is impossible: ${cleaned.reason}${origin(blamedLabels)}`, blamed)
   }
 
   return {
@@ -591,8 +593,15 @@ function samePath(label: string, target: string): boolean {
  * Measured twice live: a bare "quarantine is impossible" was retold as "an
  * invalid IBAN" and as "a technical issue", and the user learned nothing.
  */
-function origin(blamed: string | undefined): string {
-  return blamed === undefined ? '' : `; the value came from ${blamed}, not from you`
+/**
+ * Where the value came from, in the refusal. The label is a link or a path the
+ * model chose, often straight off the page, and the refusal is read by the
+ * model and, as a question, by the human. So it goes through the footer's
+ * defanging: a newline or a markdown link in it would put the page's words in
+ * Cordon's voice. The label itself stays whole elsewhere: trust is matched on it.
+ */
+function origin(blamed: readonly string[]): string {
+  return blamed.length === 0 ? '' : `; the value came from ${blamed.map(safeLabel).join(', ')}, not from you`
 }
 
 /**
