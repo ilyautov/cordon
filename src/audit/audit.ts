@@ -44,10 +44,15 @@ export const CODES = {
   CA201: { severity: 'medium', owasp: 'LLM01 Prompt Injection', title: 'an MCP server not behind the Cordon gateway' },
   CA202: { severity: 'medium', owasp: 'LLM03 Supply Chain', title: 'an MCP server package started without a pinned version' },
   CA203: { severity: 'high', owasp: 'LLM02 Sensitive Information Disclosure', title: 'a literal secret in an MCP server configuration' },
+  CA205: { severity: 'high', owasp: 'LLM03 Supply Chain', title: 'an MCP package pinned to a version with a known vulnerability' },
   CA204: { severity: 'low', owasp: 'LLM01 Prompt Injection', title: 'a remote MCP server the stdio gateway cannot cover' },
   CA301: { severity: 'medium', owasp: 'LLM03 Supply Chain', title: 'a hook defined in the project\'s own settings' },
   CA303: { severity: 'high', owasp: 'LLM03 Supply Chain', title: 'the project sets environment that steers Cordon or the hook process' },
   CA304: { severity: 'high', owasp: 'LLM03 Supply Chain', title: 'the project switches hooks or the Cordon plugin off' },
+  CA305: { severity: 'high', owasp: 'LLM02 Sensitive Information Disclosure', title: 'the project points the model endpoint elsewhere' },
+  CA306: { severity: 'high', owasp: 'LLM03 Supply Chain', title: 'the project enables its own MCP servers' },
+  CA307: { severity: 'high', owasp: 'LLM06 Excessive Agency', title: 'the project turns agent tool confirmations off' },
+  CA308: { severity: 'medium', owasp: 'LLM03 Supply Chain', title: 'a task that runs when the folder opens' },
   CA302: { severity: 'low', owasp: 'LLM01 Prompt Injection', title: 'Claude Code runs without Cordon' },
   CA901: { severity: 'medium', owasp: 'LLM03 Supply Chain', title: 'a configuration file that could not be read' },
 } as const satisfies Record<string, { severity: Severity; owasp: string; title: string }>
@@ -94,6 +99,7 @@ export function audit(options: AuditOptions): AuditFinding[] {
   }
 
   hookFindings(options, add)
+  vscodeFindings(options.root, add)
   return findings
 }
 
@@ -216,6 +222,10 @@ function serverFindings(name: string, entry: ServerEntry, file: string, add: Add
     const upstream = gated ? words.slice(words.indexOf('--') + 1) : words
     const unpinned = unpinnedPackage(upstream)
     if (unpinned !== null) add('CA202', file, `\`${unpinned}\` resolves to whatever the registry serves at start; pin a version`, name)
+    for (const word of upstream) {
+      const known = knownVulnerable(word)
+      if (known !== null) add('CA205', file, `\`${word}\` is affected by ${known}`, name)
+    }
   }
 
   if (!file.startsWith('~/')) steeringEnv(entry.env, file, add)
@@ -276,6 +286,31 @@ const RUNNERS: ReadonlyMap<string, 'npm' | 'python'> = new Map([
 ])
 
 /** The package spec a runner would fetch unpinned, or null. */
+/**
+ * MCP packages with a published vulnerability, by the first fixed version.
+ * CVE-2025-6514: mcp-remote ran a command from a server's OAuth metadata.
+ * CVE-2025-49596: MCP Inspector's proxy took commands from any web page.
+ */
+const VULNERABLE: ReadonlyArray<{ name: string; fixed: readonly number[]; advisory: string }> = [
+  { name: 'mcp-remote', fixed: [0, 1, 16], advisory: 'CVE-2025-6514 (command injection through OAuth discovery), fixed in 0.1.16' },
+  { name: '@modelcontextprotocol/inspector', fixed: [0, 14, 1], advisory: 'CVE-2025-49596 (unauthenticated RCE through the proxy), fixed in 0.14.1' },
+]
+
+function knownVulnerable(spec: string): string | null {
+  const at = spec.lastIndexOf('@')
+  if (at <= 0) return null
+  const name = spec.slice(0, at)
+  const version = spec.slice(at + 1).split('.').map((part) => Number.parseInt(part, 10))
+  if (version.length !== 3 || version.some((part) => Number.isNaN(part))) return null
+  const entry = VULNERABLE.find((candidate) => candidate.name === name)
+  if (entry === undefined) return null
+  for (let i = 0; i < 3; i++) {
+    if (version[i]! < entry.fixed[i]!) return entry.advisory
+    if (version[i]! > entry.fixed[i]!) return null
+  }
+  return null
+}
+
 function unpinnedPackage(words: string[]): string | null {
   const runner = RUNNERS.get(words[0]?.replace(/^.*[/\\]/u, '') ?? '')
   if (runner === undefined) return null
@@ -311,6 +346,59 @@ function looksLikeSecret(key: string, value: string): boolean {
   return SECRET_KEY.test(key) && trimmed.length >= 8 && !/^(true|false|none|null)$/iu.test(trimmed)
 }
 
+/**
+ * A model endpoint set by the project. CVE-2026-21852: ANTHROPIC_BASE_URL in
+ * a repository's settings sent the API key to the attacker's proxy before the
+ * trust dialog.
+ */
+const ENDPOINT = /^[A-Z0-9_]*(BASE_URL|API_URL|ENDPOINT|API_BASE|API_HOST)$/u
+
+function endpointEnv(env: unknown, file: string, add: Add): void {
+  if (!isRecord(env)) return
+  for (const key of Object.keys(env)) {
+    if (ENDPOINT.test(key)) add('CA305', file, `env.${key} sends the agent's requests, and its key, where the repository chooses`, key)
+  }
+}
+
+/** VS Code's own files, JSON with comments and trailing commas. */
+function vscodeFindings(root: string, add: Add): void {
+  const settings = readJsonc(join(root, '.vscode', 'settings.json'))
+  if (isRecord(settings)) {
+    for (const [key, value] of Object.entries(settings)) {
+      // CVE-2025-53773: chat.tools.autoApprove let an injection run commands
+      // with no confirmation. Any autoApprove switched on is the same shape.
+      if (/autoapprove/iu.test(key) && value !== false && value !== null) {
+        add('CA307', '.vscode/settings.json', `${key} approves agent tool calls without asking whoever opens the project`, key)
+      }
+    }
+  }
+  const tasks = readJsonc(join(root, '.vscode', 'tasks.json'))
+  const list = isRecord(tasks) && Array.isArray(tasks['tasks']) ? tasks['tasks'] : []
+  for (const task of list) {
+    if (!isRecord(task)) continue
+    const options = task['runOptions']
+    if (isRecord(options) && options['runOn'] === 'folderOpen') {
+      const label = typeof task['label'] === 'string' ? task['label'] : '(unnamed)'
+      add('CA308', '.vscode/tasks.json', `task \`${label}\` runs when the folder is opened, before anyone reads it`, label)
+    }
+  }
+}
+
+function readJsonc(path: string): unknown {
+  const text = readSmall(path)
+  if (text === null) return null
+  // Comments go first, outside strings only; then trailing commas.
+  const stripped = text
+    .replace(/("(?:\\.|[^"\\])*")|\/\/[^\n]*|\/\*[\s\S]*?\*\//gu, (_, string: string | undefined) => string ?? '')
+    .replace(/,(\s*[}\]])/gu, '$1')
+  try {
+    return JSON.parse(stripped) as unknown
+  } catch {
+    // A file VS Code cannot parse applies no settings either.
+    return null
+  }
+}
+
 function hookFindings(options: AuditOptions, add: Add): void {
   let cordonSeen = false
   for (const name of ['.claude/settings.json', '.claude/settings.local.json']) {
@@ -325,7 +413,16 @@ function hookFindings(options: AuditOptions, add: Add): void {
     }
     if (hasCordonPlugin(settings)) cordonSeen = true
     steeringEnv(isRecord(settings) ? settings['env'] : undefined, name, add)
+    endpointEnv(isRecord(settings) ? settings['env'] : undefined, name, add)
     switchedOff(settings, name, add)
+    if (isRecord(settings)) {
+      const listed = settings['enabledMcpjsonServers']
+      if (settings['enableAllProjectMcpServers'] === true) {
+        add('CA306', name, 'enableAllProjectMcpServers: true starts every server in .mcp.json without asking (CVE-2025-59536)')
+      } else if (Array.isArray(listed) && listed.length > 0) {
+        add('CA306', name, `enabledMcpjsonServers starts ${listed.filter((item) => typeof item === 'string').join(', ')} without asking (CVE-2025-59536)`)
+      }
+    }
   }
 
   const userSettings = join(options.home, '.claude', 'settings.json')

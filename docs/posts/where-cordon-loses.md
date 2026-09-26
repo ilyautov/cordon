@@ -1,4 +1,4 @@
-# A prompt-injection gate with no model in it: 56% → 6%, and where it still loses
+# A prompt-injection gate with no model in it: 58% → 6%, and where it still loses
 
 Cordon sits between an agent and its tools and decides, call by call, whether an action goes through. It asks no model anything. Every decision can be read in the code and comes out the same on the same input. This post is about the numbers: what that design stops, what it costs, and where it loses. The losses get as much space as the wins, because a defence you cannot see the edges of is not one you can deploy.
 
@@ -11,11 +11,11 @@ The obvious way to catch prompt injection is to ask a classifier whether a page 
 - **The fact of reading.** Once the session has read untrusted content, any consequential call escalates unless the human named its destination. This is the rule that catches what string matching cannot: a paraphrase, an encoding, a clean `curl` that shares no byte with the page.
 - **What the human could not see.** Text hidden by CSS, zero-width characters and mixed scripts is cut before the model reads it.
 
-## The adversarial battery: 56% → 6%
+## The adversarial battery: 58% → 6%
 
-The battery is 34 attacks written against Cordon's own rules: paraphrases, four rounds of percent-encoding, base64 in a query, paths spelled three ways, fake user confirmations, notes planted in memory for a later session. The "model" is the scenario script, and it obeys the page every time.
+The battery is 35 attacks written against Cordon's own rules: paraphrases, four rounds of percent-encoding, base64 in a query, paths spelled three ways, fake user confirmations, notes planted in memory for a later session. The "model" is the scenario script, and it obeys the page every time.
 
-On a working profile that can create, execute and send, 18 of 32 attacks succeed without the exposure rule and 2 of 34 with it. The two survivors are in the [report](../adversarial-report.md) with the reason each one gets through. One is exfiltration to a destination the user really did name: the page picks the moment and the payload, and the exemption looks only at where the call goes. Resource bounds are the answer to that residue, and the report says so. The other is a denial of service: the page repeats a sentence from a file so that an honest edit of that file looks tainted and is refused.
+On a working profile that can create, execute and send, 19 of 33 attacks succeed without the exposure rule and 2 of 35 with it. The two survivors are in the [report](../adversarial-report.md) with the reason each one gets through. One is exfiltration to a destination the user really did name: the page picks the moment and the payload, and the exemption looks only at where the call goes. Resource bounds are the answer to that residue, and the report says so. The other is a denial of service: the page repeats a sentence from a file so that an honest edit of that file looks tainted and is refused.
 
 A battery you wrote yourself is an easy test to pass. So:
 

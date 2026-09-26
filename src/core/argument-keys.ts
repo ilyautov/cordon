@@ -1,4 +1,4 @@
-import type { ToolCall } from './types.js'
+import type { ArgumentRole, ToolCall } from './types.js'
 
 /**
  * The argument names a call is read by, in one place.
@@ -35,6 +35,41 @@ export const URL_KEYS: ReadonlySet<string> = new Set([
 
 /** Arguments whose value is executed by a shell. */
 export const COMMAND_KEYS: ReadonlySet<string> = new Set(['command', 'cmd', 'script', 'shell'])
+
+/**
+ * Arguments that say where a call is aimed: the person, the channel, the
+ * address. Only here does a name the user said count as a destination the
+ * user named. An outside review found the name counted in any field: Bash's
+ * `description: "Alice"` let a command through under the exposure mark.
+ */
+export const DESTINATION_KEYS: ReadonlySet<string> = new Set([
+  'to', 'recipient', 'recipients', 'cc', 'bcc', 'user', 'users', 'username', 'userid',
+  'member', 'members', 'channel', 'channels', 'channelname', 'chat', 'chatid', 'room',
+  'conversation', 'email', 'emails', 'participants', 'assignee', 'assignees', 'reviewer', 'reviewers',
+])
+
+/**
+ * Arguments that say which resource a call acts on. GitHub's MCP server was
+ * led from an issue in a public repository into the user's private ones: every
+ * call was a read or aimed at the repository the user named, and only the
+ * resource changed. After an untrusted read, a resource the user did not name
+ * escalates.
+ */
+export const RESOURCE_KEYS: ReadonlySet<string> = new Set(['repo', 'repository', 'repositories', 'repos'])
+
+/** The role of an argument: the policy's declaration first, then the name. */
+export function roleOf(
+  tool: string,
+  key: string,
+  declared: Readonly<Record<string, Readonly<Record<string, ArgumentRole>>>>,
+): ArgumentRole {
+  const table = Object.hasOwn(declared, tool) ? declared[tool] : undefined
+  if (table !== undefined && Object.hasOwn(table, key)) return table[key]!
+  const folded = fold(key)
+  if (DESTINATION_KEYS.has(folded)) return 'destination'
+  if (RESOURCE_KEYS.has(folded)) return 'resource'
+  return 'content'
+}
 
 /** One name out of the several spellings a server may have chosen. */
 export function fold(name: string): string {

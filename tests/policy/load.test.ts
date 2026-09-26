@@ -337,3 +337,31 @@ describe('notify.file', () => {
     expect(() => loadPolicy(home)).toThrow(/notify\.file/u)
   })
 })
+
+describe('the policy: argument roles and the task mandate', () => {
+  function load(yaml: string) {
+    const home = scratch()
+    writeFileSync(join(home, 'policy.yaml'), yaml)
+    return loadPolicy(home)
+  }
+
+  it('reads roles and destinations', () => {
+    const policy = load('arguments:\n  send_note:\n    addressee: destination\n    repo_slug: resource\ndestinations:\n  - "*@acme.example"\n')
+    expect(policy.arguments['send_note']).toEqual({ addressee: 'destination', repo_slug: 'resource' })
+    expect(policy.destinations).toEqual(['*@acme.example'])
+  })
+
+  it('an unknown role stops the load', () => {
+    expect(() => load('arguments:\n  send_note:\n    to: recipient\n')).toThrow(/destination, resource or content/)
+  })
+
+  it('a destination that matches everything stops the load', () => {
+    // A bare * would be the exposure rule switched off under another name.
+    expect(() => load('destinations:\n  - "*"\n')).toThrow(/matches everything/)
+    expect(() => load('destinations:\n  - "**"\n')).toThrow(/matches everything/)
+  })
+
+  it('a tool name inherited from the prototype is not a declaration', () => {
+    expect(Object.hasOwn(load('arguments: {}\n').arguments, 'toString')).toBe(false)
+  })
+})

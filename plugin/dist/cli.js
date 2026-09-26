@@ -7440,6 +7440,8 @@ var DEFAULT_POLICY = {
   tools: {},
   trustedSources: [],
   toolsReturn: {},
+  arguments: {},
+  destinations: [],
   notify: { file: null },
   exposure: true,
   task: null,
@@ -7521,6 +7523,15 @@ function validate(parsed, path) {
   if (Object.hasOwn(input, "toolsReturn")) {
     policy.toolsReturn = asViews(input["toolsReturn"], `${path}: toolsReturn`);
   }
+  if (Object.hasOwn(input, "arguments")) {
+    policy.arguments = asRoles(input["arguments"], `${path}: arguments`);
+  }
+  if ("destinations" in input) {
+    policy.destinations = asStrings(input.destinations, `${path}: destinations`);
+    for (const entry of policy.destinations) {
+      if (entry.trim().replace(/^\*+/u, "") === "") throw new Error(`${path}: destinations: ${entry} matches everything`);
+    }
+  }
   if ("notify" in input) {
     const notify = asObject(input.notify, `${path}: notify`);
     if (Object.hasOwn(notify, "webhook")) {
@@ -7590,6 +7601,8 @@ var TOP_LEVEL = [
   "tools",
   "trustedSources",
   "toolsReturn",
+  "arguments",
+  "destinations",
   "notify",
   "exposure",
   "task",
@@ -7635,6 +7648,24 @@ function asViews(value, where) {
       );
     }
     table[tool] = declared;
+  }
+  return table;
+}
+var ROLES = /* @__PURE__ */ new Set(["destination", "resource", "content"]);
+function asRoles(value, where) {
+  const input = asObject(value, where);
+  const table = /* @__PURE__ */ Object.create(null);
+  for (const [tool, declared] of Object.entries(input)) {
+    if (tool.trim() === "") throw new Error(`${where}: an empty tool name cannot be a declaration`);
+    const fields2 = asObject(declared, `${where}.${tool}`);
+    const roles = /* @__PURE__ */ Object.create(null);
+    for (const [name, role] of Object.entries(fields2)) {
+      if (typeof role !== "string" || !ROLES.has(role)) {
+        throw new Error(`${where}.${tool}.${name}: expected destination, resource or content, not ${String(role)}`);
+      }
+      roles[name] = role;
+    }
+    table[tool] = roles;
   }
   return table;
 }
@@ -7754,6 +7785,42 @@ var URL_KEYS = /* @__PURE__ */ new Set([
   "callbackurl"
 ]);
 var COMMAND_KEYS = /* @__PURE__ */ new Set(["command", "cmd", "script", "shell"]);
+var DESTINATION_KEYS = /* @__PURE__ */ new Set([
+  "to",
+  "recipient",
+  "recipients",
+  "cc",
+  "bcc",
+  "user",
+  "users",
+  "username",
+  "userid",
+  "member",
+  "members",
+  "channel",
+  "channels",
+  "channelname",
+  "chat",
+  "chatid",
+  "room",
+  "conversation",
+  "email",
+  "emails",
+  "participants",
+  "assignee",
+  "assignees",
+  "reviewer",
+  "reviewers"
+]);
+var RESOURCE_KEYS = /* @__PURE__ */ new Set(["repo", "repository", "repositories", "repos"]);
+function roleOf(tool, key, declared) {
+  const table = Object.hasOwn(declared, tool) ? declared[tool] : void 0;
+  if (table !== void 0 && Object.hasOwn(table, key)) return table[key];
+  const folded = fold(key);
+  if (DESTINATION_KEYS.has(folded)) return "destination";
+  if (RESOURCE_KEYS.has(folded)) return "resource";
+  return "content";
+}
 function fold(name) {
   return name.toLowerCase().replace(/[_-]/gu, "");
 }
@@ -7880,9 +7947,19 @@ var MEMORY_FILES = /* @__PURE__ */ new Set([
   ".windsurfrules",
   "copilot-instructions.md"
 ]);
+var RULE_DIRS = [
+  [".cursor", "rules"],
+  [".windsurf", "rules"],
+  [".clinerules"],
+  [".github", "instructions"]
+];
 var MEMORY_TOOLS = /* @__PURE__ */ new Set([
   // Gemini CLI: appends a fact to GEMINI.md under the user's home.
-  "save_memory"
+  "save_memory",
+  // Windsurf Cascade: the tools SpAIware-style injections asked it to call,
+  // leaving an instruction every later session obeyed.
+  "create_memory",
+  "update_memory"
 ]);
 function memoryTarget(call, policy) {
   if (MEMORY_TOOLS.has(call.tool) || declaredTools(policy).includes(call.tool)) return call.tool;
@@ -7897,7 +7974,7 @@ function memoryTarget(call, policy) {
     if (typeof value !== "string" || !PATH_KEYS.has(fold(key))) continue;
     for (const form of canonicalForms(value).reverse()) {
       const name = memoryName(form);
-      if (MEMORY_FILES.has(name) || extra.has(name)) return form;
+      if (MEMORY_FILES.has(name) || extra.has(name) || inRuleDir(form)) return form;
     }
   }
   return null;
@@ -7910,7 +7987,7 @@ function namedInCommand(call, extra) {
       const word = raw.replace(/["'\\]/gu, "");
       if (word === "") continue;
       const name = memoryName(word);
-      if (names2.includes(name)) return word;
+      if (names2.includes(name) || inRuleDir(word)) return word;
       if (/[*?[]/u.test(name) && keepsLiteralStem(name) && names2.some((known) => globMatches(name, known))) return word;
     }
   }
@@ -7943,6 +8020,15 @@ function globMatches(pattern, name) {
   } catch {
     return false;
   }
+}
+function inRuleDir(path) {
+  const segments2 = path.replace(/\\/gu, "/").split("/").map((segment) => fold2(segment));
+  return RULE_DIRS.some((dir) => {
+    for (let i = 0; i + dir.length < segments2.length; i++) {
+      if (dir.every((part, j) => segments2[i + j] === part)) return true;
+    }
+    return false;
+  });
 }
 function memoryName(path) {
   return fold2(basename2(path.replace(/\\/gu, "/")));
@@ -8035,17 +8121,17 @@ function hash(chunk) {
 function mapWords(text) {
   const atNormalized = [];
   const atOriginal = [];
-  const words = [];
+  const words2 = [];
   let length = 0;
   for (const match of text.matchAll(/\S+/gu)) {
-    if (words.length > 0) length += 1;
+    if (words2.length > 0) length += 1;
     atNormalized.push(length);
     atOriginal.push([match.index, match.index + match[0].length]);
     const word = match[0].normalize("NFKC").toLowerCase();
-    words.push(word);
+    words2.push(word);
     length += word.length;
   }
-  const built = words.join(" ");
+  const built = words2.join(" ");
   return { text: built, atNormalized, atOriginal, exact: built === normalize(text) };
 }
 function originalSpan(map, from, to) {
@@ -8326,13 +8412,17 @@ function decide(call, ctx) {
   if (outside) {
     return escalate(ctx, outside);
   }
+  const config = agentConfigWrite(verdict.effects, parts, ctx);
+  if (config) {
+    return escalate(ctx, config, ctx.exposure?.source);
+  }
   const leaving = credentialLeaving(verdict.effects, parts, ctx.userAtoms ?? []);
   if (leaving) {
     return escalate(ctx, leaving);
   }
   const scan = scanTaint(parts, ctx.taint, ctx.userAtoms ?? []);
   if (!scan.tainted) {
-    const exposed = exposedCall(verdict.effects, parts, ctx);
+    const exposed = exposedCall(call.tool, verdict.effects, parts, ctx);
     if (exposed) return escalate(ctx, exposed, ctx.exposure?.source);
     return { kind: "allow" };
   }
@@ -8341,7 +8431,7 @@ function decide(call, ctx) {
   if (!verdict.effects.some((effect) => IRREVERSIBLE.has(effect))) {
     const targets = scan.targets.filter((atom) => !isDate(atom));
     if (targets.length === 0 || identifierReadUnderMark(verdict.effects, targets, ctx)) {
-      const exposed = exposedCall(verdict.effects, parts, ctx);
+      const exposed = exposedCall(call.tool, verdict.effects, parts, ctx);
       if (exposed) return escalate(ctx, exposed, ctx.exposure?.source);
       return { kind: "allow" };
     }
@@ -8395,6 +8485,36 @@ function selfProtection(parts, ctx) {
   }
   return null;
 }
+var AGENT_CONFIG = [
+  [".vscode", "settings.json"],
+  [".vscode", "tasks.json"],
+  [".vscode", "mcp.json"],
+  [".vscode", "launch.json"],
+  [".mcp.json"],
+  [".windsurf", "mcp.json"],
+  [".continue", "config.json"],
+  [".zed", "settings.json"]
+];
+var CONFIG_WRITES = /* @__PURE__ */ new Set(["create", "update", "delete"]);
+function agentConfigWrite(effects, parts, ctx) {
+  if (ctx.exposure === void 0 || ctx.exposure === null) return null;
+  if (!effects.some((effect) => CONFIG_WRITES.has(effect))) return null;
+  for (const { key, value } of parts) {
+    if (!PATH_KEYS.has(fold(key))) continue;
+    for (const path of asPaths(value) ?? []) {
+      for (const form of canonicalForms(path)) {
+        const segments2 = form.split(sep3).map(fold2);
+        const hit = AGENT_CONFIG.find(
+          (tail) => tail.length <= segments2.length && tail.every((part, offset) => segments2[segments2.length - tail.length + offset] === part)
+        );
+        if (hit !== void 0) {
+          return `this session read untrusted content (${ctx.exposure.source}); ${hit.join("/")} is agent configuration, and a page that edits it can switch confirmations off or start a server \u2014 edit it yourself, or ask again after your next message`;
+        }
+      }
+    }
+  }
+  return null;
+}
 function asPaths(value) {
   if (typeof value === "string") return [value];
   if (value === null || value === void 0) return [];
@@ -8417,10 +8537,14 @@ function escalate(ctx, reason, source) {
   const kind = ctx.policy.mode === "interactive" ? "ask" : "deny";
   return source === void 0 ? { kind, reason } : { kind, reason, source };
 }
-function exposedCall(effects, parts, ctx) {
+function exposedCall(tool, effects, parts, ctx) {
   if (ctx.policy.exposure === false) return null;
   const exposure = ctx.exposure;
   if (exposure === void 0 || exposure === null) return null;
+  const stray = unnamedResource(tool, parts, ctx);
+  if (stray !== null) {
+    return `this session read untrusted content (${exposure.source}); the call reaches ${safeLabel(stray)}, a resource you did not name \u2014 name it in your message, or add it to destinations in the policy`;
+  }
   if (!effects.some((effect) => EXPOSURE_SENSITIVE.has(effect))) return null;
   const targets = /* @__PURE__ */ new Set();
   for (const { value } of parts) {
@@ -8430,18 +8554,44 @@ function exposedCall(effects, parts, ctx) {
     }
   }
   const named = new Set(ctx.userAtoms ?? []);
-  const allNamed = [...targets].every((atom) => named.has(atom));
+  const mandate = ctx.policy.destinations ?? [];
+  const allNamed = [...targets].every((atom) => named.has(atom) || inMandate(atom, mandate));
   if (targets.size > 0 && allNamed) return null;
-  if (exposure.memory !== true && allNamed && namesADestination(parts, ctx.userNames ?? [])) return null;
+  if (exposure.memory !== true && allNamed && !effects.includes("exec") && namesADestination(tool, parts, ctx.userNames ?? [], mandate, ctx.policy.arguments ?? {})) return null;
   if (exposure.memory === true) {
     return `untrusted content is back in this session through memory (${exposure.source}); the call acts beyond reading and its destination was not named by you`;
   }
-  return `this session read untrusted content (${exposure.source}) since your last message; the call acts beyond reading and its destination was not named by you`;
+  return `this session read untrusted content (${exposure.source}) since your last message; the call acts beyond reading and its destination was not named by you \u2014 name the destination in your message, or declare it under destinations in the policy`;
 }
-function namesADestination(parts, userNames) {
-  if (userNames.length === 0) return false;
+function namesADestination(tool, parts, userNames, mandate, roles) {
   const names2 = new Set(userNames);
-  return parts.some(({ value }) => typeof value === "string" && names2.has(value.trim().normalize("NFKC").toLowerCase()));
+  return parts.some(({ key, value, depth }) => {
+    if (depth !== 0 || typeof value !== "string") return false;
+    if (roleOf(tool, key, roles) !== "destination") return false;
+    const whole = value.trim().normalize("NFKC").toLowerCase();
+    return names2.has(whole) || inMandate(whole, mandate);
+  });
+}
+function inMandate(value, mandate) {
+  const whole = value.trim().normalize("NFKC").toLowerCase();
+  return mandate.some((entry) => {
+    const pattern = entry.trim().normalize("NFKC").toLowerCase();
+    return pattern.startsWith("*") ? whole.endsWith(pattern.replace(/^\*+/u, "")) : whole === pattern;
+  });
+}
+function unnamedResource(tool, parts, ctx) {
+  const said = /* @__PURE__ */ new Set([...ctx.userWords ?? [], ...ctx.userNames ?? [], ...ctx.userAtoms ?? []]);
+  const mandate = ctx.policy.destinations ?? [];
+  for (const { key, value } of parts) {
+    if (typeof value !== "string" || value.trim() === "") continue;
+    if (roleOf(tool, key, ctx.policy.arguments ?? {}) !== "resource") continue;
+    const whole = value.trim().normalize("NFKC").toLowerCase();
+    if (said.has(whole) || inMandate(whole, mandate)) continue;
+    const segments2 = whole.split("/").filter((segment) => segment !== "");
+    if (segments2.length > 1 && segments2.every((segment) => said.has(segment))) continue;
+    return value;
+  }
+  return null;
 }
 var LOCAL_WRITES = /* @__PURE__ */ new Set(["create", "update", "delete"]);
 function credentialLeaving(effects, parts, userAtoms) {
@@ -8798,6 +8948,13 @@ function names(text) {
     if (at > 0 && /[\p{L}\p{N}_-]/u.test(source[at - 1])) continue;
     const before = source.slice(0, at).replace(/["'`\u2018\u201C(]+$/u, "");
     if (before.trim() === "" || SENTENCE_END.test(before)) continue;
+    found2.add(match[0].toLowerCase());
+  }
+  return [...found2];
+}
+function words(text) {
+  const found2 = /* @__PURE__ */ new Set();
+  for (const match of text.normalize("NFKC").matchAll(/[\p{L}\p{N}][\p{L}\p{N}_.-]*[\p{L}\p{N}]/gu)) {
     found2.add(match[0].toLowerCase());
   }
   return [...found2];
@@ -12093,7 +12250,7 @@ var SessionStore = class {
       if (raw !== null) states.push(this.parseState(raw, sessionId));
     }
     if (states.length === 0) {
-      return { turn: 0, taint: new TaintStore(), unredacted: false, directive: null, exposure: null, userAtoms: [], userNames: [] };
+      return { turn: 0, taint: new TaintStore(), unredacted: false, directive: null, exposure: null, userAtoms: [], userNames: [], userWords: [] };
     }
     return states.reduce(mergeStates);
   }
@@ -12146,6 +12303,7 @@ var SessionStore = class {
     const exposure = Object.hasOwn(data, "exposure") ? data["exposure"] : void 0;
     const userAtoms = Object.hasOwn(data, "userAtoms") ? data["userAtoms"] : void 0;
     const userNames = Object.hasOwn(data, "userNames") ? data["userNames"] : void 0;
+    const userWords = Object.hasOwn(data, "userWords") ? data["userWords"] : void 0;
     if (typeof version !== "number" || !READABLE.has(version) || typeof turn !== "number" || !Number.isInteger(turn) || turn < 0) {
       throw new Error(`the session state ${shown(sessionId)} is incompatible`);
     }
@@ -12164,6 +12322,9 @@ var SessionStore = class {
     if (userNames !== void 0 && (!Array.isArray(userNames) || userNames.some((item) => typeof item !== "string"))) {
       throw new Error(`the session state ${shown(sessionId)} is incompatible`);
     }
+    if (userWords !== void 0 && (!Array.isArray(userWords) || userWords.some((item) => typeof item !== "string"))) {
+      throw new Error(`the session state ${shown(sessionId)} is incompatible`);
+    }
     return {
       turn,
       taint: TaintStore.fromJSON(taint),
@@ -12171,7 +12332,8 @@ var SessionStore = class {
       directive: Array.isArray(directive) ? directive : null,
       exposure: isExposure(exposure) ? exposure : null,
       userAtoms: Array.isArray(userAtoms) ? userAtoms.slice(-MAX_USER_ATOMS) : [],
-      userNames: Array.isArray(userNames) ? userNames.slice(-MAX_USER_ATOMS) : []
+      userNames: Array.isArray(userNames) ? userNames.slice(-MAX_USER_ATOMS) : [],
+      userWords: Array.isArray(userWords) ? userWords.slice(-MAX_USER_ATOMS) : []
     };
   }
   save(sessionId, state) {
@@ -12185,7 +12347,8 @@ var SessionStore = class {
       directive: state.directive ?? null,
       exposure: state.exposure ?? null,
       userAtoms: (state.userAtoms ?? []).slice(-MAX_USER_ATOMS),
-      userNames: (state.userNames ?? []).slice(-MAX_USER_ATOMS)
+      userNames: (state.userNames ?? []).slice(-MAX_USER_ATOMS),
+      userWords: (state.userWords ?? []).slice(-MAX_USER_ATOMS)
     });
     atomicWrite(dir, path, body);
     for (const piece of this.read.get(sessionId) ?? []) {
@@ -12292,7 +12455,8 @@ function mergeStates(into, other) {
     directive: mergeDirectives(into.directive ?? null, other.directive ?? null),
     exposure: into.exposure ?? other.exposure ?? null,
     userAtoms: mergeUserAtoms(into.userAtoms ?? [], other.userAtoms ?? []),
-    userNames: mergeUserAtoms(into.userNames ?? [], other.userNames ?? [])
+    userNames: mergeUserAtoms(into.userNames ?? [], other.userNames ?? []),
+    userWords: mergeUserAtoms(into.userWords ?? [], other.userWords ?? [])
   };
 }
 function mergeUserAtoms(a, b) {
@@ -12336,6 +12500,7 @@ var Cordon = class {
    */
   userAtoms = [];
   userNames = [];
+  userWords = [];
   /**
    * MCP tools held back in this process. Not persisted: the pins on disk are
    * the state, and every start of the gateway compares against them afresh.
@@ -12356,6 +12521,7 @@ var Cordon = class {
     this.exposure = restored.exposure ?? null;
     this.userAtoms = restored.userAtoms ?? [];
     this.userNames = restored.userNames ?? [];
+    this.userWords = restored.userWords ?? [];
     this.cert = issue(this.policy, this.turn);
     this.directive = restored.directive ?? null;
     if (this.directive) this.cert = narrow(this.cert, this.directive);
@@ -12468,6 +12634,7 @@ var Cordon = class {
       exposure: this.exposure,
       userAtoms: this.userAtoms,
       userNames: this.userNames,
+      userWords: this.userWords,
       heldTools: this.heldTools
     });
     this.recordMemory(call, decision);
@@ -12618,7 +12785,8 @@ var Cordon = class {
       directive: this.directive,
       exposure: this.exposure,
       userAtoms: this.userAtoms,
-      userNames: this.userNames
+      userNames: this.userNames,
+      userWords: this.userWords
     });
   }
   /**
@@ -12637,7 +12805,11 @@ var Cordon = class {
       if (!this.userNames.includes(name)) this.userNames.push(name);
     }
     if (this.userAtoms.length > MAX_USER_ATOMS) this.userAtoms = this.userAtoms.slice(-MAX_USER_ATOMS);
+    for (const word of words(text)) {
+      if (!this.userWords.includes(word)) this.userWords.push(word);
+    }
     if (this.userNames.length > MAX_USER_ATOMS) this.userNames = this.userNames.slice(-MAX_USER_ATOMS);
+    if (this.userWords.length > MAX_USER_ATOMS) this.userWords = this.userWords.slice(-MAX_USER_ATOMS);
   }
 };
 var FROM_OUTSIDE = /* @__PURE__ */ new Set(["web", "tool", "mcp-description"]);
@@ -13036,7 +13208,7 @@ function visit(node, key, depth, scan) {
     return;
   }
   if (typeof node === "string") {
-    const role = roleOf(key, node);
+    const role = roleOf2(key, node);
     if (role === "unknown") {
       scan.known = false;
       return;
@@ -13061,7 +13233,7 @@ function visit(node, key, depth, scan) {
 }
 function rebuild(node, key, depth, parts, cursor) {
   if (typeof node === "string") {
-    const role = roleOf(key, node);
+    const role = roleOf2(key, node);
     if (role !== "text" && role !== "label") return node;
     const next = parts[cursor.at++];
     return next ?? node;
@@ -13083,7 +13255,7 @@ function rebuild(node, key, depth, parts, cursor) {
   }
   return node;
 }
-function roleOf(key, value) {
+function roleOf2(key, value) {
   const folded = fold(key);
   if (TEXT_KEYS.has(folded)) return "text";
   if (LABEL_KEYS.has(folded)) return "label";
@@ -13997,10 +14169,15 @@ var CODES = {
   CA201: { severity: "medium", owasp: "LLM01 Prompt Injection", title: "an MCP server not behind the Cordon gateway" },
   CA202: { severity: "medium", owasp: "LLM03 Supply Chain", title: "an MCP server package started without a pinned version" },
   CA203: { severity: "high", owasp: "LLM02 Sensitive Information Disclosure", title: "a literal secret in an MCP server configuration" },
+  CA205: { severity: "high", owasp: "LLM03 Supply Chain", title: "an MCP package pinned to a version with a known vulnerability" },
   CA204: { severity: "low", owasp: "LLM01 Prompt Injection", title: "a remote MCP server the stdio gateway cannot cover" },
   CA301: { severity: "medium", owasp: "LLM03 Supply Chain", title: "a hook defined in the project's own settings" },
   CA303: { severity: "high", owasp: "LLM03 Supply Chain", title: "the project sets environment that steers Cordon or the hook process" },
   CA304: { severity: "high", owasp: "LLM03 Supply Chain", title: "the project switches hooks or the Cordon plugin off" },
+  CA305: { severity: "high", owasp: "LLM02 Sensitive Information Disclosure", title: "the project points the model endpoint elsewhere" },
+  CA306: { severity: "high", owasp: "LLM03 Supply Chain", title: "the project enables its own MCP servers" },
+  CA307: { severity: "high", owasp: "LLM06 Excessive Agency", title: "the project turns agent tool confirmations off" },
+  CA308: { severity: "medium", owasp: "LLM03 Supply Chain", title: "a task that runs when the folder opens" },
   CA302: { severity: "low", owasp: "LLM01 Prompt Injection", title: "Claude Code runs without Cordon" },
   CA901: { severity: "medium", owasp: "LLM03 Supply Chain", title: "a configuration file that could not be read" }
 };
@@ -14040,6 +14217,7 @@ function audit(options) {
     for (const base of bases) mcpFindings(join11(base.dir, config.path), base.label + config.path, add);
   }
   hookFindings(options, add);
+  vscodeFindings(options.root, add);
   return findings;
 }
 function instructionFiles(dir) {
@@ -14127,12 +14305,16 @@ function serverFindings(name, entry, file, add) {
       add("CA204", file, "a remote server is reached over HTTP; `cordon mcp` gates stdio servers only", name);
     }
   } else {
-    const words = [command, ...args];
-    const gated = isGateway(words);
-    if (!gated) add("CA201", file, `started as \`${words.join(" ")}\`; wrap it as \`cordon mcp -- ${words.join(" ")}\``, name);
-    const upstream = gated ? words.slice(words.indexOf("--") + 1) : words;
+    const words2 = [command, ...args];
+    const gated = isGateway(words2);
+    if (!gated) add("CA201", file, `started as \`${words2.join(" ")}\`; wrap it as \`cordon mcp -- ${words2.join(" ")}\``, name);
+    const upstream = gated ? words2.slice(words2.indexOf("--") + 1) : words2;
     const unpinned = unpinnedPackage(upstream);
     if (unpinned !== null) add("CA202", file, `\`${unpinned}\` resolves to whatever the registry serves at start; pin a version`, name);
+    for (const word of upstream) {
+      const known = knownVulnerable(word);
+      if (known !== null) add("CA205", file, `\`${word}\` is affected by ${known}`, name);
+    }
   }
   if (!file.startsWith("~/")) steeringEnv(entry.env, file, add);
   for (const [where, block] of [["env", entry.env], ["headers", entry.headers]]) {
@@ -14161,10 +14343,10 @@ function switchedOff(settings, file, add) {
     }
   }
 }
-function isGateway(words) {
-  const at = words.indexOf("--");
+function isGateway(words2) {
+  const at = words2.indexOf("--");
   if (at === -1) return false;
-  const before = words.slice(0, at);
+  const before = words2.slice(0, at);
   return before.includes("mcp") && before.some((word) => /(^|[/@])cordon(\.js)?$|@ilyautov\/cordon(@[^/]*)?$/u.test(word));
 }
 var RUNNERS = /* @__PURE__ */ new Map([
@@ -14174,11 +14356,29 @@ var RUNNERS = /* @__PURE__ */ new Map([
   ["uvx", "python"],
   ["pipx", "python"]
 ]);
-function unpinnedPackage(words) {
-  const runner = RUNNERS.get(words[0]?.replace(/^.*[/\\]/u, "") ?? "");
+var VULNERABLE = [
+  { name: "mcp-remote", fixed: [0, 1, 16], advisory: "CVE-2025-6514 (command injection through OAuth discovery), fixed in 0.1.16" },
+  { name: "@modelcontextprotocol/inspector", fixed: [0, 14, 1], advisory: "CVE-2025-49596 (unauthenticated RCE through the proxy), fixed in 0.14.1" }
+];
+function knownVulnerable(spec) {
+  const at = spec.lastIndexOf("@");
+  if (at <= 0) return null;
+  const name = spec.slice(0, at);
+  const version = spec.slice(at + 1).split(".").map((part) => Number.parseInt(part, 10));
+  if (version.length !== 3 || version.some((part) => Number.isNaN(part))) return null;
+  const entry = VULNERABLE.find((candidate) => candidate.name === name);
+  if (entry === void 0) return null;
+  for (let i = 0; i < 3; i++) {
+    if (version[i] < entry.fixed[i]) return entry.advisory;
+    if (version[i] > entry.fixed[i]) return null;
+  }
+  return null;
+}
+function unpinnedPackage(words2) {
+  const runner = RUNNERS.get(words2[0]?.replace(/^.*[/\\]/u, "") ?? "");
   if (runner === void 0) return null;
-  let rest = words.slice(1);
-  if (words[0] === "pipx" && rest[0] === "run") rest = rest.slice(1);
+  let rest = words2.slice(1);
+  if (words2[0] === "pipx" && rest[0] === "run") rest = rest.slice(1);
   for (let i = 0; i < rest.length; i++) {
     const word = rest[i];
     if (word === "--from" || word === "-p" || word === "--package") {
@@ -14204,6 +14404,43 @@ function looksLikeSecret(key, value) {
   if (SECRET_SHAPE.test(trimmed.replace(/^Bearer\s+/iu, ""))) return true;
   return SECRET_KEY.test(key) && trimmed.length >= 8 && !/^(true|false|none|null)$/iu.test(trimmed);
 }
+var ENDPOINT = /^[A-Z0-9_]*(BASE_URL|API_URL|ENDPOINT|API_BASE|API_HOST)$/u;
+function endpointEnv(env, file, add) {
+  if (!isRecord3(env)) return;
+  for (const key of Object.keys(env)) {
+    if (ENDPOINT.test(key)) add("CA305", file, `env.${key} sends the agent's requests, and its key, where the repository chooses`, key);
+  }
+}
+function vscodeFindings(root, add) {
+  const settings = readJsonc(join11(root, ".vscode", "settings.json"));
+  if (isRecord3(settings)) {
+    for (const [key, value] of Object.entries(settings)) {
+      if (/autoapprove/iu.test(key) && value !== false && value !== null) {
+        add("CA307", ".vscode/settings.json", `${key} approves agent tool calls without asking whoever opens the project`, key);
+      }
+    }
+  }
+  const tasks = readJsonc(join11(root, ".vscode", "tasks.json"));
+  const list = isRecord3(tasks) && Array.isArray(tasks["tasks"]) ? tasks["tasks"] : [];
+  for (const task of list) {
+    if (!isRecord3(task)) continue;
+    const options = task["runOptions"];
+    if (isRecord3(options) && options["runOn"] === "folderOpen") {
+      const label = typeof task["label"] === "string" ? task["label"] : "(unnamed)";
+      add("CA308", ".vscode/tasks.json", `task \`${label}\` runs when the folder is opened, before anyone reads it`, label);
+    }
+  }
+}
+function readJsonc(path) {
+  const text = readSmall(path);
+  if (text === null) return null;
+  const stripped = text.replace(/("(?:\\.|[^"\\])*")|\/\/[^\n]*|\/\*[\s\S]*?\*\//gu, (_, string) => string ?? "").replace(/,(\s*[}\]])/gu, "$1");
+  try {
+    return JSON.parse(stripped);
+  } catch {
+    return null;
+  }
+}
 function hookFindings(options, add) {
   let cordonSeen = false;
   for (const name of [".claude/settings.json", ".claude/settings.local.json"]) {
@@ -14218,7 +14455,16 @@ function hookFindings(options, add) {
     }
     if (hasCordonPlugin(settings2)) cordonSeen = true;
     steeringEnv(isRecord3(settings2) ? settings2["env"] : void 0, name, add);
+    endpointEnv(isRecord3(settings2) ? settings2["env"] : void 0, name, add);
     switchedOff(settings2, name, add);
+    if (isRecord3(settings2)) {
+      const listed = settings2["enabledMcpjsonServers"];
+      if (settings2["enableAllProjectMcpServers"] === true) {
+        add("CA306", name, "enableAllProjectMcpServers: true starts every server in .mcp.json without asking (CVE-2025-59536)");
+      } else if (Array.isArray(listed) && listed.length > 0) {
+        add("CA306", name, `enabledMcpjsonServers starts ${listed.filter((item) => typeof item === "string").join(", ")} without asking (CVE-2025-59536)`);
+      }
+    }
   }
   const userSettings = join11(options.home, ".claude", "settings.json");
   if (!isFile(userSettings)) return;

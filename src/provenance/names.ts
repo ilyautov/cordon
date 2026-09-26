@@ -58,3 +58,19 @@ export function names(text: string): string[] {
 
   return [...found]
 }
+
+/**
+ * Every word of the user's message, lower-cased, for naming a resource.
+ *
+ * A repository is written as it is called, `pacman` or `infra-docs`, not
+ * capitalized and not quoted, so the names above miss it. Only the resource
+ * rule reads these: a word is too loose to name where a message goes, and it
+ * is exactly as loose as it needs to be for "this repository and no other".
+ */
+export function words(text: string): string[] {
+  const found = new Set<string>()
+  for (const match of text.normalize('NFKC').matchAll(/[\p{L}\p{N}][\p{L}\p{N}_.-]*[\p{L}\p{N}]/gu)) {
+    found.add(match[0].toLowerCase())
+  }
+  return [...found]
+}

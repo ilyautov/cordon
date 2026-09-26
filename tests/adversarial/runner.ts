@@ -183,6 +183,7 @@ function writePolicy(home: string, profile: Profile): void {
       `    hosts: [${profile.hosts.join(', ')}]`,
       'tools:',
       '  publish_note: [create]',
+      '  get_file_contents: [read]',
       // Absent means the default, and the default is on: only the comparison
       // profile spells the valve out.
       ...(profile.exposure === false ? ['exposure: false'] : []),
@@ -198,6 +199,7 @@ function mechanismOf(reason: string): string {
   if (/provenance is full/u.test(reason)) return 'saturation'
   if (/hidden layer/u.test(reason)) return 'unredacted-mark'
   if (/was written after reading/u.test(reason)) return 'memory-carry'
+  if (/a resource you did not name/u.test(reason)) return 'resource'
   if (/read untrusted content/u.test(reason)) return 'exposure'
   if (/self-protection/u.test(reason)) return 'self-protection'
   if (/outside the certificate's boundaries/u.test(reason)) return 'certificate-bounds'

@@ -1,16 +1,16 @@
 import { resolve, sep } from 'node:path'
-import type { Certificate, Decision, EffectClass, ExposureMark, Source, ToolCall } from '../core/types.js'
+import type { ArgumentRole, Certificate, Decision, EffectClass, ExposureMark, Source, ToolCall } from '../core/types.js'
 import { fields, type Field } from './fields.js'
 import { secretKinds } from './secrets.js'
 import { memoryTarget } from './memory.js'
 import type { Policy } from '../policy/defaults.js'
-import { canonicalForms, touchesCordonItself } from '../policy/selfprotect.js'
+import { canonicalForms, fold as foldSegment, touchesCordonItself } from '../policy/selfprotect.js'
 import { atoms } from '../provenance/normalize.js'
 import type { TaintStore } from '../provenance/store.js'
 import { covers } from '../scope/certificate.js'
 import { classify } from '../scope/effects.js'
 import { quarantine } from './quarantine.js'
-import { COMMAND_KEYS, PATH_KEYS, URL_KEYS, fold } from '../core/argument-keys.js'
+import { COMMAND_KEYS, PATH_KEYS, URL_KEYS, fold, roleOf } from '../core/argument-keys.js'
 import { safeLabel } from '../output/footer.js'
 
 export interface GateContext {
@@ -44,6 +44,8 @@ export interface GateContext {
    * treats it as anything.
    */
   userNames?: readonly string[]
+  /** Words of the user's messages: a resource the user named. */
+  userWords?: readonly string[]
   /**
    * MCP tools held back because they changed or appeared after the owner
    * approved the server. Optional: only the MCP gateway lists tools.
@@ -141,6 +143,11 @@ function decide(call: ToolCall, ctx: GateContext): Decision {
     return escalate(ctx, outside)
   }
 
+  const config = agentConfigWrite(verdict.effects, parts, ctx)
+  if (config) {
+    return escalate(ctx, config, ctx.exposure?.source)
+  }
+
   // A credential leaving the machine answers before provenance: it needs no
   // page to be dangerous. The reason names the kind and never the value, so
   // the key does not travel on into the journal or the model's context.
@@ -151,7 +158,7 @@ function decide(call: ToolCall, ctx: GateContext): Decision {
 
   const scan = scanTaint(parts, ctx.taint, ctx.userAtoms ?? [])
   if (!scan.tainted) {
-    const exposed = exposedCall(verdict.effects, parts, ctx)
+    const exposed = exposedCall(call.tool, verdict.effects, parts, ctx)
     if (exposed) return escalate(ctx, exposed, ctx.exposure?.source)
     return { kind: 'allow' }
   }
@@ -175,7 +182,7 @@ function decide(call: ToolCall, ctx: GateContext): Decision {
   if (!verdict.effects.some((effect) => IRREVERSIBLE.has(effect))) {
     const targets = scan.targets.filter((atom) => !isDate(atom))
     if (targets.length === 0 || identifierReadUnderMark(verdict.effects, targets, ctx)) {
-      const exposed = exposedCall(verdict.effects, parts, ctx)
+      const exposed = exposedCall(call.tool, verdict.effects, parts, ctx)
       if (exposed) return escalate(ctx, exposed, ctx.exposure?.source)
       return { kind: 'allow' }
     }
@@ -270,6 +277,43 @@ function selfProtection(parts: readonly Field[], ctx: GateContext): Decision | n
 }
 
 /**
+ * Agent configuration a project keeps outside the harness directories, which
+ * self-protection already closes. These are edited by people all the time, so
+ * they stay writable; after an untrusted read they are not, whoever named the
+ * path. CVE-2025-53773: an injection wrote `chat.tools.autoApprove` into
+ * .vscode/settings.json and ran commands unconfirmed. CVE-2025-54135: an
+ * injection rewrote mcp.json and the new server started on its own.
+ */
+const AGENT_CONFIG: readonly (readonly string[])[] = [
+  ['.vscode', 'settings.json'], ['.vscode', 'tasks.json'], ['.vscode', 'mcp.json'], ['.vscode', 'launch.json'],
+  ['.mcp.json'], ['.windsurf', 'mcp.json'], ['.continue', 'config.json'], ['.zed', 'settings.json'],
+]
+const CONFIG_WRITES: ReadonlySet<EffectClass> = new Set(['create', 'update', 'delete'])
+
+function agentConfigWrite(effects: readonly EffectClass[], parts: readonly Field[], ctx: GateContext): string | null {
+  if (ctx.exposure === undefined || ctx.exposure === null) return null
+  if (!effects.some((effect) => CONFIG_WRITES.has(effect))) return null
+  for (const { key, value } of parts) {
+    if (!PATH_KEYS.has(fold(key))) continue
+    for (const path of asPaths(value) ?? []) {
+      for (const form of canonicalForms(path)) {
+        const segments = form.split(sep).map(foldSegment)
+        const hit = AGENT_CONFIG.find((tail) =>
+          tail.length <= segments.length && tail.every((part, offset) => segments[segments.length - tail.length + offset] === part),
+        )
+        if (hit !== undefined) {
+          return (
+            `this session read untrusted content (${ctx.exposure.source}); ${hit.join('/')} is agent configuration, ` +
+            'and a page that edits it can switch confirmations off or start a server — edit it yourself, or ask again after your next message'
+          )
+        }
+      }
+    }
+  }
+  return null
+}
+
+/**
  * The value of a path argument as a list of paths.
  *
  * null means "not a path": scalars such as a number are harmless and pass,
@@ -321,6 +365,7 @@ function escalate(ctx: GateContext, reason: string, source?: string): Decision {
  * residue is what resource bounds (hosts/paths in the certificate) are for.
  */
 function exposedCall(
+  tool: string,
   effects: readonly EffectClass[],
   parts: readonly Field[],
   ctx: GateContext,
@@ -330,6 +375,19 @@ function exposedCall(
   if (ctx.policy.exposure === false) return null
   const exposure = ctx.exposure
   if (exposure === undefined || exposure === null) return null
+
+  // Before the effect filter: a read of a resource the user never named is
+  // the step that matters. GitHub's MCP server was led from an issue in the
+  // public repository the user asked about into their private ones, and
+  // every call on the way was a read or aimed at the named repository.
+  const stray = unnamedResource(tool, parts, ctx)
+  if (stray !== null) {
+    return (
+      `this session read untrusted content (${exposure.source}); the call reaches ${safeLabel(stray)}, ` +
+      'a resource you did not name — name it in your message, or add it to destinations in the policy'
+    )
+  }
+
   if (!effects.some((effect) => EXPOSURE_SENSITIVE.has(effect))) return null
 
   // The call's targets are the atoms of its arguments, extracted by the same
@@ -346,7 +404,8 @@ function exposedCall(
     }
   }
   const named = new Set(ctx.userAtoms ?? [])
-  const allNamed = [...targets].every((atom) => named.has(atom))
+  const mandate = ctx.policy.destinations ?? []
+  const allNamed = [...targets].every((atom) => named.has(atom) || inMandate(atom, mandate))
   if (targets.size > 0 && allNamed) return null
   // A field whose whole value is a name the user wrote — "send it to Alice"
   // — is a destination the user named, as a link or an address would be.
@@ -354,7 +413,10 @@ function exposedCall(
   // carried in from memory is not lifted by it: the note was written in an
   // earlier session under a page's influence, and a name said in this one
   // does not vouch for what the note asks.
-  if (exposure.memory !== true && allNamed && namesADestination(parts, ctx.userNames ?? [])) return null
+  if (
+    exposure.memory !== true && allNamed && !effects.includes('exec') &&
+    namesADestination(tool, parts, ctx.userNames ?? [], mandate, ctx.policy.arguments ?? {})
+  ) return null
 
   if (exposure.memory === true) {
     return (
@@ -364,14 +426,60 @@ function exposedCall(
   }
   return (
     `this session read untrusted content (${exposure.source}) since your last message; ` +
-    'the call acts beyond reading and its destination was not named by you'
+    'the call acts beyond reading and its destination was not named by you — ' +
+    'name the destination in your message, or declare it under destinations in the policy'
   )
 }
 
-function namesADestination(parts: readonly Field[], userNames: readonly string[]): boolean {
-  if (userNames.length === 0) return false
+/**
+ * A top-level destination field whose whole value the user said or the policy
+ * declares. Only a destination: a name in Bash's `description` field vouched
+ * for a whole command once. A shell command is never aimed by a name at all;
+ * the caller keeps exec out.
+ */
+function namesADestination(
+  tool: string,
+  parts: readonly Field[],
+  userNames: readonly string[],
+  mandate: readonly string[],
+  roles: Readonly<Record<string, Readonly<Record<string, ArgumentRole>>>>,
+): boolean {
   const names = new Set(userNames)
-  return parts.some(({ value }) => typeof value === 'string' && names.has(value.trim().normalize('NFKC').toLowerCase()))
+  return parts.some(({ key, value, depth }) => {
+    if (depth !== 0 || typeof value !== 'string') return false
+    if (roleOf(tool, key, roles) !== 'destination') return false
+    const whole = value.trim().normalize('NFKC').toLowerCase()
+    return names.has(whole) || inMandate(whole, mandate)
+  })
+}
+
+/** A value the policy declares for the task: exact, or `*suffix`. */
+function inMandate(value: string, mandate: readonly string[]): boolean {
+  const whole = value.trim().normalize('NFKC').toLowerCase()
+  return mandate.some((entry) => {
+    const pattern = entry.trim().normalize('NFKC').toLowerCase()
+    return pattern.startsWith('*') ? whole.endsWith(pattern.replace(/^\*+/u, '')) : whole === pattern
+  })
+}
+
+/**
+ * The first resource-role value the user did not name, at any depth: a word
+ * of their messages, a name, an atom, or a segment of `owner/repo` that is
+ * each of those. The policy's destinations name resources too.
+ */
+function unnamedResource(tool: string, parts: readonly Field[], ctx: GateContext): string | null {
+  const said = new Set([...(ctx.userWords ?? []), ...(ctx.userNames ?? []), ...(ctx.userAtoms ?? [])])
+  const mandate = ctx.policy.destinations ?? []
+  for (const { key, value } of parts) {
+    if (typeof value !== 'string' || value.trim() === '') continue
+    if (roleOf(tool, key, ctx.policy.arguments ?? {}) !== 'resource') continue
+    const whole = value.trim().normalize('NFKC').toLowerCase()
+    if (said.has(whole) || inMandate(whole, mandate)) continue
+    const segments = whole.split('/').filter((segment) => segment !== '')
+    if (segments.length > 1 && segments.every((segment) => said.has(segment))) continue
+    return value
+  }
+  return null
 }
 
 /**

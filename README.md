@@ -8,7 +8,7 @@
 
 **Ready:** a core with adapters for **Claude Code** and **Gemini CLI**, a gateway for **MCP hosts**, and middleware for **LangChain** agents.
 
-**Measured:** 1293 tests · 25 pinned attack vectors · 9 legitimate documents · 2 runtime dependencies.
+**Measured:** 1323 tests · 25 pinned attack vectors · 9 legitimate documents · 2 runtime dependencies.
 
 **AgentDojo:** with Cordon, an agent that obeys every injection got 0 attacks through on all four suites; without it, 39–100% succeeded. Utility depends on the policy: 100% in interactive mode at 0.3–1.6 questions per task, 14–70% on a strict autonomous policy. The methodology and where Cordon loses are in [docs/agentdojo.md](docs/agentdojo.md).
 

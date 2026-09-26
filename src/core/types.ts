@@ -10,6 +10,13 @@ export type EffectClass =
   | 'financial'
   | 'exec'
 
+/**
+ * What an argument is to the call. A destination is where the call is aimed
+ * (a recipient, a channel); a resource is what it acts on (a repository);
+ * content is what it carries. Only a destination can be named by a name.
+ */
+export type ArgumentRole = 'destination' | 'resource' | 'content'
+
 /** Presence mode. An explicit setting from the policy, never a heuristic. */
 export type PresenceMode = 'interactive' | 'autonomous'
 

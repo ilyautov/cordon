@@ -143,3 +143,33 @@ describe('memoryTarget: a glob the shell itself would reject', () => {
     expect(() => memoryTarget({ tool: 'Bash', args: { command: 'ls CL[z-a]UDE.md' } }, policy())).not.toThrow()
   })
 })
+
+describe('memoryTarget: rule directories and memory tools the harnesses added', () => {
+  // Windsurf's create_memory was the carrier of the SpAIware-style attack on
+  // Cascade: an injected page asked the agent to remember an instruction, and
+  // every later session obeyed it.
+  it('create_memory and update_memory are memory tools', () => {
+    expect(memoryTarget({ tool: 'create_memory', args: { content: 'x' } }, policy())).toBe('create_memory')
+    expect(memoryTarget({ tool: 'update_memory', args: { content: 'x' } }, policy())).toBe('update_memory')
+  })
+
+  it('a file under a rules directory is memory, whatever it is called', () => {
+    expect(memoryTarget({ tool: 'Write', args: { file_path: '/srv/p/.windsurf/rules/style.md' } }, policy()))
+      .toBe('/srv/p/.windsurf/rules/style.md')
+    expect(memoryTarget({ tool: 'Write', args: { file_path: '/srv/p/.cursor/rules/team.mdc' } }, policy()))
+      .toBe('/srv/p/.cursor/rules/team.mdc')
+    expect(memoryTarget({ tool: 'Write', args: { file_path: '/srv/p/.clinerules/a.md' } }, policy()))
+      .toBe('/srv/p/.clinerules/a.md')
+    expect(memoryTarget({ tool: 'Write', args: { file_path: '/srv/p/.github/instructions/x.instructions.md' } }, policy()))
+      .toBe('/srv/p/.github/instructions/x.instructions.md')
+  })
+
+  it('a command that names a rules directory', () => {
+    expect(memoryTarget({ tool: 'Bash', args: { command: 'echo x > .windsurf/rules/a.md' } }, policy())).toBe('.windsurf/rules/a.md')
+  })
+
+  it('a file that only resembles one is not memory', () => {
+    expect(memoryTarget({ tool: 'Write', args: { file_path: '/srv/p/docs/rules/style.md' } }, policy())).toBeNull()
+    expect(memoryTarget({ tool: 'Bash', args: { command: 'cat docs/windsurf-rules.md' } }, policy())).toBeNull()
+  })
+})

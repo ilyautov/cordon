@@ -129,14 +129,28 @@ No profile grants `delete`, `export` or `financial`, because those are irreversi
 
 **`notify.file`**: path to the event journal. It must be absolute or start with `~/`. A relative path stops the load, because it would resolve against whatever project the agent runs in. See the section on the journal.
 
-**`exposure`**: `true` or `false`, default `true`. While it is on, a session that read untrusted content is marked, and a call acting beyond reading — anything from the irreversible classes, plus `create` — escalates while the mark stands, unless the user named the call's destination in their own message: a link, a path, an identifier, or a name (a capitalized word inside a sentence, such as Alice, or a single quoted word, such as 'general'). This is the rule that answers the attacks whose arguments share no byte with what was read: a paraphrase, an encoding, a clean shell command. The measured difference on the adversarial battery's working profile is a drop from 56% attack success (18 of 32) without the rule to 6% (2 of 34) with it; see [adversarial-report.md](adversarial-report.md). The price is friction: in autonomous mode, after any untrusted read a consequential call is refused until the user's next message names its destination. `false` restores the previous behaviour and weakens no other axis, and `cordon doctor` names the off state out loud with its price — from the outside it is indistinguishable from a session that simply read nothing untrusted.
+**`exposure`**: `true` or `false`, default `true`. While it is on, a session that read untrusted content is marked, and a call acting beyond reading — anything from the irreversible classes, plus `create` — escalates while the mark stands, unless the user named the call's destination in their own message: a link, a path, an identifier, or a name (a capitalized word inside a sentence, such as Alice, or a single quoted word, such as 'general'). A name counts only in a destination field (see `arguments`), and never for a call that executes something: "thank Alice" does not make `curl … # Alice` the user's own command. This is the rule that answers the attacks whose arguments share no byte with what was read: a paraphrase, an encoding, a clean shell command. The measured difference on the adversarial battery's working profile is a drop from 58% attack success (19 of 33) without the rule to 6% (2 of 35) with it; see [adversarial-report.md](adversarial-report.md). The price is friction: in autonomous mode, after any untrusted read a consequential call is refused until the user's next message names its destination. `false` restores the previous behaviour and weakens no other axis, and `cordon doctor` names the off state out loud with its price — from the outside it is indistinguishable from a session that simply read nothing untrusted.
 
-**`memory.files`** and **`memory.tools`**: memory the agent reloads in later sessions, beyond what Cordon knows by name. `files` are base names compared case-folded (`CLAUDE.md`, `CLAUDE.local.md`, `AGENTS.md`, `GEMINI.md`, `.cursorrules`, `.windsurfrules` and `copilot-instructions.md` are known already); `tools` are tool names as the harness calls them (`save_memory` is known already). A Mem0 store behind a tool is declared here. See the section on memory below.
+**`memory.files`** and **`memory.tools`**: memory the agent reloads in later sessions, beyond what Cordon knows by name. `files` are base names compared case-folded (`CLAUDE.md`, `CLAUDE.local.md`, `AGENTS.md`, `GEMINI.md`, `.cursorrules`, `.windsurfrules` and `copilot-instructions.md` are known already); `tools` are tool names as the harness calls them (`save_memory`, `create_memory` and `update_memory` are known already). Every file under `.cursor/rules/`, `.windsurf/rules/`, `.clinerules/` and `.github/instructions/` is memory whatever its name. A Mem0 store behind a tool is declared here. See the section on memory below.
 
 ```yaml
 memory:
   files: [TEAM-RULES.md]
   tools: [mem0_add]
+```
+
+**`arguments`**: the role of a tool's arguments, by tool and argument name: `destination` (who receives the call: a recipient, a channel), `resource` (what the call reaches: a repository) or `content` (what it carries). Only a destination field can carry a name that exempts a call from the exposure rule, and a resource field is what the resource rule reads. Undeclared arguments get a role from their name: `to`, `recipient`, `channel`, `email`, `user` and similar are destinations; `repo` and `repository` are resources; everything else is content.
+
+```yaml
+arguments:
+  mcp__crm__notify: {account: destination, note: content}
+  mcp__github__get_file_contents: {project: resource}
+```
+
+**`destinations`**: the task's mandate, for an agent that runs without a human to name things. A value listed here counts as named by the user under the exposure mark, in a destination or a resource field. An entry is an exact value, or `*` followed by a suffix (`*@example.com`, `*.example.com`). An entry that is only `*` is a load error: a mandate that names everything names nothing.
+
+```yaml
+destinations: [ops@example.com, '#deploys', acme/website]
 ```
 
 **`mcp.pin`**: `true` or `false`, default `true`. When it is on, the MCP gateway pins each server's tools the first time it sees them, then hides and refuses any tool that changed or appeared since. See [install-mcp.md](install-mcp.md#tool-pinning).
@@ -188,6 +202,14 @@ The `wb_update_price` tool is declared even though it is not meant to be used. T
 A call that carries a credential escalates, read or no read, unless all it does is write locally (`create`, `update`, `delete`): a refusal in autonomous mode, a question in interactive mode. A tool declared as a `read` counts, since an MCP search tool sends its query to the server. Property names are checked along with values. A credential is recognized by shape: GitHub, Anthropic, OpenAI, AWS, Slack, Google, GitLab and Stripe credentials, and private keys, by the header together with the first line of the key, so a grep for the header is not one. The reason names the kind and never the value, so the key goes neither into the journal nor back to the model. Writing it to a local file is not this rule. A credential you paste into your own message is exempt, since you named it; that key and no other. The key AWS prints in its documentation, ending in `EXAMPLE`, is not a credential. This covers the careless case, an agent putting a token into a curl command on its own; the injected case is the exposure rule's.
 
 What the shape check does not see: a credential passed by reference (`$GITHUB_TOKEN` in a command), a credential written to a file and sent in a later call, and credentials without a fixed prefix, such as JWTs and passwords inside connection strings. After an untrusted read, the exposure rule escalates both calls in the first two cases. Without one, only the literal is caught.
+
+### A resource you did not name
+
+After an untrusted read, a call that reaches a resource the user never mentioned escalates, even a read. This is the GitHub MCP "toxic agent flow": an issue in a public repository asks the agent to read the owner's private repository and post what it found. The call reads, so no effect class stops it; the repository name comes from the page, but the page can spell it as the user would. The rule reads fields with the `resource` role and passes a value the user said in their own words, as a whole or segment by segment (`acme` and `website` said, `acme/website` passes), or one listed under `destinations`.
+
+### Agent configuration written after an untrusted read
+
+After an untrusted read, a write to a file that configures an agent escalates: `.vscode/settings.json`, `.vscode/tasks.json`, `.vscode/mcp.json`, `.vscode/launch.json`, `.mcp.json`, `.windsurf/mcp.json`, `.continue/config.json` and `.zed/settings.json`. An injected write there turns confirmations off or adds an MCP server that runs a command on the next start (CVE-2025-53773, CVE-2025-54135). The harness directories `.claude`, `.cursor`, `.codex` and `.gemini` are not writable at all; see self-protection.
 
 ### Autonomous agents: declare what is a directory
 

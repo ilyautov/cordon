@@ -4,6 +4,18 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versions follo
 
 ## [Unreleased]
 
+A name no longer exempts a call wherever it appears. After an untrusted read, "thank Alice" exempted a Bash command whose `description` said Alice, and a note field that mentioned her. A name now counts only in a field whose role is `destination`, and never for a call that executes something. Roles come from a new policy field, `arguments`, and from the argument's name when undeclared: `to`, `recipient`, `channel`, `email`, `user` and their kin are destinations, `repo` and `repository` are resources, the rest is content.
+
+After an untrusted read, a call that reaches a resource the user never mentioned escalates, reads included. This is the GitHub MCP "toxic agent flow": an issue in a public repository leads the agent into the owner's private one, and every call on the way is a read. The battery gains `resource/private-repo-from-public-issue`; it went through before on every profile and now stops on each one that keeps the exposure rule.
+
+A policy can declare the task's mandate under `destinations`: exact values, or `*` and a suffix. A value on it counts as named by the user, for an autonomous agent that has nobody to name things. A bare `*` is a load error. Refusals under the exposure mark now say how to recover: name the destination in a message, or declare it.
+
+After an untrusted read, a write to a file that configures an agent escalates: `.vscode/settings.json`, `tasks.json`, `mcp.json` and `launch.json`, a root `.mcp.json`, `.windsurf/mcp.json`, `.continue/config.json`, `.zed/settings.json`. Injected writes there switched confirmations off in Copilot (CVE-2025-53773) and started a command in Cursor (CVE-2025-54135).
+
+Memory now includes Windsurf's `create_memory` and `update_memory`, and every file under `.cursor/rules/`, `.windsurf/rules/`, `.clinerules/` and `.github/instructions/`, whatever its name.
+
+`cordon audit` has five new findings: CA305, a project that points the model endpoint elsewhere (`ANTHROPIC_BASE_URL` and kin, CVE-2026-21852); CA306, a project that starts its own `.mcp.json` servers (CVE-2025-59536); CA307, a VS Code `autoApprove` setting (CVE-2025-53773), with `.vscode/settings.json` read as JSON with comments; CA308, a task that runs on folder open; CA205, `mcp-remote` before 0.1.16 (CVE-2025-6514) and MCP Inspector before 0.14.1 (CVE-2025-49596).
+
 ## [0.8.0] - 2026-09-26
 
 The LangChain middleware has been run live: a `createAgent` loop on Claude Haiku 4.5 with a poisoned review tool. The hidden layer never reached the model, a price change outside the certificate never ran, a reply to a link from the page was refused, and a reply to a link the user named went through. The record is in [docs/live-run.md](docs/live-run.md), and the script is `scripts/live-langchain.mjs`. The run also showed a refusal retold to the user as "a technical issue", so a refused quarantine now says where the value came from and that the user did not name it.

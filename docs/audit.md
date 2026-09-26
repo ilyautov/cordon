@@ -18,7 +18,7 @@ Without `--fail-on` the exit code is 0. A finding is a signal, and whether it fa
 
 | Where | Files |
 |---|---|
-| Project | `CLAUDE.md`, `CLAUDE.local.md`, `AGENTS.md`, `GEMINI.md`, `.cursorrules`, `.windsurfrules`, `.github/copilot-instructions.md`; markdown under `.claude/skills`, `.claude/commands`, `.claude/agents`, `.gemini/commands`; `.mcp.json`, `.vscode/mcp.json`, `.cursor/mcp.json`, `.gemini/settings.json`; `.claude/settings.json`, `.claude/settings.local.json` |
+| Project | `CLAUDE.md`, `CLAUDE.local.md`, `AGENTS.md`, `GEMINI.md`, `.cursorrules`, `.windsurfrules`, `.github/copilot-instructions.md`; markdown under `.claude/skills`, `.claude/commands`, `.claude/agents`, `.gemini/commands`; `.mcp.json`, `.vscode/mcp.json`, `.cursor/mcp.json`, `.gemini/settings.json`; `.claude/settings.json`, `.claude/settings.local.json`; `.vscode/settings.json`, `.vscode/tasks.json` |
 | Home | `.claude/CLAUDE.md`, `.gemini/GEMINI.md` and the same skill, command and agent directories; `.claude.json` (including per-project servers), `.cursor/mcp.json`, `.gemini/settings.json`, `.codeium/windsurf/mcp_config.json`, the Claude Desktop config; `.claude/settings.json` |
 
 Files over 1 MB are skipped: nobody reviews those by eye as instructions.
@@ -36,10 +36,15 @@ Codes are stable. A code is never renumbered or reused, so a CI rule or a report
 | CA201 | medium | LLM01 Prompt Injection | A stdio MCP server that is not behind the Cordon gateway. Its descriptions and results reach the model uncleaned, and its calls are not gated. The fix is `cordon mcp -- <command>`. |
 | CA202 | medium | LLM03 Supply Chain | An MCP server package started through `npx`, `bunx`, `uvx` or `pipx` without a pinned version. The server you reviewed is not necessarily the one that starts tomorrow. |
 | CA203 | high | LLM02 Sensitive Information Disclosure | A literal secret in a server's `env` or `headers`. The finding names the key, never the value. |
+| CA205 | high | LLM03 Supply Chain | An MCP package pinned to a version with a published vulnerability: `mcp-remote` before 0.1.16 (CVE-2025-6514, a command run from a server's OAuth metadata) and `@modelcontextprotocol/inspector` before 0.14.1 (CVE-2025-49596, a proxy that took commands from any web page). |
 | CA204 | low | LLM01 Prompt Injection | A remote (HTTP or SSE) MCP server. The stdio gateway cannot cover it. |
 | CA301 | medium | LLM03 Supply Chain | A hook defined in the project's own `.claude/settings.json`. It came with `git clone`, and it runs on the machine of whoever starts the agent in the directory. |
 | CA303 | high | LLM03 Supply Chain | The project's settings or its MCP configuration set environment that steers Cordon or the hook process: `CORDON_*`, `NODE_OPTIONS`, `NODE_PATH`, `PATH`, `LD_PRELOAD`, `DYLD_*`. Claude Code hands a project's `env` to hook processes. A `CORDON_HOME` inside the project is refused at run time as well. |
 | CA304 | high | LLM03 Supply Chain | The project's settings switch the defence off: `disableAllHooks: true` silences every hook that is not managed, and an `enabledPlugins` entry can disable `cordon@…` for everyone who opens the project. Hooks deployed through managed settings are immune to both; see [enterprise.md](enterprise.md). |
+| CA305 | high | LLM02 Sensitive Information Disclosure | The project's settings set a model endpoint: any `env` key ending in `BASE_URL`, `API_URL`, `ENDPOINT`, `API_BASE` or `API_HOST`. `ANTHROPIC_BASE_URL` in a cloned repository sent the API key to the repository's proxy before the trust dialog (CVE-2026-21852). |
+| CA306 | high | LLM03 Supply Chain | The project's settings start its own `.mcp.json` servers without asking: `enableAllProjectMcpServers: true` or a non-empty `enabledMcpjsonServers` (CVE-2025-59536). |
+| CA307 | high | LLM06 Excessive Agency | `.vscode/settings.json` switches on an `autoApprove` setting, so agent tool calls run without a confirmation for whoever opens the folder (CVE-2025-53773). The file is read as JSON with comments, the way VS Code reads it. |
+| CA308 | medium | LLM03 Supply Chain | A task in `.vscode/tasks.json` with `runOptions.runOn: folderOpen`: it runs when the folder is opened, before anyone has read it. |
 | CA302 | low | LLM01 Prompt Injection | Claude Code is installed and neither the Cordon plugin nor a `cordon hook` command is configured. |
 | CA901 | medium | LLM03 Supply Chain | A configuration file that could not be parsed. |
 

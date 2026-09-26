@@ -20,10 +20,21 @@ const MEMORY_FILES: ReadonlySet<string> = new Set([
   '.cursorrules', '.windsurfrules', 'copilot-instructions.md',
 ])
 
+/**
+ * Directories whose every file is loaded as a rule, by folded path segments.
+ * The file name is free there, so the base-name list above cannot see them.
+ */
+const RULE_DIRS: ReadonlyArray<readonly string[]> = [
+  ['.cursor', 'rules'], ['.windsurf', 'rules'], ['.clinerules'], ['.github', 'instructions'],
+]
+
 /** Tools whose whole job is writing into memory that outlives the session. */
 const MEMORY_TOOLS: ReadonlySet<string> = new Set([
   // Gemini CLI: appends a fact to GEMINI.md under the user's home.
   'save_memory',
+  // Windsurf Cascade: the tools SpAIware-style injections asked it to call,
+  // leaving an instruction every later session obeyed.
+  'create_memory', 'update_memory',
 ])
 
 /**
@@ -56,7 +67,7 @@ export function memoryTarget(call: ToolCall, policy: Policy): string | null {
     // CLAUDE.md, and the form reported is the one the harness will reload.
     for (const form of canonicalForms(value).reverse()) {
       const name = memoryName(form)
-      if (MEMORY_FILES.has(name) || extra.has(name)) return form
+      if (MEMORY_FILES.has(name) || extra.has(name) || inRuleDir(form)) return form
     }
   }
   return null
@@ -89,7 +100,7 @@ function namedInCommand(call: ToolCall, extra: ReadonlySet<string>): string | nu
       const word = raw.replace(/["'\\]/gu, '')
       if (word === '') continue
       const name = memoryName(word)
-      if (names.includes(name)) return word
+      if (names.includes(name) || inRuleDir(word)) return word
       if (/[*?[]/u.test(name) && keepsLiteralStem(name) && names.some((known) => globMatches(name, known))) return word
     }
   }
@@ -126,6 +137,17 @@ function globMatches(pattern: string, name: string): boolean {
     // memory file name. Not a match; the decision on the call is untouched.
     return false
   }
+}
+
+/** Whether a path lies inside one of RULE_DIRS, below the directory itself. */
+function inRuleDir(path: string): boolean {
+  const segments = path.replace(/\\/gu, '/').split('/').map((segment) => foldSegment(segment))
+  return RULE_DIRS.some((dir) => {
+    for (let i = 0; i + dir.length < segments.length; i++) {
+      if (dir.every((part, j) => segments[i + j] === part)) return true
+    }
+    return false
+  })
 }
 
 /**

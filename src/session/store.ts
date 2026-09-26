@@ -55,6 +55,8 @@ export interface SessionState {
    * also reads. Absent means none, as for the atoms.
    */
   userNames?: string[]
+  /** Words of the user's own messages, for naming a resource: `pacman`, `infra-docs`. */
+  userWords?: string[]
 }
 
 /** The cap on atoms the user named. Exceeding it drops the OLDEST ones (FIFO). */
@@ -162,7 +164,7 @@ export class SessionStore {
     }
 
     if (states.length === 0) {
-      return { turn: 0, taint: new TaintStore(), unredacted: false, directive: null, exposure: null, userAtoms: [], userNames: [] }
+      return { turn: 0, taint: new TaintStore(), unredacted: false, directive: null, exposure: null, userAtoms: [], userNames: [], userWords: [] }
     }
     return states.reduce(mergeStates)
   }
@@ -230,6 +232,7 @@ export class SessionStore {
     const exposure = Object.hasOwn(data, 'exposure') ? data['exposure'] : undefined
     const userAtoms = Object.hasOwn(data, 'userAtoms') ? data['userAtoms'] : undefined
     const userNames = Object.hasOwn(data, 'userNames') ? data['userNames'] : undefined
+    const userWords = Object.hasOwn(data, 'userWords') ? data['userWords'] : undefined
     if (
       typeof version !== 'number' || !READABLE.has(version) ||
       typeof turn !== 'number' || !Number.isInteger(turn) || turn < 0
@@ -275,6 +278,12 @@ export class SessionStore {
     ) {
       throw new Error(`the session state ${shown(sessionId)} is incompatible`)
     }
+    if (
+      userWords !== undefined &&
+      (!Array.isArray(userWords) || userWords.some((item) => typeof item !== 'string'))
+    ) {
+      throw new Error(`the session state ${shown(sessionId)} is incompatible`)
+    }
 
     return {
       turn,
@@ -284,6 +293,7 @@ export class SessionStore {
       exposure: isExposure(exposure) ? exposure : null,
       userAtoms: Array.isArray(userAtoms) ? (userAtoms as string[]).slice(-MAX_USER_ATOMS) : [],
       userNames: Array.isArray(userNames) ? (userNames as string[]).slice(-MAX_USER_ATOMS) : [],
+      userWords: Array.isArray(userWords) ? (userWords as string[]).slice(-MAX_USER_ATOMS) : [],
     }
   }
 
@@ -299,6 +309,7 @@ export class SessionStore {
       exposure: state.exposure ?? null,
       userAtoms: (state.userAtoms ?? []).slice(-MAX_USER_ATOMS),
       userNames: (state.userNames ?? []).slice(-MAX_USER_ATOMS),
+      userWords: (state.userWords ?? []).slice(-MAX_USER_ATOMS),
     })
 
     atomicWrite(dir, path, body)
@@ -498,6 +509,7 @@ function mergeStates(into: SessionState, other: SessionState): SessionState {
     exposure: into.exposure ?? other.exposure ?? null,
     userAtoms: mergeUserAtoms(into.userAtoms ?? [], other.userAtoms ?? []),
     userNames: mergeUserAtoms(into.userNames ?? [], other.userNames ?? []),
+    userWords: mergeUserAtoms(into.userWords ?? [], other.userWords ?? []),
   }
 }
 

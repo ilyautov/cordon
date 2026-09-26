@@ -5,7 +5,7 @@ import { comparePins, shadows, type HeldTool, type ListedTool } from './gate/pin
 import { pastedSecrets } from './gate/secrets.js'
 import { FileNotifier, SILENT, type Notifier } from './notify/notifier.js'
 import type { Policy } from './policy/defaults.js'
-import { names } from './provenance/names.js'
+import { names, words } from './provenance/names.js'
 import { atoms } from './provenance/normalize.js'
 import { TaintStore } from './provenance/store.js'
 import { sanitize } from './sanitize/index.js'
@@ -79,6 +79,7 @@ export class Cordon {
    */
   private userAtoms: string[] = []
   private userNames: string[] = []
+  private userWords: string[] = []
   /**
    * MCP tools held back in this process. Not persisted: the pins on disk are
    * the state, and every start of the gateway compares against them afresh.
@@ -107,6 +108,7 @@ export class Cordon {
     this.exposure = restored.exposure ?? null
     this.userAtoms = restored.userAtoms ?? []
     this.userNames = restored.userNames ?? []
+    this.userWords = restored.userWords ?? []
 
     // The certificate is NOT restored from disk: it is issued from the policy
     // on every run. Only the requested narrowing comes from disk, and it is
@@ -292,6 +294,7 @@ export class Cordon {
       exposure: this.exposure,
       userAtoms: this.userAtoms,
       userNames: this.userNames,
+      userWords: this.userWords,
       heldTools: this.heldTools,
     })
 
@@ -468,6 +471,7 @@ export class Cordon {
       exposure: this.exposure,
       userAtoms: this.userAtoms,
       userNames: this.userNames,
+      userWords: this.userWords,
     })
   }
 
@@ -487,7 +491,11 @@ export class Cordon {
       if (!this.userNames.includes(name)) this.userNames.push(name)
     }
     if (this.userAtoms.length > MAX_USER_ATOMS) this.userAtoms = this.userAtoms.slice(-MAX_USER_ATOMS)
+    for (const word of words(text)) {
+      if (!this.userWords.includes(word)) this.userWords.push(word)
+    }
     if (this.userNames.length > MAX_USER_ATOMS) this.userNames = this.userNames.slice(-MAX_USER_ATOMS)
+    if (this.userWords.length > MAX_USER_ATOMS) this.userWords = this.userWords.slice(-MAX_USER_ATOMS)
   }
 }
 

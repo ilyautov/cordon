@@ -1,4 +1,4 @@
-import type { EffectClass, PresenceMode, ResourceBounds, SourceView } from '../core/types.js'
+import type { ArgumentRole, EffectClass, PresenceMode, ResourceBounds, SourceView } from '../core/types.js'
 
 export interface Policy {
   mode: PresenceMode
@@ -29,6 +29,20 @@ export interface Policy {
    * separately in the event, and the key is written as `server/tool`.
    */
   toolsReturn: Record<string, SourceView>
+  /**
+   * Roles of arguments, by tool and argument name. They override the roles
+   * read from the argument's name: `to`, `recipient`, `channel` and the like
+   * are destinations, `repo` and `repository` are resources. A name the user
+   * said counts only in a destination.
+   */
+  arguments: Record<string, Record<string, ArgumentRole>>
+  /**
+   * Destinations the owner declares for the task: a value matching one counts
+   * as named by the human. Exact values, or a pattern starting with `*` that
+   * matches by suffix (`*@acme.example`). The autonomous agent's mandate:
+   * there is no human to name a destination during the run.
+   */
+  destinations: string[]
   notify: {
     /**
      * The file autonomous-mode events are written to.
@@ -131,6 +145,8 @@ export const DEFAULT_POLICY: Policy = {
   tools: {},
   trustedSources: [],
   toolsReturn: {},
+  arguments: {},
+  destinations: [],
   notify: { file: null },
   exposure: true,
   task: null,

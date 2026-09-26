@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { isAbsolute, join } from 'node:path'
 import { parse } from 'yaml'
-import type { EffectClass, PresenceMode, SourceView } from '../core/types.js'
+import type { ArgumentRole, EffectClass, PresenceMode, SourceView } from '../core/types.js'
 import { DEFAULT_POLICY, type Policy } from './defaults.js'
 
 const EFFECTS: ReadonlySet<string> = new Set<EffectClass>([
@@ -89,6 +89,19 @@ function validate(parsed: unknown, path: string): Policy {
   // The field is read as an own property: the policy file is parsed from outside.
   if (Object.hasOwn(input, 'toolsReturn')) {
     policy.toolsReturn = asViews(input['toolsReturn'], `${path}: toolsReturn`)
+  }
+
+  if (Object.hasOwn(input, 'arguments')) {
+    policy.arguments = asRoles(input['arguments'], `${path}: arguments`)
+  }
+
+  if ('destinations' in input) {
+    policy.destinations = asStrings(input.destinations, `${path}: destinations`)
+    // A bare * would name every destination there is: the mandate would be
+    // the exposure rule switched off under another name.
+    for (const entry of policy.destinations) {
+      if (entry.trim().replace(/^\*+/u, '') === '') throw new Error(`${path}: destinations: ${entry} matches everything`)
+    }
   }
 
   if ('notify' in input) {
@@ -200,7 +213,7 @@ function journalPath(value: unknown, path: string): string | null {
 }
 
 const TOP_LEVEL = [
-  'mode', 'profile', 'tools', 'trustedSources', 'toolsReturn',
+  'mode', 'profile', 'tools', 'trustedSources', 'toolsReturn', 'arguments', 'destinations',
   'notify', 'exposure', 'task', 'memory', 'mcp', 'output',
 ]
 
@@ -277,6 +290,27 @@ function asViews(value: unknown, where: string): Record<string, SourceView> {
     table[tool] = declared as SourceView
   }
 
+  return table
+}
+
+const ROLES: ReadonlySet<string> = new Set(['destination', 'resource', 'content'])
+
+/** Null prototype, for the same reason as asViews: the keys come from the file. */
+function asRoles(value: unknown, where: string): Record<string, Record<string, ArgumentRole>> {
+  const input = asObject(value, where)
+  const table = Object.create(null) as Record<string, Record<string, ArgumentRole>>
+  for (const [tool, declared] of Object.entries(input)) {
+    if (tool.trim() === '') throw new Error(`${where}: an empty tool name cannot be a declaration`)
+    const fields = asObject(declared, `${where}.${tool}`)
+    const roles = Object.create(null) as Record<string, ArgumentRole>
+    for (const [name, role] of Object.entries(fields)) {
+      if (typeof role !== 'string' || !ROLES.has(role)) {
+        throw new Error(`${where}.${tool}.${name}: expected destination, resource or content, not ${String(role)}`)
+      }
+      roles[name] = role as ArgumentRole
+    }
+    table[tool] = roles
+  }
   return table
 }
 

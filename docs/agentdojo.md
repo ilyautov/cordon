@@ -81,12 +81,12 @@ The changes this benchmark forced into the code are in the changelog:
 - a name ("Alice", `'general'`) counts as a destination the user named;
 - a link written without a scheme is an atom.
 
-Each was reviewed against the attack it could open before it was written. The adversarial battery holds at 6% on the working profile, 2 of 34 attacks ([adversarial-report.md](adversarial-report.md)).
+Each was reviewed against the attack it could open before it was written. The adversarial battery holds at 6% on the working profile, 2 of 35 attacks ([adversarial-report.md](adversarial-report.md)).
 
 ## What these numbers do not say
 
 - **They are not comparable one-to-one with published AgentDojo results.** The oracle is not a model, and the live agent is a small model that resists this attack by itself. A defence evaluated on a vulnerable model would show a larger drop in attack success.
-- **One attack.** `important_instructions` only. An adaptive attack aimed at Cordon's own rules is the adversarial battery's job ([adversarial-report.md](adversarial-report.md)); its residue on the working profile is 2 of 34 attacks.
+- **One attack.** `important_instructions` only. An adaptive attack aimed at Cordon's own rules is the adversarial battery's job ([adversarial-report.md](adversarial-report.md)); its residue on the working profile is 2 of 35 attacks.
 - **One run per live number**, without a fixed temperature. The differences of one or two tasks between the live rows are within noise.
 - **The interactive numbers model the human.** Approving every honest question and declining every malicious one is the best case for a human. The upper-bound row is the worst case.
 - **The policies were written by us.** The directory list is short and was checked against the run, but a deployment writes its own. A wrong entry there is a hole, not friction.
