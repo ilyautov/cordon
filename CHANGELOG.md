@@ -4,6 +4,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versions follo
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-09-26
+
 The LangChain middleware has been run live: a `createAgent` loop on Claude Haiku 4.5 with a poisoned review tool. The hidden layer never reached the model, a price change outside the certificate never ran, a reply to a link from the page was refused, and a reply to a link the user named went through. The record is in [docs/live-run.md](docs/live-run.md), and the script is `scripts/live-langchain.mjs`. The run also showed a refusal retold to the user as "a technical issue", so a refused quarantine now says where the value came from and that the user did not name it.
 
 A call argument that is, whole, a value the user named in their own message is no longer treated as an untrusted target, even when a page or a tool result repeats it. AgentDojo's banking suite, run with an agent that follows each task's ground truth, measured the cost: "refund GB29NWBK60161331926819" was refused because the same IBAN sat in the transaction history. The exposure rule already exempted a destination the user named, and the taint rule now agrees with it. Only the whole value is exempt: a longer text carrying the named value alongside other untrusted content is checked as before.
