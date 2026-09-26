@@ -10835,7 +10835,7 @@ function cutOut(source, cuts) {
 function stylesheetHiddenClasses(source) {
   const hidden = /* @__PURE__ */ new Set();
   const conditional = /* @__PURE__ */ new Set();
-  for (const block of source.matchAll(/<style\b[^>]*>([\s\S]*?)<\/style\s*>/giu)) {
+  for (const block of source.matchAll(/<style\b[^>]*>([\s\S]*?)(?:<\/style\s*>|$)/giu)) {
     const css = (block[1] ?? "").replace(/\/\*[\s\S]*?\*\//gu, "");
     for (const match of css.matchAll(/@[^{]+\{([\s\S]*?)\}\s*\}/gu)) {
       for (const name of (match[1] ?? "").matchAll(/\.([\w-]+)/gu)) conditional.add((name[1] ?? "").toLowerCase());
@@ -10847,8 +10847,11 @@ function stylesheetHiddenClasses(source) {
       for (const one of selectors) hidden.add(one.slice(1).toLowerCase());
     }
   }
-  for (const name of conditional) hidden.delete(name);
-  return hidden;
+  const judged = /* @__PURE__ */ new Set();
+  for (const name of conditional) {
+    if (hidden.delete(name)) judged.add(name);
+  }
+  return { hidden, judged };
 }
 function topLevelRules(css) {
   const rules = [];
@@ -10864,8 +10867,8 @@ function topLevelRules(css) {
     } else if (char === "}") {
       depth = Math.max(0, depth - 1);
       if (depth === 0) {
-        const selector = head.trim();
-        if (!nested && !selector.startsWith("@")) rules.push({ selector, body });
+        const selector2 = head.trim();
+        if (!nested && !selector2.startsWith("@")) rules.push({ selector: selector2, body });
         head = "";
         body = "";
         nested = false;
@@ -10877,6 +10880,8 @@ function topLevelRules(css) {
       else head += char;
     } else body += char;
   }
+  const selector = head.trim();
+  if (depth === 1 && !nested && selector !== "" && !selector.startsWith("@")) rules.push({ selector, body });
   return rules;
 }
 function classesOf(attrs) {
@@ -10899,7 +10904,7 @@ function stripHiddenHtml(input) {
   const mark2 = mentionMark(withoutComments);
   const source = maskUnclosedRawTags(withoutComments, mark2);
   const pageHasBackground = BACKGROUND_DECLARED.test(input);
-  const classHidden = stylesheetHiddenClasses(source);
+  const { hidden: classHidden, judged: classJudged } = stylesheetHiddenClasses(source);
   const screenReader = [];
   let screenReaderDepth = 0;
   const cuts = [];
@@ -10926,6 +10931,7 @@ function stripHiddenHtml(input) {
         return;
       }
       if (DROP_TAGS.has(tag)) {
+        if (screenReaderDepth > 0) screenReaderDepth++;
         frame.candidate = true;
         frame.text = [];
         sinks.push(frame);
@@ -10941,7 +10947,7 @@ function stripHiddenHtml(input) {
         doomedDepth = 1;
         return;
       }
-      const readerClass = classes.find((name2) => SCREEN_READER_CLASSES.has(name2));
+      const readerClass = classes.find((name2) => SCREEN_READER_CLASSES.has(name2) || classJudged.has(name2));
       if (readerClass !== void 0 && screenReaderDepth === 0) {
         frame.screenReader = true;
         frame.fallback = readerClass;

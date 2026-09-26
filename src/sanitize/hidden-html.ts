@@ -385,14 +385,17 @@ function cutOut(source: string, cuts: ReadonlyArray<readonly [number, number]>):
  * depends on a structure this pass does not model. Reading less keeps the
  * answer certain: what is collected here is hidden on every screen.
  */
-function stylesheetHiddenClasses(source: string): Set<string> {
+function stylesheetHiddenClasses(source: string): { hidden: Set<string>; judged: Set<string> } {
   const hidden = new Set<string>()
   const conditional = new Set<string>()
-  for (const block of source.matchAll(/<style\b[^>]*>([\s\S]*?)<\/style\s*>/giu)) {
+  for (const block of source.matchAll(/<style\b[^>]*>([\s\S]*?)(?:<\/style\s*>|$)/giu)) {
     const css = (block[1] ?? '').replace(/\/\*[\s\S]*?\*\//gu, '')
-    // A class the sheet styles again inside an at-rule is shown somewhere:
-    // `.print-footer{display:none}` with `@media print{.print-footer{display:block}}`
-    // is an honest print-only line, not text kept from every reader.
+    // A class the sheet styles again inside an at-rule may be shown
+    // somewhere: `.print-footer{display:none}` with
+    // `@media print{.print-footer{display:block}}` is an honest print-only
+    // line. It may also be shown nowhere a reader looks: print, or a
+    // breakpoint no screen has. So such a class is not cut outright and not
+    // trusted either: its spans are judged like a screen-reader span.
     for (const match of css.matchAll(/@[^{]+\{([\s\S]*?)\}\s*\}/gu)) {
       for (const name of (match[1] ?? '').matchAll(/\.([\w-]+)/gu)) conditional.add((name[1] ?? '').toLowerCase())
     }
@@ -403,8 +406,11 @@ function stylesheetHiddenClasses(source: string): Set<string> {
       for (const one of selectors) hidden.add(one.slice(1).toLowerCase())
     }
   }
-  for (const name of conditional) hidden.delete(name)
-  return hidden
+  const judged = new Set<string>()
+  for (const name of conditional) {
+    if (hidden.delete(name)) judged.add(name)
+  }
+  return { hidden, judged }
 }
 
 /**
@@ -439,6 +445,10 @@ function topLevelRules(css: string): Array<{ selector: string; body: string }> {
       else head += char
     } else body += char
   }
+  // A browser closes a block left open at the end of the sheet, so a rule
+  // missing its last brace still applies.
+  const selector = head.trim()
+  if (depth === 1 && !nested && selector !== '' && !selector.startsWith('@')) rules.push({ selector, body })
   return rules
 }
 
@@ -489,7 +499,7 @@ export function stripHiddenHtml(input: string): { clean: string; findings: Findi
   const mark = mentionMark(withoutComments)
   const source = maskUnclosedRawTags(withoutComments, mark)
   const pageHasBackground = BACKGROUND_DECLARED.test(input)
-  const classHidden = stylesheetHiddenClasses(source)
+  const { hidden: classHidden, judged: classJudged } = stylesheetHiddenClasses(source)
   // Screen-reader spans wait for the end of the page: whether they are labels
   // or a message is a question about all of them together.
   const screenReader: Array<{ span: readonly [number, number]; text: string; className: string }> = []
@@ -527,6 +537,10 @@ export function stripHiddenHtml(input: string): { clean: string; findings: Findi
       }
 
       if (DROP_TAGS.has(tag)) {
+        // Counted like any other child of a screen-reader span: its close
+        // takes a level, and without this an empty `<style></style>` inside
+        // the span spent the span's own level and switched its check off.
+        if (screenReaderDepth > 0) screenReaderDepth++
         frame.candidate = true
         frame.text = []
         sinks.push(frame)
@@ -551,7 +565,7 @@ export function stripHiddenHtml(input: string): { clean: string; findings: Findi
         return
       }
 
-      const readerClass = classes.find((name) => SCREEN_READER_CLASSES.has(name))
+      const readerClass = classes.find((name) => SCREEN_READER_CLASSES.has(name) || classJudged.has(name))
       if (readerClass !== undefined && screenReaderDepth === 0) {
         frame.screenReader = true
         frame.fallback = readerClass
