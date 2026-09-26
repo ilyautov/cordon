@@ -7,15 +7,14 @@ describe('names the user wrote', () => {
     expect(found).toEqual(expect.arrayContaining(['bob', 'general', 'alice']))
   })
 
-  it('does not take the first word of a sentence', () => {
-    // Every sentence opens with a capital: "Send", "Delete", "Thanks" would
-    // all become names after a few turns and exempt a call whose field
-    // happens to hold that word.
-    const found = names('Summarize the page. Delete nothing! Thanks: Post it later')
-    expect(found).not.toContain('summarize')
-    expect(found).not.toContain('delete')
-    expect(found).not.toContain('thanks')
-    expect(found).not.toContain('post')
+  it('takes the first word of a sentence too', () => {
+    // "Apple called and said I underpaid; send them the difference": the
+    // payee opens the message. AgentDojo's banking suite lost that task when
+    // names came to count only in destination fields. "Send" and "Thanks"
+    // become names as well, and exempt only a destination field whose whole
+    // value is that word: see the gate's tests.
+    const found = names('Apple called about the bill. Thanks: Post it later')
+    expect(found).toEqual(expect.arrayContaining(['apple', 'thanks', 'post']))
   })
 
   it('does not take a lowercase word', () => {

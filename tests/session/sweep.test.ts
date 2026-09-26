@@ -227,3 +227,22 @@ describe('a failed sweep stays silent', () => {
     expect(() => sweep(home(), 'current')).not.toThrow()
   })
 })
+
+describe('the sweep and one-time approvals', () => {
+  it('removes requests and approvals past their hour, and leaves fresh ones', async () => {
+    const { ApprovalStore, APPROVAL_TTL_MS } = await import('../../src/session/approvals.js')
+    const dir = home()
+    const store = new ApprovalStore(dir)
+    store.request('aaaaaaaaaaaaaaaa', { tool: 't', reason: 'r' })
+    store.approve('aaaaaaaaaaaaaaaa')
+    store.request('bbbbbbbbbbbbbbbb', { tool: 't', reason: 'r' })
+    age(store.pendingPath('aaaaaaaaaaaaaaaa'), APPROVAL_TTL_MS + 1000)
+    age(store.approvedPath('aaaaaaaaaaaaaaaa'), APPROVAL_TTL_MS + 1000)
+
+    sweep(dir, 'current')
+
+    expect(existsSync(store.pendingPath('aaaaaaaaaaaaaaaa'))).toBe(false)
+    expect(existsSync(store.approvedPath('aaaaaaaaaaaaaaaa'))).toBe(false)
+    expect(existsSync(store.pendingPath('bbbbbbbbbbbbbbbb'))).toBe(true)
+  })
+})

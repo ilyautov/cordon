@@ -16,13 +16,16 @@
  *   exactly that command, which carries no atom for anything else to catch.
  * - A lowercase word is not a name, so "don't make this public" does not name
  *   a destination called public.
- * - The first word of a sentence is not a name. Every sentence opens with a
- *   capital, and "Send", "Delete", "Thanks" would all become names within a
- *   few turns.
  * - A capitalized word shorter than three letters is not a name.
  *
- * What remains: a capitalized word inside a sentence, and a single quoted
- * token. Both are stored in lower case; the gate compares a whole argument
+ * The first word of a sentence used to be excluded too, when a name exempted
+ * a call from any field: "Send" and "Thanks" would have vouched for whatever
+ * held them. A name now counts only as the whole value of a destination
+ * field, and never for exec, so "Send" vouches for a recipient called Send
+ * and nothing else. The exclusion cost a real payee: "Apple called and said
+ * I underpaid", AgentDojo banking's user_task_11.
+ *
+ * What remains: a capitalized word, and a single quoted token. Both are stored in lower case; the gate compares a whole argument
  * value, case-folded, and never a part of one.
  */
 
@@ -34,9 +37,6 @@ const TOKEN = /^[\p{L}\p{N}][\p{L}\p{N}_.#@-]*$/u
 
 /** A word that starts with a capital letter, at least three letters long. */
 const CAPITALIZED = /\p{Lu}[\p{L}\p{N}_-]{2,}/gu
-
-/** What ends a sentence, so that the word after it is sentence-initial. */
-const SENTENCE_END = /[.!?:;\n]\s*$/u
 
 export function names(text: string): string[] {
   const found = new Set<string>()
@@ -51,8 +51,6 @@ export function names(text: string): string[] {
     const at = match.index
     // Inside a word ("McDonald" is found at "Donald"): not a word start.
     if (at > 0 && /[\p{L}\p{N}_-]/u.test(source[at - 1]!)) continue
-    const before = source.slice(0, at).replace(/["'`\u2018\u201C(]+$/u, '')
-    if (before.trim() === '' || SENTENCE_END.test(before)) continue
     found.add(match[0].toLowerCase())
   }
 

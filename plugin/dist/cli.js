@@ -9039,7 +9039,6 @@ function renderOutbound(found2) {
 var QUOTED = /(?:'([^'\s]{1,64})'|"([^"\s]{1,64})"|`([^`\s]{1,64})`|\u2018([^\u2019\s]{1,64})\u2019|\u201C([^\u201D\s]{1,64})\u201D)/gu;
 var TOKEN = /^[\p{L}\p{N}][\p{L}\p{N}_.#@-]*$/u;
 var CAPITALIZED = new RegExp("\\p{Lu}[\\p{L}\\p{N}_-]{2,}", "gu");
-var SENTENCE_END = /[.!?:;\n]\s*$/u;
 function names(text) {
   const found2 = /* @__PURE__ */ new Set();
   const source = text.normalize("NFKC");
@@ -9050,8 +9049,6 @@ function names(text) {
   for (const match of source.matchAll(CAPITALIZED)) {
     const at = match.index;
     if (at > 0 && /[\p{L}\p{N}_-]/u.test(source[at - 1])) continue;
-    const before = source.slice(0, at).replace(/["'`\u2018\u201C(]+$/u, "");
-    if (before.trim() === "" || SENTENCE_END.test(before)) continue;
     found2.add(match[0].toLowerCase());
   }
   return [...found2];
@@ -13281,6 +13278,7 @@ var SWEEP_INTERVAL_MS = 60 * 60 * 1e3;
 var SWEEP_BUDGET = 5e3;
 var SWEEP_MARK = "last-sweep";
 var OURS = /^[A-Za-z0-9_-]{1,81}(?:\.[a-f0-9]{1,32})?\.json(?:\.\d{1,10}\.tmp)?$/u;
+var APPROVALS = /^[0-9a-f]{16}\.(?:request\.json|approved)$/u;
 function sweep(cordonHome2, keepSessionId, now = Date.now()) {
   try {
     if (!due(cordonHome2, now)) return;
@@ -13288,6 +13286,7 @@ function sweep(cordonHome2, keepSessionId, now = Date.now()) {
     const keep = safeName(keepSessionId);
     sweepDir(join8(cordonHome2, "sessions"), SESSION_TTL_MS, keep, now);
     sweepDir(join8(cordonHome2, "drafts"), DRAFT_TTL_MS, keep, now);
+    sweepDir(join8(cordonHome2, "approvals"), APPROVAL_TTL_MS, keep, now, APPROVALS);
   } catch {
   }
 }
@@ -13305,7 +13304,7 @@ function mark(cordonHome2) {
   } catch {
   }
 }
-function sweepDir(dir, ttl, keep, now) {
+function sweepDir(dir, ttl, keep, now, ours = OURS) {
   let entries;
   try {
     if (!lstatSync(dir).isDirectory()) return;
@@ -13316,7 +13315,7 @@ function sweepDir(dir, ttl, keep, now) {
   let budget = SWEEP_BUDGET;
   for (const entry of entries) {
     const name = entry.name;
-    if (!entry.isFile() || !OURS.test(name)) continue;
+    if (!entry.isFile() || !ours.test(name)) continue;
     if (name.startsWith(`${keep}.`)) continue;
     if (budget <= 0) return;
     budget -= 1;

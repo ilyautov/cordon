@@ -1,6 +1,7 @@
 import { lstatSync, readdirSync, rmSync, writeFileSync, type Dirent } from 'node:fs'
 import { join } from 'node:path'
 import { safeName } from './store.js'
+import { APPROVAL_TTL_MS } from './approvals.js'
 
 /**
  * The lifetime of a session's state.
@@ -70,6 +71,9 @@ export const SWEEP_MARK = 'last-sweep'
  */
 const OURS = /^[A-Za-z0-9_-]{1,81}(?:\.[a-f0-9]{1,32})?\.json(?:\.\d{1,10}\.tmp)?$/u
 
+/** The two files a one-time approval leaves: see `approvals.ts`. */
+const APPROVALS = /^[0-9a-f]{16}\.(?:request\.json|approved)$/u
+
 /**
  * Cleans up session states and drafts whose time has run out.
  *
@@ -107,6 +111,9 @@ export function sweep(cordonHome: string, keepSessionId: string, now: number = D
     const keep = safeName(keepSessionId)
     sweepDir(join(cordonHome, 'sessions'), SESSION_TTL_MS, keep, now)
     sweepDir(join(cordonHome, 'drafts'), DRAFT_TTL_MS, keep, now)
+    // Approvals are void after their hour whatever the disk holds; this is
+    // hygiene for the reasons they carry, not a part of the rule.
+    sweepDir(join(cordonHome, 'approvals'), APPROVAL_TTL_MS, keep, now, APPROVALS)
   } catch {
     // Deliberately silent: see the function's description.
   }
@@ -163,7 +170,7 @@ function mark(cordonHome: string): void {
  * at, so even a stale check ends in deleting a link, not somebody else's
  * file.
  */
-function sweepDir(dir: string, ttl: number, keep: string, now: number): void {
+function sweepDir(dir: string, ttl: number, keep: string, now: number, ours: RegExp = OURS): void {
   let entries: Dirent[]
   try {
     // lstat rather than stat: a `sessions` replaced by a link pointing
@@ -177,7 +184,7 @@ function sweepDir(dir: string, ttl: number, keep: string, now: number): void {
   let budget = SWEEP_BUDGET
   for (const entry of entries) {
     const name = entry.name
-    if (!entry.isFile() || !OURS.test(name)) continue
+    if (!entry.isFile() || !ours.test(name)) continue
     // The currently running session's files and their abandoned temporary
     // tails. The digest inside `keep` is sixteen characters of a hash of the
     // whole identifier, so a prefix cannot belong to another session.
