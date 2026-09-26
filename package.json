@@ -68,7 +68,7 @@
   },
   "devDependencies": {
     "@langchain/core": "^1.2.9",
-    "@types/node": "^26.5.1",
+    "@types/node": "^26.6.2",
     "esbuild": "^0.28.2",
     "langchain": "^1.5.11",
     "typescript": "^7.0.2",
