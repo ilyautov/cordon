@@ -13,6 +13,7 @@ import { sanitize } from './sanitize/index.js'
 import type { Finding } from './sanitize/types.js'
 import { issue, narrow, parseDirective, parseTrustMemory } from './scope/certificate.js'
 import { MemoryLedger, type MemoryEntry } from './session/memory.js'
+import { ApprovalStore, approvalId } from './session/approvals.js'
 import { PinStore } from './session/pins.js'
 import { MAX_USER_ATOMS, SessionStore } from './session/store.js'
 
@@ -324,6 +325,57 @@ export class Cordon {
     }
 
     return decision
+  }
+
+  /**
+   * The gate, for a transport with nobody to put a question to: the MCP
+   * gateway and the LangChain middleware.
+   *
+   * There the interactive mode's question used to become a plain refusal, and
+   * an agent refused has nowhere to go. Now the refusal names a one-time
+   * approval for this exact call. The owner runs `cordon approve <id>`, and
+   * the same call, retried, goes through once. The id is bound to the
+   * session, the tool and every argument, so an approval cannot be spent on
+   * a different recipient, and it expires within the hour.
+   *
+   * Only a question is offered. A refusal the gate means as a refusal
+   * (self-protection, a held tool, anything in autonomous mode) stays one:
+   * there the policy is what should change, in the open.
+   */
+  gateUnattended(call: ToolCall): Decision {
+    const decision = this.gate(call)
+    if (decision.kind !== 'ask') return decision
+
+    const approvals = new ApprovalStore(this.cordonHome)
+    const id = approvalId(this.sessionId, call)
+    if (approvals.consume(id)) {
+      this.notifier.notify({
+        at: new Date().toISOString(),
+        decision: 'approved',
+        tool: call.tool,
+        reason: `the owner approved this call once (${id}): ${decision.reason}`,
+        source: decision.source ?? null,
+      })
+      return { kind: 'allow' }
+    }
+
+    // A failure to record the request is not allowed to become an allow or
+    // silence: it propagates, and the transport refuses the call on its own
+    // failure path.
+    approvals.request(id, { tool: call.tool, reason: decision.reason })
+    this.notifier.notify({
+      at: new Date().toISOString(),
+      decision: 'approval-requested',
+      tool: call.tool,
+      reason: `waiting for "cordon approve ${id}": ${decision.reason}`,
+      source: decision.source ?? null,
+    })
+    return {
+      kind: 'deny',
+      reason: `${decision.reason}. Nobody is here to ask, so the call is refused; the owner can allow this exact call once ` +
+        `with "cordon approve ${id}", and retrying it unchanged then goes through`,
+      ...(decision.source === undefined ? {} : { source: decision.source }),
+    }
   }
 
   /**

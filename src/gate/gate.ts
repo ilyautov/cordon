@@ -265,6 +265,12 @@ function selfProtection(parts: readonly Field[], ctx: GateContext): Decision | n
     // from variables gets around it. It closes the direct case; full closure
     // comes only from the absence of `exec` in the certificate.
     if (COMMAND_KEYS.has(folded) && typeof value === 'string') {
+      // An approval is the owner's word, and a shell can say it for them:
+      // a pending call approved, a changed MCP server re-pinned. The same
+      // substring crudeness as below, and the same answer to its limit.
+      if (APPROVES.test(value)) {
+        return { kind: 'deny', reason: 'self-protection: the command gives an approval only the owner may give' }
+      }
       for (const marker of selfMarkers(ctx.cordonHome)) {
         if (value.includes(marker)) {
           return { kind: 'deny', reason: `self-protection: the command mentions ${marker}` }
@@ -336,6 +342,9 @@ function asPaths(value: unknown): string[] | null {
 }
 
 /** Substrings whose mention in a shell command means an attempt to reach Cordon. */
+/** `cordon approve`, `cordon mcp approve`, and the same through the bundle's path. */
+const APPROVES = /(?:\bcordon|\bcli\.m?js)["']?\s+(?:mcp\s+)?approve\b/iu
+
 function selfMarkers(cordonHome: string): string[] {
   return [cordonHome, '.cordon', '.claude/settings', '.claude/hooks', '.cursor', '.codex', '.gemini']
 }

@@ -252,6 +252,22 @@ describe('adversarial: ways to get an action past the gate', () => {
     expect(gate({ tool: 'wb_update_price', args: {} }, setup()).kind).toBe('deny')
   })
 
+  it('a command that approves on the owner\'s behalf', () => {
+    // The approval is the owner's word. An agent with a shell could say it
+    // for them: a pending call approved, or a changed MCP server re-pinned.
+    for (const command of [
+      'cordon approve 0123456789abcdef',
+      'npx @ilyautov/cordon mcp approve -- node server.js',
+      'node plugin/dist/cli.js approve 0123456789abcdef',
+    ]) {
+      const decision = gate({ tool: 'Bash', args: { command } }, wide())
+      expect(decision.kind).toBe('deny')
+      expect(decision.kind === 'deny' && decision.reason).toContain('self-protection')
+    }
+    // A commit message about the feature is not the command.
+    expect(gate({ tool: 'Bash', args: { command: "git commit -m 'feat: cordon: approve once'" } }, wide()).kind).not.toBe('deny')
+  })
+
   it('4. a path passed as an array instead of a string', () => {
     const ctx = wide()
     const decision = gate(

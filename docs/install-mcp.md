@@ -90,7 +90,20 @@ task: change the price of item 99887766 to the seasonal one
 
 Atoms — links, paths, identifiers — are extracted from the task text by the same function that extracts them from user messages, and the exemption compares a call's targets against them. Without a `task`, every consequential call under the exposure mark escalates, which is the honest default for a run nobody described.
 
-In practice the mark is set before the first call. Tool descriptions are untrusted text the model reads, and poisoned descriptions are usually plain visible text, not a hidden layer. So the first `tools/list` marks the session. Through the gateway, a write, a send or a shell call is therefore always a question in interactive mode and a refusal in autonomous mode, unless `task` names its target. That is the price of the transport, and it is deliberate. A description is where the server's author speaks to your model, and pinning makes it stable, not trustworthy. A non-string `task` is a load error, not a silent default.
+In practice the mark is set before the first call. Tool descriptions are untrusted text the model reads, and poisoned descriptions are usually plain visible text, not a hidden layer. So the first `tools/list` marks the session. Through the gateway, a write, a send or a shell call is therefore always a question in interactive mode, answered as below, and a refusal in autonomous mode, unless `task` names its target. That is the price of the transport, and it is deliberate. A description is where the server's author speaks to your model, and pinning makes it stable, not trustworthy. A non-string `task` is a load error, not a silent default.
+
+### A question with nobody to ask
+
+MCP and a LangChain agent loop carry no way to put a question in front of a person and resume. In interactive mode, a question becomes a refusal that names a one-time approval:
+
+```
+Cordon refused the call to update_price: … Nobody is here to ask, so the call is refused; the owner can allow
+this exact call once with "cordon approve 3f9c0a12b7e4d651", and retrying it unchanged then goes through
+```
+
+The owner sees what waits with `cordon approve` and allows one call with `cordon approve <id>`. The journal carries the same id. The id is bound to the session, the tool and every argument, so an approval cannot be spent on a different recipient or a changed amount. It is used once, and a request or an approval older than an hour is void. Autonomous mode offers no approval: there a refusal means the policy, `destinations` or `task`, is what should change.
+
+The approval is the owner's word, and an agent with a shell could try to say it for them. The gate refuses a command that runs `cordon approve` or `cordon mcp approve`, and an exec after an untrusted read escalates anyway. The substring check is crude, the same as self-protection's: a command assembled from variables gets past it. Where the agent has no shell, it has no way to approve at all.
 
 `toolsReturn` works as everywhere else: an MCP tool's result is treated as source by default (the hidden layer is not stripped, the finding is named in the journal), and `toolsReturn: <tool>: rendered` switches stripping on for the tools whose output the human sees rendered.
 

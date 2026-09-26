@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { runGateway } from '../../../src/adapters/mcp/gateway.js'
 import { DEFAULT_POLICY, type Policy } from '../../../src/policy/defaults.js'
+import { ApprovalStore } from '../../../src/session/approvals.js'
 
 const FAKE_SERVER = fileURLToPath(new URL('./fake-server.mjs', import.meta.url))
 
@@ -176,6 +177,35 @@ describe('the MCP gateway', () => {
     expect(result.isError).toBe(true)
     expect(result.content[0]!.text).toContain('untrusted content')
     expect(callLog(env)).toEqual([])
+    expect(await gateway.stop()).toBe(0)
+  })
+
+  it('in interactive mode, a question becomes a one-time approval the owner can give', async () => {
+    const policy = basePolicy()
+    policy.mode = 'interactive'
+    const env = withCallLog()
+    const home = mkdtempSync(join(tmpdir(), 'cordon-mcp-home-'))
+    const gateway = start(policy, env, home)
+    gateway.send({ jsonrpc: '2.0', id: 1, method: 'tools/list' })
+    await gateway.next()
+
+    const call = { name: 'update_price', arguments: { nmId: '99887766', price: 1 } }
+    gateway.send({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: call })
+    const refused = (await gateway.next()).result as { isError?: boolean; content: Array<{ text: string }> }
+    expect(refused.isError).toBe(true)
+    const id = /cordon approve ([0-9a-f]{16})/u.exec(refused.content[0]!.text)?.[1]
+    expect(id).toBeDefined()
+    expect(callLog(env)).toEqual([])
+
+    expect(new ApprovalStore(home).approve(id!)).not.toBeNull()
+    gateway.send({ jsonrpc: '2.0', id: 3, method: 'tools/call', params: call })
+    const passed = (await gateway.next()).result as { isError?: boolean }
+    expect(passed.isError).toBeUndefined()
+    expect(callLog(env)).toEqual(['update_price'])
+
+    // Once: the same call again waits for the owner again.
+    gateway.send({ jsonrpc: '2.0', id: 4, method: 'tools/call', params: call })
+    expect(((await gateway.next()).result as { isError?: boolean }).isError).toBe(true)
     expect(await gateway.stop()).toBe(0)
   })
 

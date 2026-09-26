@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll } from 'vitest'
 import { ensureBuiltCli } from './support/built-cli.js'
 import { PinStore } from '../src/session/pins.js'
+import { ApprovalStore, approvalId } from '../src/session/approvals.js'
 import { spawnSync } from 'node:child_process'
 import { readFileSync, writeFileSync, mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -332,5 +333,51 @@ describe('cordon log', () => {
     const home = mkdtempSync(join(tmpdir(), 'cordon-log-'))
     writeFileSync(join(home, 'policy.yaml'), 'mode: sometimes\n')
     expect(run(['log'], '', { CORDON_HOME: home }).status).toBe(1)
+  })
+})
+
+describe('cordon approve', () => {
+  beforeAll(() => {
+    ensureBuiltCli()
+  }, 60_000)
+
+  function waiting() {
+    const home = mkdtempSync(join(tmpdir(), 'cordon-approve-'))
+    const id = approvalId('s', { tool: 'send_email', args: { to: 'a@example.com' } })
+    new ApprovalStore(home).request(id, { tool: 'send_email', reason: 'outside the certificate' })
+    return { home, id }
+  }
+
+  it('lists what waits for the owner', () => {
+    const { home, id } = waiting()
+    const { stdout, status } = run(['approve'], '', { CORDON_HOME: home })
+    expect(status).toBe(0)
+    expect(stdout).toContain(id)
+    expect(stdout).toContain('send_email')
+    expect(stdout).toContain('outside the certificate')
+  })
+
+  it('says so when nothing waits', () => {
+    const { stdout, status } = run(['approve'], '', { CORDON_HOME: mkdtempSync(join(tmpdir(), 'cordon-approve-')) })
+    expect(status).toBe(0)
+    expect(stdout).toContain('nothing waits')
+  })
+
+  it('approves one call and says back what was approved', () => {
+    const { home, id } = waiting()
+    const { stdout, status } = run(['approve', id], '', { CORDON_HOME: home })
+    expect(status).toBe(0)
+    expect(stdout).toContain('send_email')
+    expect(new ApprovalStore(home).consume(id)).toBe(true)
+  })
+
+  it('an id nothing waits under is an error, not a silent success', () => {
+    const { status, stderr } = run(['approve', '0123456789abcdef'], '', { CORDON_HOME: mkdtempSync(join(tmpdir(), 'cordon-approve-')) })
+    expect(status).toBe(1)
+    expect(stderr).toContain('nothing waits')
+  })
+
+  it('a malformed id is a usage error', () => {
+    expect(run(['approve', '../policy'], '', { CORDON_HOME: mkdtempSync(join(tmpdir(), 'cordon-approve-')) }).status).toBe(2)
   })
 })

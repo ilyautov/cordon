@@ -39,7 +39,7 @@ The middleware contract maps onto the core's entries, on three hooks:
 | `wrapToolCall`, after the handler | the result's text is observed: cleaned, recorded into provenance, and substituted when the source's view allows it. The session reading untrusted content is marked, and the gate answers the fact of the read from there |
 | `wrapModelCall`, after the model | after an untrusted read, images the user did not name and links that carry data are cut from the model's message before it enters the state: an image becomes `[image removed by Cordon: host]`, a link keeps its text and loses its address. Tool calls, the id and the metadata are kept. The cut is journalled. A token stream your application renders as it arrives has shown the tokens already; the cut reaches the state and the final result, not a live stream |
 
-`ask` lands as a refusal, exactly as in the MCP gateway: the agent loop has no one to put the question in front of and resume, so the interactive mode's question becomes a denial carrying the same reason. The refusal arrives as a `ToolMessage` with `status: 'error'` — the model reads the reason as the tool's output instead of inventing a result.
+The agent loop has no one to put a question in front of and resume, so in interactive mode a question becomes a refusal naming a one-time approval: the owner runs `cordon approve <id>`, and the same call, retried unchanged, goes through once. The details are the same as on the MCP gateway; see [install-mcp.md](install-mcp.md#a-question-with-nobody-to-ask). The refusal arrives as a `ToolMessage` with `status: 'error'` — the model reads the reason as the tool's output instead of inventing a result.
 
 ### One user turn is fed once
 

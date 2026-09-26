@@ -257,9 +257,11 @@ export function runGateway(options: GatewayOptions): Promise<number> {
  * in the protocol's own shape — a CallToolResult with isError — so the model
  * reads the reason as the tool's output instead of inventing a result.
  *
- * `ask` lands as a refusal here. The gateway has no one to ask: MCP carries
- * no way to put the question in front of the human and resume, so the
- * interactive mode's question becomes a denial carrying the same reason.
+ * The gateway has no one to ask: MCP carries no way to put the question in
+ * front of the human and resume. The core turns the interactive mode's
+ * question into a refusal naming a one-time approval the owner gives with
+ * `cordon approve`; the retried call then passes once. `ask` is still read
+ * as a refusal here should one ever arrive.
  */
 function gateCall(
   message: Extract<Message, { type: 'request' }>,
@@ -273,7 +275,7 @@ function gateCall(
   const name = typeof params?.['name'] === 'string' ? params['name'] : ''
   const call: ToolCall = { tool: name, args: asRecord(params?.['arguments']) ?? {} }
 
-  const decision = cordon.gate(call)
+  const decision = cordon.gateUnattended(call)
   if (decision.kind === 'deny' || decision.kind === 'ask') {
     sendToHost(toolError(message.id, `Cordon refused the call to ${name || '(no tool named)'}: ${decision.reason}`))
     return

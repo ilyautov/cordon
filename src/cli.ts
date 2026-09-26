@@ -14,10 +14,11 @@ import { makeDirectory } from './core/mkdir.js'
 import { loadPolicy } from './policy/load.js'
 import { PROFILES, renderPolicy } from './policy/templates.js'
 import { sanitize } from './sanitize/index.js'
+import { ApprovalStore } from './session/approvals.js'
 import { MemoryLedger } from './session/memory.js'
 
 const USAGE =
-  'usage: cordon scan <file|-> [--json] | cordon hook [--harness claude-code|gemini] | cordon mcp -- <server command...> | cordon mcp approve -- <server command...> | cordon doctor | cordon init [--profile locked|research|documents|coding] [--force] | cordon log [--last N] [--json] | cordon audit [dir] [--json|--sarif] [--fail-on high|medium|low]'
+  'usage: cordon scan <file|-> [--json] | cordon hook [--harness claude-code|gemini] | cordon mcp -- <server command...> | cordon mcp approve -- <server command...> | cordon doctor | cordon init [--profile locked|research|documents|coding] [--force] | cordon log [--last N] [--json] | cordon approve [id] | cordon audit [dir] [--json|--sarif] [--fail-on high|medium|low]'
 
 /**
  * Event parsing depends on the harness, so the harness is named explicitly.
@@ -57,6 +58,8 @@ export function main(argv: string[]): number | Promise<number> {
   if (command === 'init') return init(rest)
 
   if (command === 'log') return showLog(rest)
+
+  if (command === 'approve') return approveCall(rest)
 
   if (command !== 'scan') {
     process.stderr.write(USAGE + '\n')
@@ -705,7 +708,8 @@ function sarif(findings: AuditFinding[]): Record<string, unknown> {
  * The command must be spelled exactly as the host starts it, because that is
  * what the pins are keyed by. It is a human's command: the gateway never
  * runs it, and an agent that could run it through a shell is under the
- * exposure rule like any other exec.
+ * exposure rule like any other exec, and the gate refuses a command that
+ * names it outright.
  */
 function approve(args: string[]): number {
   const command = args[0] === '--' ? args.slice(1) : []
@@ -817,6 +821,41 @@ if (launchedDirectly()) {
  * through visible(). A line that does not parse is counted aloud, because a
  * log that quietly drops lines is a log someone can hide an event in.
  */
+/**
+ * The owner's side of a one-time approval: with no id, what waits; with one,
+ * that exact call is allowed once, and what was approved is said back.
+ *
+ * Run by a person at a terminal. The gate refuses a shell command that runs
+ * this, so an agent cannot give the approval it is waiting for.
+ */
+function approveCall(args: string[]): number {
+  const store = new ApprovalStore(cordonHome())
+  const [id] = args
+  if (id === undefined) {
+    const waiting = store.pending()
+    if (waiting.length === 0) {
+      process.stdout.write('nothing waits for approval\n')
+      return 0
+    }
+    for (const item of waiting) {
+      process.stdout.write(`${item.id}  ${visible(item.at)}  ${visible(item.tool)}\n    ${visible(item.reason)}\n`)
+    }
+    process.stdout.write('approve one call with: cordon approve <id>\n')
+    return 0
+  }
+  if (!/^[0-9a-f]{16}$/u.test(id)) {
+    process.stderr.write(`not an approval id: ${visible(id)}\n${USAGE}\n`)
+    return 2
+  }
+  const approved = store.approve(id)
+  if (approved === null) {
+    process.stderr.write(`nothing waits under ${id}: it was never asked for, was already used, or is older than an hour\n`)
+    return 1
+  }
+  process.stdout.write(`approved once: ${visible(approved.tool)}\n    ${visible(approved.reason)}\nthe agent's next identical call goes through, and only that one\n`)
+  return 0
+}
+
 function showLog(args: string[]): number {
   const asJson = args.includes('--json')
   const at = args.indexOf('--last')

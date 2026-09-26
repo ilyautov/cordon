@@ -139,12 +139,12 @@ export function createCordonMiddleware(options: CordonMiddlewareOptions) {
         args: (typeof args === 'object' && args !== null ? args : {}) as Record<string, unknown>,
       }
 
-      const decision = cordon.gate(call)
+      const decision = cordon.gateUnattended(call)
 
-      // `ask` lands as a refusal here, exactly as in the MCP gateway: the
-      // agent loop has no one to put the question in front of and resume, so
-      // the interactive mode's question becomes a denial carrying the same
-      // reason. The refusal is a ToolMessage in the protocol's own shape, so
+      // The agent loop has no one to put a question in front of and resume,
+      // so the core turns the interactive mode's question into a refusal
+      // naming a one-time approval the owner can give out of band; `ask` is
+      // still read as a refusal here should one ever arrive. The refusal is a ToolMessage in the protocol's own shape, so
       // the model reads the reason as the tool's output instead of inventing
       // a result.
       if (decision.kind === 'deny' || decision.kind === 'ask') {
