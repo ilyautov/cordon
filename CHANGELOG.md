@@ -16,6 +16,8 @@ The claim that the adapters hold no security logic is now measured. `tests/adver
 
 The certificate no longer carries `expiresAtTurn`. It was always `null`: the certificate is reissued from the policy at every user turn, so nothing ever set an expiry, and the check that read it could not fire. Code in the decision path that cannot run is still code a reviewer has to read and trust.
 
+A destination the user named by name now counts as named under the exposure mark. "Send it to Alice" or "post to the 'general' channel" named no atom, so after any untrusted read the call was refused; AgentDojo's slack suite, run with an agent that follows each task's ground truth, kept 1 task of 21 because of it. A name is a capitalized word inside a sentence or a single quoted token, and an argument whose whole value equals one exempts the call, provided every atom in it was named too. The extraction is narrow because an outside review found the wide version exploitable: a quoted phrase with a space is not a name (a quoted `rm -rf build` would have exempted an injected exec of it), neither is a lowercase word or the first word of a sentence. Names are stored apart from atoms, so they cannot push the links the user named out of the list; the taint rule does not read them; and they do not lift a mark that came back through memory. The slack suite now keeps 3 of 21 under the same agent.
+
 ## [0.7.0] - 2026-09-26
 
 The release for teams: `cordon audit` before deployment, MCP tool pinning at run time, `cordon init` profiles, `cordon log`, a managed-settings deployment guide, and npm provenance on the published package. Refusals on Claude Code now also leave with exit code 2.

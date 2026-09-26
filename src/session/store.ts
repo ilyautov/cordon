@@ -48,6 +48,13 @@ export interface SessionState {
    * An absent field means "the user named nothing", that is, an empty list.
    */
   userAtoms?: string[]
+  /**
+   * Names the user wrote (`provenance/names.ts`), kept apart from the atoms:
+   * a chatty message yields many of them, and in a shared FIFO they would
+   * push out the links and identifiers the user named, which the taint rule
+   * also reads. Absent means none, as for the atoms.
+   */
+  userNames?: string[]
 }
 
 /** The cap on atoms the user named. Exceeding it drops the OLDEST ones (FIFO). */
@@ -155,7 +162,7 @@ export class SessionStore {
     }
 
     if (states.length === 0) {
-      return { turn: 0, taint: new TaintStore(), unredacted: false, directive: null, exposure: null, userAtoms: [] }
+      return { turn: 0, taint: new TaintStore(), unredacted: false, directive: null, exposure: null, userAtoms: [], userNames: [] }
     }
     return states.reduce(mergeStates)
   }
@@ -222,6 +229,7 @@ export class SessionStore {
     const directive = Object.hasOwn(data, 'directive') ? data['directive'] : undefined
     const exposure = Object.hasOwn(data, 'exposure') ? data['exposure'] : undefined
     const userAtoms = Object.hasOwn(data, 'userAtoms') ? data['userAtoms'] : undefined
+    const userNames = Object.hasOwn(data, 'userNames') ? data['userNames'] : undefined
     if (
       typeof version !== 'number' || !READABLE.has(version) ||
       typeof turn !== 'number' || !Number.isInteger(turn) || turn < 0
@@ -261,6 +269,12 @@ export class SessionStore {
     ) {
       throw new Error(`the session state ${shown(sessionId)} is incompatible`)
     }
+    if (
+      userNames !== undefined &&
+      (!Array.isArray(userNames) || userNames.some((item) => typeof item !== 'string'))
+    ) {
+      throw new Error(`the session state ${shown(sessionId)} is incompatible`)
+    }
 
     return {
       turn,
@@ -269,6 +283,7 @@ export class SessionStore {
       directive: Array.isArray(directive) ? (directive as EffectClass[]) : null,
       exposure: isExposure(exposure) ? exposure : null,
       userAtoms: Array.isArray(userAtoms) ? (userAtoms as string[]).slice(-MAX_USER_ATOMS) : [],
+      userNames: Array.isArray(userNames) ? (userNames as string[]).slice(-MAX_USER_ATOMS) : [],
     }
   }
 
@@ -283,6 +298,7 @@ export class SessionStore {
       directive: state.directive ?? null,
       exposure: state.exposure ?? null,
       userAtoms: (state.userAtoms ?? []).slice(-MAX_USER_ATOMS),
+      userNames: (state.userNames ?? []).slice(-MAX_USER_ATOMS),
     })
 
     atomicWrite(dir, path, body)
@@ -481,6 +497,7 @@ function mergeStates(into: SessionState, other: SessionState): SessionState {
     directive: mergeDirectives(into.directive ?? null, other.directive ?? null),
     exposure: into.exposure ?? other.exposure ?? null,
     userAtoms: mergeUserAtoms(into.userAtoms ?? [], other.userAtoms ?? []),
+    userNames: mergeUserAtoms(into.userNames ?? [], other.userNames ?? []),
   }
 }
 

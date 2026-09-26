@@ -339,6 +339,37 @@ describe('two writers on one session', () => {
     expect(new SessionStore(dir).load('s').exposure).toEqual({ at: 1, source: 'https://evil.example' })
   })
 
+  it('names the user wrote survive a restart, apart from the atoms', () => {
+    const dir = home()
+    new SessionStore(dir).save('abc', { turn: 1, taint: new TaintStore(), userNames: ['alice', 'general'] })
+    const loaded = new SessionStore(dir).load('abc')
+    expect(loaded.userNames).toEqual(['alice', 'general'])
+    expect(loaded.userAtoms).toEqual([])
+  })
+
+  it('user names of the wrong shape are a refusal, not an empty list', () => {
+    const dir = home()
+    const name = nameOf(dir, 'abc')
+    writeFileSync(
+      join(dir, 'sessions', name),
+      JSON.stringify({ version: 4, turn: 1, taint: new TaintStore().toJSON(), userNames: [1] }),
+    )
+    expect(() => new SessionStore(dir).load('abc')).toThrow()
+  })
+
+  it('user names written by different writers unite', () => {
+    const dir = home()
+    const first = new SessionStore(dir)
+    const second = new SessionStore(dir)
+    const one = first.load('s')
+    const two = second.load('s')
+    one.userNames = ['alice']
+    two.userNames = ['general']
+    first.save('s', one)
+    second.save('s', two)
+    expect(new SessionStore(dir).load('s').userNames).toEqual(expect.arrayContaining(['alice', 'general']))
+  })
+
   it('user atoms named to different writers unite', () => {
     const dir = home()
     const first = new SessionStore(dir)

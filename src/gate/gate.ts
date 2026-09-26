@@ -37,6 +37,12 @@ export interface GateContext {
    */
   userAtoms?: readonly string[]
   /**
+   * Names the user wrote (`provenance/names.ts`). Read by the exposure rule
+   * only: a name is a destination the user pointed at, and nothing else here
+   * treats it as anything.
+   */
+  userNames?: readonly string[]
+  /**
    * MCP tools held back because they changed or appeared after the owner
    * approved the server. Optional: only the MCP gateway lists tools.
    */
@@ -322,7 +328,15 @@ function exposedCall(
     }
   }
   const named = new Set(ctx.userAtoms ?? [])
-  if (targets.size > 0 && [...targets].every((atom) => named.has(atom))) return null
+  const allNamed = [...targets].every((atom) => named.has(atom))
+  if (targets.size > 0 && allNamed) return null
+  // A field whose whole value is a name the user wrote — "send it to Alice"
+  // — is a destination the user named, as a link or an address would be.
+  // The rest of the call still answers: every atom must be named too. A mark
+  // carried in from memory is not lifted by it: the note was written in an
+  // earlier session under a page's influence, and a name said in this one
+  // does not vouch for what the note asks.
+  if (exposure.memory !== true && allNamed && namesADestination(parts, ctx.userNames ?? [])) return null
 
   if (exposure.memory === true) {
     return (
@@ -334,6 +348,12 @@ function exposedCall(
     `this session read untrusted content (${exposure.source}) since your last message; ` +
     'the call acts beyond reading and its destination was not named by you'
   )
+}
+
+function namesADestination(parts: readonly Field[], userNames: readonly string[]): boolean {
+  if (userNames.length === 0) return false
+  const names = new Set(userNames)
+  return parts.some(({ value }) => typeof value === 'string' && names.has(value.trim().normalize('NFKC').toLowerCase()))
 }
 
 /**

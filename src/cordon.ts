@@ -4,6 +4,7 @@ import { memoryTarget } from './gate/memory.js'
 import { comparePins, type HeldTool, type ListedTool } from './gate/pins.js'
 import { FileNotifier, SILENT, type Notifier } from './notify/notifier.js'
 import type { Policy } from './policy/defaults.js'
+import { names } from './provenance/names.js'
 import { atoms } from './provenance/normalize.js'
 import { TaintStore } from './provenance/store.js'
 import { sanitize } from './sanitize/index.js'
@@ -76,6 +77,7 @@ export class Cordon {
    * came from the human, not from the page.
    */
   private userAtoms: string[] = []
+  private userNames: string[] = []
   /**
    * MCP tools held back in this process. Not persisted: the pins on disk are
    * the state, and every start of the gateway compares against them afresh.
@@ -103,6 +105,7 @@ export class Cordon {
     this.unredacted = restored.unredacted === true
     this.exposure = restored.exposure ?? null
     this.userAtoms = restored.userAtoms ?? []
+    this.userNames = restored.userNames ?? []
 
     // The certificate is NOT restored from disk: it is issued from the policy
     // on every run. Only the requested narrowing comes from disk, and it is
@@ -160,14 +163,7 @@ export class Cordon {
     // this message and nowhere else, so the note cannot vouch for itself.
     if (parseTrustMemory(text)) this.ledger.clear()
     else this.carryMemory()
-    for (const atom of atoms(text)) {
-      if (!this.userAtoms.includes(atom)) this.userAtoms.push(atom)
-    }
-    // The cap drops the oldest names first: a destination named long ago
-    // expires before the list can grow without bound.
-    if (this.userAtoms.length > MAX_USER_ATOMS) {
-      this.userAtoms = this.userAtoms.slice(-MAX_USER_ATOMS)
-    }
+    this.rememberNamed(text)
 
     const requested = parseDirective(text)
     if (requested && requested.length > 0) {
@@ -279,6 +275,7 @@ export class Cordon {
       unredacted: this.unredacted,
       exposure: this.exposure,
       userAtoms: this.userAtoms,
+      userNames: this.userNames,
       heldTools: this.heldTools,
     })
 
@@ -328,14 +325,7 @@ export class Cordon {
    * an identifier means the same token on both sides of the comparison.
    */
   declareTask(text: string): void {
-    for (const atom of atoms(text)) {
-      if (!this.userAtoms.includes(atom)) this.userAtoms.push(atom)
-    }
-    // The same cap as for user messages, and the same order: the oldest
-    // names expire first.
-    if (this.userAtoms.length > MAX_USER_ATOMS) {
-      this.userAtoms = this.userAtoms.slice(-MAX_USER_ATOMS)
-    }
+    this.rememberNamed(text)
     this.persist()
   }
 
@@ -461,7 +451,27 @@ export class Cordon {
       directive: this.directive,
       exposure: this.exposure,
       userAtoms: this.userAtoms,
+      userNames: this.userNames,
     })
+  }
+
+  /**
+   * What the human named in their own words: atoms, and separately names
+   * (`provenance/names.ts`). Two lists with a cap each, because a chatty
+   * message yields many names, and in one list they would push out the links
+   * and identifiers the taint rule also reads. The cap drops the oldest
+   * first: a destination named long ago expires before a list can grow
+   * without bound.
+   */
+  private rememberNamed(text: string): void {
+    for (const atom of atoms(text)) {
+      if (!this.userAtoms.includes(atom)) this.userAtoms.push(atom)
+    }
+    for (const name of names(text)) {
+      if (!this.userNames.includes(name)) this.userNames.push(name)
+    }
+    if (this.userAtoms.length > MAX_USER_ATOMS) this.userAtoms = this.userAtoms.slice(-MAX_USER_ATOMS)
+    if (this.userNames.length > MAX_USER_ATOMS) this.userNames = this.userNames.slice(-MAX_USER_ATOMS)
   }
 }
 

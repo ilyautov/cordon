@@ -7855,15 +7855,15 @@ function memoryTarget(call, policy) {
   return null;
 }
 function namedInCommand(call, extra) {
-  const names = [...MEMORY_FILES, ...extra];
+  const names2 = [...MEMORY_FILES, ...extra];
   for (const { value } of fields(call.args ?? {})) {
     if (typeof value !== "string") continue;
     for (const raw of value.split(/[\s;&|<>()`=]+/u)) {
       const word = raw.replace(/["'\\]/gu, "");
       if (word === "") continue;
       const name = memoryName(word);
-      if (names.includes(name)) return word;
-      if (/[*?[]/u.test(name) && keepsLiteralStem(name) && names.some((known) => globMatches(name, known))) return word;
+      if (names2.includes(name)) return word;
+      if (/[*?[]/u.test(name) && keepsLiteralStem(name) && names2.some((known) => globMatches(name, known))) return word;
     }
   }
   return null;
@@ -8316,11 +8316,18 @@ function exposedCall(effects, parts, ctx) {
     }
   }
   const named = new Set(ctx.userAtoms ?? []);
-  if (targets.size > 0 && [...targets].every((atom) => named.has(atom))) return null;
+  const allNamed = [...targets].every((atom) => named.has(atom));
+  if (targets.size > 0 && allNamed) return null;
+  if (exposure.memory !== true && allNamed && namesADestination(parts, ctx.userNames ?? [])) return null;
   if (exposure.memory === true) {
     return `untrusted content is back in this session through memory (${exposure.source}); the call acts beyond reading and its destination was not named by you`;
   }
   return `this session read untrusted content (${exposure.source}) since your last message; the call acts beyond reading and its destination was not named by you`;
+}
+function namesADestination(parts, userNames) {
+  if (userNames.length === 0) return false;
+  const names2 = new Set(userNames);
+  return parts.some(({ value }) => typeof value === "string" && names2.has(value.trim().normalize("NFKC").toLowerCase()));
 }
 var IRREVERSIBLE = /* @__PURE__ */ new Set([
   "network-egress",
@@ -8537,6 +8544,28 @@ var FileNotifier = class {
 };
 var SILENT = { notify: () => {
 } };
+
+// src/provenance/names.ts
+var QUOTED = /(?:'([^'\s]{1,64})'|"([^"\s]{1,64})"|`([^`\s]{1,64})`|\u2018([^\u2019\s]{1,64})\u2019|\u201C([^\u201D\s]{1,64})\u201D)/gu;
+var TOKEN = /^[\p{L}\p{N}][\p{L}\p{N}_.#@-]*$/u;
+var CAPITALIZED = new RegExp("\\p{Lu}[\\p{L}\\p{N}_-]{2,}", "gu");
+var SENTENCE_END = /[.!?:;\n]\s*$/u;
+function names(text) {
+  const found = /* @__PURE__ */ new Set();
+  const source = text.normalize("NFKC");
+  for (const match of source.matchAll(QUOTED)) {
+    const token = match.slice(1).find((group) => group !== void 0);
+    if (token !== void 0 && TOKEN.test(token)) found.add(token.toLowerCase());
+  }
+  for (const match of source.matchAll(CAPITALIZED)) {
+    const at = match.index;
+    if (at > 0 && /[\p{L}\p{N}_-]/u.test(source[at - 1])) continue;
+    const before = source.slice(0, at).replace(/["'`\u2018\u201C(]+$/u, "");
+    if (before.trim() === "" || SENTENCE_END.test(before)) continue;
+    found.add(match[0].toLowerCase());
+  }
+  return [...found];
+}
 
 // src/sanitize/types.ts
 function sample(text, max = 80) {
@@ -11196,15 +11225,15 @@ var MemoryLedger = class {
    * the read is another process pruning or clearing it, not damage.
    */
   pieces() {
-    let names;
+    let names2;
     try {
-      names = readdirSync(this.dir).filter((name) => name.endsWith(".json")).sort();
+      names2 = readdirSync(this.dir).filter((name) => name.endsWith(".json")).sort();
     } catch (error) {
       if (error.code === "ENOENT") return [];
       throw new Error(`the memory ledger is unreadable: ${error.message}`);
     }
     const out = [];
-    for (const name of names) {
+    for (const name of names2) {
       const path = join3(this.dir, name);
       let raw;
       try {
@@ -11786,7 +11815,7 @@ var SessionStore = class {
       if (raw !== null) states.push(this.parseState(raw, sessionId));
     }
     if (states.length === 0) {
-      return { turn: 0, taint: new TaintStore(), unredacted: false, directive: null, exposure: null, userAtoms: [] };
+      return { turn: 0, taint: new TaintStore(), unredacted: false, directive: null, exposure: null, userAtoms: [], userNames: [] };
     }
     return states.reduce(mergeStates);
   }
@@ -11794,14 +11823,14 @@ var SessionStore = class {
   piecesOf(sessionId) {
     const dir = join5(this.cordonHome, "sessions");
     const prefix = safeName(sessionId);
-    let names;
+    let names2;
     try {
-      names = readdirSync2(dir);
+      names2 = readdirSync2(dir);
     } catch (error) {
       if (error.code === "ENOENT") return [];
       throw new Error(`the session state ${shown(sessionId)} is unreadable: ${error.message}`);
     }
-    return names.filter((name) => name === `${prefix}.json` || name.startsWith(`${prefix}.`) && name.endsWith(".json")).sort().map((name) => join5(dir, name));
+    return names2.filter((name) => name === `${prefix}.json` || name.startsWith(`${prefix}.`) && name.endsWith(".json")).sort().map((name) => join5(dir, name));
   }
   /**
    * One piece, or null when it is no longer there.
@@ -11838,6 +11867,7 @@ var SessionStore = class {
     const directive = Object.hasOwn(data, "directive") ? data["directive"] : void 0;
     const exposure = Object.hasOwn(data, "exposure") ? data["exposure"] : void 0;
     const userAtoms = Object.hasOwn(data, "userAtoms") ? data["userAtoms"] : void 0;
+    const userNames = Object.hasOwn(data, "userNames") ? data["userNames"] : void 0;
     if (typeof version !== "number" || !READABLE.has(version) || typeof turn !== "number" || !Number.isInteger(turn) || turn < 0) {
       throw new Error(`the session state ${shown(sessionId)} is incompatible`);
     }
@@ -11853,13 +11883,17 @@ var SessionStore = class {
     if (userAtoms !== void 0 && (!Array.isArray(userAtoms) || userAtoms.some((item) => typeof item !== "string"))) {
       throw new Error(`the session state ${shown(sessionId)} is incompatible`);
     }
+    if (userNames !== void 0 && (!Array.isArray(userNames) || userNames.some((item) => typeof item !== "string"))) {
+      throw new Error(`the session state ${shown(sessionId)} is incompatible`);
+    }
     return {
       turn,
       taint: TaintStore.fromJSON(taint),
       unredacted: unredacted === true,
       directive: Array.isArray(directive) ? directive : null,
       exposure: isExposure(exposure) ? exposure : null,
-      userAtoms: Array.isArray(userAtoms) ? userAtoms.slice(-MAX_USER_ATOMS) : []
+      userAtoms: Array.isArray(userAtoms) ? userAtoms.slice(-MAX_USER_ATOMS) : [],
+      userNames: Array.isArray(userNames) ? userNames.slice(-MAX_USER_ATOMS) : []
     };
   }
   save(sessionId, state) {
@@ -11872,7 +11906,8 @@ var SessionStore = class {
       unredacted: state.unredacted === true,
       directive: state.directive ?? null,
       exposure: state.exposure ?? null,
-      userAtoms: (state.userAtoms ?? []).slice(-MAX_USER_ATOMS)
+      userAtoms: (state.userAtoms ?? []).slice(-MAX_USER_ATOMS),
+      userNames: (state.userNames ?? []).slice(-MAX_USER_ATOMS)
     });
     atomicWrite(dir, path, body);
     for (const piece of this.read.get(sessionId) ?? []) {
@@ -11978,7 +12013,8 @@ function mergeStates(into, other) {
     unredacted: into.unredacted === true || other.unredacted === true,
     directive: mergeDirectives(into.directive ?? null, other.directive ?? null),
     exposure: into.exposure ?? other.exposure ?? null,
-    userAtoms: mergeUserAtoms(into.userAtoms ?? [], other.userAtoms ?? [])
+    userAtoms: mergeUserAtoms(into.userAtoms ?? [], other.userAtoms ?? []),
+    userNames: mergeUserAtoms(into.userNames ?? [], other.userNames ?? [])
   };
 }
 function mergeUserAtoms(a, b) {
@@ -12021,6 +12057,7 @@ var Cordon = class {
    * came from the human, not from the page.
    */
   userAtoms = [];
+  userNames = [];
   /**
    * MCP tools held back in this process. Not persisted: the pins on disk are
    * the state, and every start of the gateway compares against them afresh.
@@ -12040,6 +12077,7 @@ var Cordon = class {
     this.unredacted = restored.unredacted === true;
     this.exposure = restored.exposure ?? null;
     this.userAtoms = restored.userAtoms ?? [];
+    this.userNames = restored.userNames ?? [];
     this.cert = issue(this.policy, this.turn);
     this.directive = restored.directive ?? null;
     if (this.directive) this.cert = narrow(this.cert, this.directive);
@@ -12056,12 +12094,7 @@ var Cordon = class {
     this.exposure = null;
     if (parseTrustMemory(text)) this.ledger.clear();
     else this.carryMemory();
-    for (const atom of atoms(text)) {
-      if (!this.userAtoms.includes(atom)) this.userAtoms.push(atom);
-    }
-    if (this.userAtoms.length > MAX_USER_ATOMS) {
-      this.userAtoms = this.userAtoms.slice(-MAX_USER_ATOMS);
-    }
+    this.rememberNamed(text);
     const requested = parseDirective(text);
     if (requested && requested.length > 0) {
       this.directive = requested;
@@ -12149,6 +12182,7 @@ var Cordon = class {
       unredacted: this.unredacted,
       exposure: this.exposure,
       userAtoms: this.userAtoms,
+      userNames: this.userNames,
       heldTools: this.heldTools
     });
     this.recordMemory(call, decision);
@@ -12184,12 +12218,7 @@ var Cordon = class {
    * an identifier means the same token on both sides of the comparison.
    */
   declareTask(text) {
-    for (const atom of atoms(text)) {
-      if (!this.userAtoms.includes(atom)) this.userAtoms.push(atom);
-    }
-    if (this.userAtoms.length > MAX_USER_ATOMS) {
-      this.userAtoms = this.userAtoms.slice(-MAX_USER_ATOMS);
-    }
+    this.rememberNamed(text);
     this.persist();
   }
   /**
@@ -12303,8 +12332,27 @@ var Cordon = class {
       unredacted: this.unredacted,
       directive: this.directive,
       exposure: this.exposure,
-      userAtoms: this.userAtoms
+      userAtoms: this.userAtoms,
+      userNames: this.userNames
     });
+  }
+  /**
+   * What the human named in their own words: atoms, and separately names
+   * (`provenance/names.ts`). Two lists with a cap each, because a chatty
+   * message yields many names, and in one list they would push out the links
+   * and identifiers the taint rule also reads. The cap drops the oldest
+   * first: a destination named long ago expires before a list can grow
+   * without bound.
+   */
+  rememberNamed(text) {
+    for (const atom of atoms(text)) {
+      if (!this.userAtoms.includes(atom)) this.userAtoms.push(atom);
+    }
+    for (const name of names(text)) {
+      if (!this.userNames.includes(name)) this.userNames.push(name);
+    }
+    if (this.userAtoms.length > MAX_USER_ATOMS) this.userAtoms = this.userAtoms.slice(-MAX_USER_ATOMS);
+    if (this.userNames.length > MAX_USER_ATOMS) this.userNames = this.userNames.slice(-MAX_USER_ATOMS);
   }
 };
 var FROM_OUTSIDE = /* @__PURE__ */ new Set(["web", "tool", "mcp-description"]);
@@ -12386,14 +12434,14 @@ function subjectOf(source) {
   const raw = hostOf(source.label);
   if (!raw) return null;
   const host = trim(raw);
-  const names = [host];
+  const names2 = [host];
   const head = host.split(".")[0] ?? "";
   if (head.length >= MIN_NAME && !GENERIC_NAMES.has(head)) {
-    names.push(head);
+    names2.push(head);
     const squashed = head.replace(/[^a-z0-9]/gu, "");
-    if (squashed !== head && squashed.length >= MIN_NAME) names.push(squashed);
+    if (squashed !== head && squashed.length >= MIN_NAME) names2.push(squashed);
   }
-  return { host, names };
+  return { host, names: names2 };
 }
 
 // src/output/attribute.ts
@@ -13781,14 +13829,14 @@ function instructionFiles(dir) {
 }
 function markdownUnder(dir, depth) {
   if (depth < 0) return [];
-  let names;
+  let names2;
   try {
-    names = readdirSync4(dir);
+    names2 = readdirSync4(dir);
   } catch {
     return [];
   }
   const out = [];
-  for (const name of names.sort()) {
+  for (const name of names2.sort()) {
     const path = join11(dir, name);
     let stat;
     try {

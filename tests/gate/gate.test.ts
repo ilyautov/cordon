@@ -837,3 +837,53 @@ describe('gate: a value the user named is not an untrusted target', () => {
     expect(gate(call, banking(['gb29nwbk60161331926819'])).kind).not.toBe('allow')
   })
 })
+
+describe('gate: a destination the user named by name', () => {
+  // AgentDojo's slack suite, with an agent that follows each task's ground
+  // truth, kept 1 task of 21: "send it to Alice" was refused under the mark
+  // because Alice is a name, not an atom. A name counts as a destination the
+  // user named, narrowly, and only for the exposure rule.
+  const EXPOSED = { at: 1, source: 'https://evil.example/page' }
+
+  function exposed(userNames: string[], memory = false) {
+    return {
+      ...setup({ mode: 'autonomous' }),
+      exposure: memory ? { ...EXPOSED, memory: true as const } : EXPOSED,
+      userNames,
+    }
+  }
+
+  it('a call to a recipient the user named passes under the mark', () => {
+    const decision = gate({ tool: 'wb_reply', args: { recipient: 'Alice', text: 'the article is about pans' } }, exposed(['alice']))
+    expect(decision.kind).toBe('allow')
+  })
+
+  it('a recipient the user did not name still escalates', () => {
+    const decision = gate({ tool: 'wb_reply', args: { recipient: 'Eve', text: 'the article is about pans' } }, exposed(['alice']))
+    expect(decision.kind).toBe('deny')
+  })
+
+  it('an unnamed link in the same call still escalates', () => {
+    // The name exempts the destination field, not the rest of the call:
+    // every atom of the arguments must still have been named.
+    const decision = gate(
+      { tool: 'wb_reply', args: { recipient: 'Alice', text: 'see https://collect.example/in' } },
+      exposed(['alice']),
+    )
+    expect(decision.kind).toBe('deny')
+  })
+
+  it('only a whole value is a name', () => {
+    const decision = gate({ tool: 'wb_reply', args: { text: 'hello Alice, here it is' } }, exposed(['alice']))
+    expect(decision.kind).toBe('deny')
+  })
+
+  it('a name does not lift a mark that came back through memory', () => {
+    // The user said the name in this session; the note was written in an
+    // earlier one, under a page's influence, and nothing the user said here
+    // vouches for what it asks.
+    const decision = gate({ tool: 'wb_reply', args: { recipient: 'Alice', text: 'hi' } }, exposed(['alice'], true))
+    expect(decision.kind).toBe('deny')
+  })
+})
+
