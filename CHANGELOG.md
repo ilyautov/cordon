@@ -20,6 +20,8 @@ A destination the user named by name now counts as named under the exposure mark
 
 A link written without a scheme is now an atom. `www.name.com` and `host.tld/path` were no atoms at all, so a page naming its collection site that way named nothing, and a site the user named that way was not named. Every link now also yields its spelling without `https://`, so the page's `www.evil.example/drop` meets the call's `https://www.evil.example/drop`. A bare `host.tld` with neither `www` nor a path is left out, because `notes.txt` and `node.js` look exactly like it. The battery gains `atoms/link-without-scheme`: before the change it went through on the profile without the exposure rule, and now provenance stops it on every profile.
 
+The journal at `notify.file` now rotates. At 50 MB it is renamed to `<file>.1`, replacing the previous one, and a new file is started. An autonomous agent writes it for weeks, and before this it grew until it filled the disk it shares with the agent's work. Two hook processes can see a full file at once; the second finds nothing to rename and writes its event anyway.
+
 ## [0.7.0] - 2026-09-26
 
 The release for teams: `cordon audit` before deployment, MCP tool pinning at run time, `cordon init` profiles, `cordon log`, a managed-settings deployment guide, and npm provenance on the published package. Refusals on Claude Code now also leave with exit code 2.

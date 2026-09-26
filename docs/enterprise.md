@@ -117,6 +117,8 @@ notify:
   file: /var/log/cordon/events.jsonl
 ```
 
+At 50 MB the file is renamed to `events.jsonl.1`, replacing the previous one, and a new file is started. Shippers that follow renames (all of the above do) keep up without configuration. If you need a longer history, let the shipper keep it; `cordon log` reads only the current file.
+
 A failure to write the journal never turns a refusal into a pass: notification is a side effect, and the decision stands without it.
 
 ## CI

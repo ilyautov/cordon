@@ -8533,14 +8533,21 @@ function stable(value) {
 }
 
 // src/notify/notifier.ts
-import { appendFileSync } from "node:fs";
+import { appendFileSync, renameSync, statSync } from "node:fs";
 import { dirname as dirname3 } from "node:path";
+var MAX_JOURNAL_BYTES = 50 * 1024 * 1024;
 var FileNotifier = class {
-  constructor(path) {
+  constructor(path, maxBytes = MAX_JOURNAL_BYTES) {
     this.path = path;
+    this.maxBytes = maxBytes;
   }
   path;
+  maxBytes;
   notify(event) {
+    try {
+      if (statSync(this.path).size >= this.maxBytes) renameSync(this.path, `${this.path}.1`);
+    } catch {
+    }
     try {
       makeDirectory(dirname3(this.path), 493);
       appendFileSync(this.path, JSON.stringify(event) + "\n", "utf8");
@@ -11170,7 +11177,7 @@ ${removed}` : html.clean;
 
 // src/session/memory.ts
 import { randomBytes } from "node:crypto";
-import { readdirSync, readFileSync as readFileSync2, renameSync, rmSync, writeFileSync } from "node:fs";
+import { readdirSync, readFileSync as readFileSync2, renameSync as renameSync2, rmSync, writeFileSync } from "node:fs";
 import { join as join3 } from "node:path";
 var MEMORY_TTL_MS = 30 * 24 * 60 * 60 * 1e3;
 var MAX_ENTRIES = 200;
@@ -11199,7 +11206,7 @@ var MemoryLedger = class {
     const path = join3(this.dir, name);
     const temp = `${path}.${process.pid}.tmp`;
     writeFileSync(temp, JSON.stringify({ version: 1, entry: { ...entry, at } }), { encoding: "utf8", mode: 384 });
-    renameSync(temp, path);
+    renameSync2(temp, path);
     this.prune(name);
   }
   /**
@@ -11269,7 +11276,7 @@ function isEntry(value) {
 
 // src/session/pins.ts
 import { createHash as createHash2 } from "node:crypto";
-import { readFileSync as readFileSync3, renameSync as renameSync2, rmSync as rmSync2, writeFileSync as writeFileSync2 } from "node:fs";
+import { readFileSync as readFileSync3, renameSync as renameSync3, rmSync as rmSync2, writeFileSync as writeFileSync2 } from "node:fs";
 import { join as join4 } from "node:path";
 function serverId(command) {
   return createHash2("sha256").update(JSON.stringify(command), "utf8").digest("hex").slice(0, 24);
@@ -11314,7 +11321,7 @@ var PinStore = class {
     const path = this.path(command);
     const temp = `${path}.${process.pid}.tmp`;
     writeFileSync2(temp, JSON.stringify({ version: 1, command, tools: pins }), { encoding: "utf8", mode: 384 });
-    renameSync2(temp, path);
+    renameSync3(temp, path);
   }
   /** Drops a server's pins. Returns whether there were any. */
   forget(command) {
@@ -11334,7 +11341,7 @@ var PinStore = class {
 
 // src/session/store.ts
 import { createHash as createHash3, randomBytes as randomBytes2 } from "node:crypto";
-import { readFileSync as readFileSync4, readdirSync as readdirSync2, renameSync as renameSync3, rmSync as rmSync3, writeFileSync as writeFileSync3 } from "node:fs";
+import { readFileSync as readFileSync4, readdirSync as readdirSync2, renameSync as renameSync4, rmSync as rmSync3, writeFileSync as writeFileSync3 } from "node:fs";
 import { join as join5 } from "node:path";
 
 // src/provenance/decode.ts
@@ -11984,7 +11991,7 @@ function atomicWrite(dir, path, body) {
   makeDirectory(dir);
   const temp = `${path}.${process.pid}.tmp`;
   writeFileSync3(temp, body, { encoding: "utf8", mode: 384 });
-  renameSync3(temp, path);
+  renameSync4(temp, path);
 }
 function readDraft(raw) {
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return void 0;
@@ -13773,7 +13780,7 @@ function ensureUsableHome3(home) {
 }
 
 // src/audit/audit.ts
-import { readdirSync as readdirSync4, readFileSync as readFileSync5, statSync } from "node:fs";
+import { readdirSync as readdirSync4, readFileSync as readFileSync5, statSync as statSync2 } from "node:fs";
 import { join as join11, relative as relative2 } from "node:path";
 var CODES = {
   CA101: { severity: "high", owasp: "LLM01 Prompt Injection", title: "invisible characters in a file the agent loads as instruction" },
@@ -13846,7 +13853,7 @@ function markdownUnder(dir, depth) {
     const path = join11(dir, name);
     let stat;
     try {
-      stat = statSync(path);
+      stat = statSync2(path);
     } catch {
       continue;
     }
@@ -14046,7 +14053,7 @@ function readJson(path) {
 }
 function readSmall(path) {
   try {
-    if (statSync(path).size > MAX_FILE_BYTES) return null;
+    if (statSync2(path).size > MAX_FILE_BYTES) return null;
     return readFileSync5(path, "utf8");
   } catch {
     return null;
@@ -14054,7 +14061,7 @@ function readSmall(path) {
 }
 function isFile(path) {
   try {
-    return statSync(path).isFile();
+    return statSync2(path).isFile();
   } catch {
     return false;
   }
