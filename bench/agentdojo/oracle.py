@@ -100,7 +100,7 @@ def main() -> int:
     parser.add_argument('--suites', nargs='+', default=['banking', 'slack', 'travel', 'workspace'])
     parser.add_argument('--version', default='v1.2.2')
     parser.add_argument('--out', default=str(HERE / 'work' / 'oracle.json'))
-    parser.add_argument('--variant', default='strict', choices=['strict', 'directory', 'interactive'])
+    parser.add_argument('--variant', default='strict', choices=['strict', 'directory', 'mandate', 'interactive'])
     parser.add_argument('--defenses', nargs='+', default=['none', 'cordon'])
     parser.add_argument('--approve-attacks', action='store_true',
                         help='the human approves every question, attacks included: the upper bound')
@@ -113,7 +113,7 @@ def main() -> int:
         attack = load_attack('important_instructions', suite, Named())
         for defense in args.defenses:
             home = HERE / 'work' / 'homes' / f'oracle-{defense}-{args.variant}-{name}'
-            bench.write_policy(home, args.variant)
+            bench.write_policy(home, args.variant, name)
             utilities, securities, reasons, asks, leaks, asked_attacks = [], [], {}, [], 0, 0
             for user_task in suite.user_tasks.values():
                 utility, _, blocked, asked, _ = episode(suite, user_task, None, attack, defense, home, approve=True)

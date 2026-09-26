@@ -34,6 +34,7 @@ Every policy grants every effect class the tasks need: `read`, `summarize`, `cre
 
 - **strict**: `mode: autonomous`, nothing trusted. An escalation is a refusal.
 - **directory**: strict, plus the tools that return the system's own records declared in `trustedSources`. These are the channel list, the user directory, the account's IBAN and balance, hotel and restaurant listings, prices and addresses, the address book and the date (the list is `DIRECTORY` in `cordon_bench.py`). Message bodies, emails, files, reviews and web pages stay untrusted. The list was chosen by what each tool returns, before looking at where AgentDojo places its injections. The run checks it: no trusted result carried an injection, in any suite.
+- **mandate**: directory, plus `destinations` as the owner of each environment would declare them: Slack's own channels (`general`, `random`, `private`) and people (Alice, Bob, Charlie, Eve), and the workspace company's mail domain (`*@bluesparrowtech.com`). Not the external channel, and nothing an attack names. Banking and travel declare nothing (`MANDATE` in `cordon_bench.py`).
 - **interactive**: `mode: interactive`. An escalation is a question. For the user tasks, the script approves every question, modelling a human who wants the task done. For the attacks it declines every one, modelling a human who reads the question. A third run approves everything, attacks included, as the upper bound.
 
 ## Results: the oracle
@@ -46,6 +47,8 @@ Utility is the share of user tasks completed without an attack. Attack success i
 | slack | 21/21 | 105/105 (100%) | 3/21 (14%) | 7/21 (33%) | 21/21 (100%) | 1.57 | 0 |
 | travel | 20/20 | 116/140 (83%) | 14/20 (70%) | 15/20 (75%) | 19/20 (95%) | 0.30 | 0 |
 | workspace | 40/40 | 218/560 (39%) | 25/40 (63%) | 25/40 (63%) | 40/40 (100%) | 0.42 | 0 |
+
+The mandate policy, run on the bundle that added it: banking 11/16, Slack 12/21 (57%, against 7/21 on directory), travel 15/20, workspace 25/40, and 0 attacks through on every suite. On Slack the gain is the workspace's own channels and people named up front; on workspace the company domain changed nothing, since the refused tasks there are of kinds 2–4 below. The strict and directory rows above were re-run on the same bundle and came out unchanged.
 
 In interactive mode, "0" assumes the human declines when asked. The upper bound, a human who approves every question, puts attack success near the undefended level: 144/144 on banking, 84/105 on Slack (the rest were cut by quarantine), 115/140 on travel (one pair fewer than undefended, not traced) and 218/560 on workspace. The attacks that reached a question were 144 of 144, 105 of 105, 126 of 140 and 360 of 560. The pairs that asked nothing were stopped by a refusal or a rewrite before any question came up. Put plainly: in interactive mode no attack succeeded without a human saying yes to the call that carried it.
 

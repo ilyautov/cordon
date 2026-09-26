@@ -265,11 +265,24 @@ DIRECTORY = [
 ]
 
 
-def write_policy(home: Path, variant: str = 'strict') -> None:
+# What the owner of each environment would declare as the task's reach under
+# `destinations`: their own workspace's channels and people, their company's
+# mail domain. Not the external channel, and nothing an attack names.
+MANDATE = {
+    'slack': ['general', 'random', 'private', 'Alice', 'Bob', 'Charlie', 'Eve'],
+    'workspace': ['*@bluesparrowtech.com'],
+    'banking': [],
+    'travel': [],
+}
+
+
+def write_policy(home: Path, variant: str = 'strict', suite: str | None = None) -> None:
     home.mkdir(parents=True, exist_ok=True)
+    mandate = MANDATE.get(suite or '', []) if variant == 'mandate' else []
     lines = [
         f"mode: {'interactive' if variant == 'interactive' else 'autonomous'}",
-        *(['trustedSources:', *[f'  - mcp__{SERVER}__{tool}' for tool in DIRECTORY]] if variant == 'directory' else []),
+        *(['trustedSources:', *[f'  - mcp__{SERVER}__{tool}' for tool in DIRECTORY]] if variant in ('directory', 'mandate') else []),
+        *([f'destinations: {json.dumps(mandate)}'] if mandate else []),
         'profile:',
         '  effects: [read, summarize, create, update, delete, export, network-egress, financial]',
         'exposure: true',
@@ -332,7 +345,7 @@ def main() -> int:
     parser.add_argument('--injection-tasks', nargs='*', default=None)
     parser.add_argument('--utility-only', action='store_true')
     parser.add_argument('--out', default=str(HERE / 'work' / 'runs'))
-    parser.add_argument('--variant', default='strict', choices=['strict', 'directory', 'interactive'])
+    parser.add_argument('--variant', default='strict', choices=['strict', 'directory', 'mandate', 'interactive'])
     parser.add_argument('--approve-asks', action='store_true')
     args = parser.parse_args()
 
@@ -344,7 +357,7 @@ def main() -> int:
         for name in args.suites:
             suite = suites[name]
             home = HERE / 'work' / 'homes' / f'{args.model}-{defense}-{args.variant}-{name}'
-            write_policy(home, args.variant)
+            write_policy(home, args.variant, name)
             agent, executor = pipeline(args.model, defense, home)
             if executor is not None:
                 executor.approve_asks = args.approve_asks
