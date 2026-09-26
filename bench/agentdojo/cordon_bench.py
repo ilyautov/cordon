@@ -12,11 +12,15 @@ import json
 import os
 import subprocess
 import sys
+import time
 import uuid
 from collections.abc import Sequence
 from pathlib import Path
 
 import anthropic
+import httpx
+import openai
+import tenacity
 from anthropic import AsyncAnthropic
 
 import agentdojo.agent_pipeline.llms.anthropic_llm as anthropic_llm
@@ -50,6 +54,11 @@ PRICES = {  # dollars per million tokens: input, output; matched by prefix
 
 
 def price(model: str) -> tuple[float, float]:
+    # OpenRouter's `:free` variants are billed at zero and never fall back
+    # to a paid route; anything else through OpenRouter has no price here and
+    # is refused, so the key's credit cannot be spent by a typo.
+    if model.startswith('openrouter/') and model.endswith(':free'):
+        return (0.0, 0.0)
     for prefix, value in PRICES.items():
         if model.startswith(prefix):
             return value
@@ -121,6 +130,78 @@ async def metered_request(client, model, messages, tools, max_tokens, system_pro
 
 
 anthropic_llm.chat_completion_request = metered_request
+
+
+SERVED_FILE = HERE / 'work' / f'served-{os.getpid()}.jsonl'
+
+
+# The same retry AgentDojo puts on the function this replaces; without it a
+# single error completion from a free provider ends the whole suite.
+@tenacity.retry(wait=tenacity.wait_random_exponential(multiplier=1, max=40), stop=tenacity.stop_after_attempt(3),
+                reraise=True, retry=tenacity.retry_if_not_exception_type((openai.BadRequestError,
+                                                                          openai.UnprocessableEntityError)))
+def metered_openai_request(client, model, messages, tools, reasoning_effort, temperature=0.0):
+    """AgentDojo's OpenAI request, with three things it lacks.
+
+    It passes `temperature or NOT_GIVEN`, which drops 0.0: the request went
+    out with the provider's default sampling. It records no usage, so a run
+    reported zero calls. And a completion that carries an error with HTTP 200
+    became a turn with no tool calls, which scores as a resisted attack.
+    Found by Codex and Kimi reviewing the plan.
+    """
+    kwargs = {'model': model, 'messages': messages, 'temperature': temperature if temperature is not None else 0.0}
+    if tools:
+        kwargs['tools'] = tools
+        kwargs['tool_choice'] = 'auto'
+    completion = client.chat.completions.create(**kwargs)
+    choice = completion.choices[0] if completion.choices else None
+    # The error can sit on the completion or on the choice, and either way the
+    # attempt is recorded first: an error completion is still a request made.
+    error = getattr(completion, 'error', None) or getattr(choice, 'error', None)
+    finish = choice.finish_reason if choice is not None else None
+    usage = completion.usage
+    SERVED_FILE.parent.mkdir(parents=True, exist_ok=True)
+    with SERVED_FILE.open('a') as out:
+        out.write(json.dumps({
+            'at': time.time(), 'asked': model, 'served': completion.model,
+            'provider': getattr(completion, 'provider', None), 'finish': finish,
+            'error': str(error)[:200] if error else None,
+            'input': getattr(usage, 'prompt_tokens', 0), 'output': getattr(usage, 'completion_tokens', 0),
+        }) + '\n')
+    state = own()
+    state['input'] += getattr(usage, 'prompt_tokens', 0) or 0
+    state['output'] += getattr(usage, 'completion_tokens', 0) or 0
+    state['calls'] += 1
+    SPEND_FILE.parent.mkdir(parents=True, exist_ok=True)
+    temp = SPEND_FILE.with_suffix('.tmp')
+    temp.write_text(json.dumps(state))
+    os.replace(temp, SPEND_FILE)
+    if choice is None or error or finish == 'error':
+        raise openai.APIError(f'error completion from {model}: {error}',
+                              request=httpx.Request('POST', 'https://openrouter.ai/api/v1'), body=None)
+    return completion
+
+
+def episode_error_request(*args, **kwargs):
+    """Ends only the episode when the retries run out, not the whole suite.
+
+    AgentDojo turns into an error episode only the exception types it
+    catches, and among OpenAI's only a BadRequestError that reads as a
+    context overflow; any other one propagates and stops the suite. The
+    episode is logged with its error, and the report counts it apart.
+    """
+    try:
+        return metered_openai_request(*args, **kwargs)
+    except (openai.BadRequestError, openai.UnprocessableEntityError):
+        raise
+    except openai.APIError as error:
+        response = httpx.Response(400, request=httpx.Request('POST', 'https://openrouter.ai/api/v1'))
+        raise openai.BadRequestError(f'{error} (reduce the length of the messages.: counted as an error episode)',
+                                     response=response, body=None) from error
+
+
+import agentdojo.agent_pipeline.llms.openai_llm as openai_llm
+openai_llm.chat_completion_request = episode_error_request
 
 # ---------------------------------------------------------------- cordon
 
@@ -297,8 +378,21 @@ def write_policy(home: Path, variant: str = 'strict', suite: str | None = None) 
 # ---------------------------------------------------------------- run
 
 
+def make_llm(model: str):
+    if model.startswith('openrouter/'):
+        import openai
+        from agentdojo.agent_pipeline.llms.openai_llm import OpenAILLM
+        # Free models are rate-limited; the SDK's own retries honour
+        # Retry-After, and AgentDojo's three attempts alone do not outlast a
+        # minute's quota.
+        client = openai.OpenAI(base_url='https://openrouter.ai/api/v1', api_key=os.environ['OPENROUTER_API_KEY'],
+                               max_retries=8, timeout=180)
+        return OpenAILLM(client, model.removeprefix('openrouter/'), temperature=0.0)
+    return AnthropicLLM(AsyncAnthropic(), model, max_tokens=2048)
+
+
 def pipeline(model: str, defense: str, home: Path) -> tuple[AgentPipeline, CordonToolsExecutor | None]:
-    llm = AnthropicLLM(AsyncAnthropic(), model, max_tokens=2048)
+    llm = make_llm(model)
     if defense == 'cordon':
         executor = CordonToolsExecutor(home)
         elements = [SystemMessage(load_system_message(None)), InitQuery(), CordonUserTurn(home), llm,
@@ -349,41 +443,74 @@ def main() -> int:
     parser.add_argument('--approve-asks', action='store_true')
     args = parser.parse_args()
 
-    MODEL_NAMES[args.model] = 'Claude'
+    # The attack addresses the model by name; a model that is not Claude is
+    # addressed neutrally rather than misnamed.
+    MODEL_NAMES[args.model] = 'Claude' if args.model.startswith('claude') else 'AI assistant'
     price(args.model)
     suites = get_suites(args.version)
     summary = {}
     for defense in args.defense:
         for name in args.suites:
             suite = suites[name]
-            home = HERE / 'work' / 'homes' / f'{args.model}-{defense}-{args.variant}-{name}'
+            label = args.model.replace('/', '_').replace(':', '_')
+            home = HERE / 'work' / 'homes' / f'{label}-{defense}-{args.variant}-{name}'
             write_policy(home, args.variant, name)
             agent, executor = pipeline(args.model, defense, home)
             if executor is not None:
                 executor.approve_asks = args.approve_asks
-            logdir = Path(args.out) / f'{args.model}-{defense}-{args.variant}'
+            logdir = Path(args.out) / f'{label}-{defense}-{args.variant}'
             logdir.mkdir(parents=True, exist_ok=True)
+            started = time.time()
             logger = OutputLogger(str(logdir))
             logger.__enter__()
             clean = benchmark_suite_without_injections(agent, suite, logdir, False, args.user_tasks,
                                                        benchmark_version=args.version)
-            row = {'utility': mean(clean['utility_results'])}
+            base = logdir / agent.name.replace('/', '_') / name
+            row = scored(clean['utility_results'], 'utility', {task: base / task / 'none' / 'none.json'
+                                                               for task in clean['utility_results']})
             if not args.utility_only:
                 attack = load_attack(args.attack, suite, agent)
                 attacked = benchmark_suite_with_injections(agent, suite, attack, logdir, False, args.user_tasks,
                                                            args.injection_tasks, verbose=False,
                                                            benchmark_version=args.version)
-                row['utility_under_attack'] = mean(attacked['utility_results'])
-                row['attack_success'] = mean(attacked['security_results'])
-                row['cases'] = len(attacked['security_results'])
+                episodes = {pair: base / pair[0] / attack.name / f'{pair[1]}.json'
+                            for pair in attacked['security_results']}
+                row.update(scored(attacked['utility_results'], 'utility_under_attack', episodes))
+                row.update(scored(attacked['security_results'], 'attack_success', episodes))
+                row.update(scored(attacked['injection_tasks_utility_results'], 'injection_task_utility',
+                                  {task: base / task / 'none' / 'none.json'
+                                   for task in attacked['injection_tasks_utility_results']}))
             logger.__exit__(None, None, None)
-            row['tasks'] = len(clean['utility_results'])
+            row['seconds'] = round(time.time() - started)
             if executor is not None:
                 row['cordon'] = executor.stats
             summary[f'{defense}/{name}'] = row
             print(json.dumps({f'{defense}/{name}': row}), flush=True)
     print(json.dumps({'summary': summary, 'spend': spent()}, indent=2))
     return 0
+
+
+def errored(path: Path) -> bool:
+    """Whether AgentDojo logged this episode as ended by an error."""
+    try:
+        return bool(json.loads(path.read_text()).get('error'))
+    except FileNotFoundError:
+        return False
+
+
+def scored(results: dict, key: str, paths: dict) -> dict:
+    """A metric over the episodes that ran, with the errors beside it.
+
+    AgentDojo scores an episode that ended in an error, a context overflow
+    among them, as security=True and utility=False. Kept in, those would be
+    read as the model obeying an attack, so the metric is over the completed
+    episodes, the raw one is kept as it came, and the errors are named. Only
+    the episodes of this run are looked at, never others in the same log dir.
+    """
+    failed = {k for k in results if errored(paths[k])}
+    return {key: mean({k: v for k, v in results.items() if k not in failed}),
+            f'{key}_raw': mean(results),
+            f'{key}_errors': sorted('/'.join(k) if isinstance(k, tuple) else k for k in failed)}
 
 
 def mean(results: dict) -> tuple[float, int, int] | None:
