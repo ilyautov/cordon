@@ -101,9 +101,9 @@ Cordon refused the call to update_price: … Nobody is here to ask, so the call 
 this exact call once with "cordon approve 3f9c0a12b7e4d651", and retrying it unchanged then goes through
 ```
 
-The owner sees what waits with `cordon approve` and allows one call with `cordon approve <id>`. The journal carries the same id. The id is bound to the session, the tool and every argument, so an approval cannot be spent on a different recipient or a changed amount. It is used once, and a request or an approval older than an hour is void. Autonomous mode offers no approval: there a refusal means the policy, `destinations` or `task`, is what should change.
+The owner sees what waits with `cordon approve`, the arguments of each call included, and allows one call with `cordon approve <id>`. The journal carries the same id. The id is bound to the session, the tool and every argument, so an approval cannot be spent on a different recipient or a changed amount. It is used once, and a request or an approval older than an hour is void. Autonomous mode offers no approval: there a refusal means the policy, `destinations` or `task`, is what should change.
 
-The approval is the owner's word, and an agent with a shell could try to say it for them. The gate refuses a command that runs `cordon approve` or `cordon mcp approve`, and an exec after an untrusted read escalates anyway. The substring check is crude, the same as self-protection's: a command assembled from variables gets past it. Where the agent has no shell, it has no way to approve at all.
+The approval is the owner's word, and an agent with a shell could try to say it for them. The gate refuses a command that runs `cordon approve` or `cordon mcp approve`, quotes and backslashes removed first, and an exec after an untrusted read escalates anyway. The check is still crude, the same as self-protection's: a command assembled from variables gets past it. Where the agent has no shell, it has no way to approve at all.
 
 `toolsReturn` works as everywhere else: an MCP tool's result is treated as source by default (the hidden layer is not stripped, the finding is named in the journal), and `toolsReturn: <tool>: rendered` switches stripping on for the tools whose output the human sees rendered.
 

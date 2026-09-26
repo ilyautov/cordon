@@ -148,7 +148,7 @@ arguments:
   mcp__github__get_file_contents: {project: resource}
 ```
 
-**`destinations`**: the task's mandate, for an agent that runs without a human to name things. A value listed here counts as named by the user under the exposure mark, in a destination or a resource field. An entry is an exact value, or `*` followed by a suffix (`*@example.com`, `*.example.com`). An entry that is only `*` is a load error: a mandate that names everything names nothing.
+**`destinations`**: the task's mandate, for an agent that runs without a human to name things. A value listed here counts as named by the user under the exposure mark, in a destination or a resource field, and never for a call that executes something. An entry is an exact value, or `*` followed by a suffix (`*@example.com`, `*.example.com`). An entry that is only `*` is a load error: a mandate that names everything names nothing.
 
 ```yaml
 destinations: [ops@example.com, '#deploys', acme/website]
@@ -210,7 +210,7 @@ After an untrusted read, a call that reaches a resource the user never mentioned
 
 ### Agent configuration written after an untrusted read
 
-After an untrusted read, a write to a file that configures an agent escalates: `.vscode/settings.json`, `.vscode/tasks.json`, `.vscode/mcp.json`, `.vscode/launch.json`, `.mcp.json`, `.windsurf/mcp.json`, `.continue/config.json` and `.zed/settings.json`. An injected write there turns confirmations off or adds an MCP server that runs a command on the next start (CVE-2025-53773, CVE-2025-54135). The harness directories `.claude`, `.cursor`, `.codex` and `.gemini` are not writable at all; see self-protection.
+After an untrusted read, a write to a file that configures an agent escalates: `.vscode/settings.json`, `.vscode/tasks.json`, `.vscode/mcp.json`, `.vscode/launch.json`, `.mcp.json`, `.windsurf/mcp.json`, `.continue/config.json`, `.zed/settings.json`, `.zed/tasks.json` and `.devcontainer/devcontainer.json`, by a file tool or by a shell command that names the file. An injected write there turns confirmations off or adds an MCP server that runs a command on the next start (CVE-2025-53773, CVE-2025-54135). The harness directories `.claude`, `.cursor`, `.codex` and `.gemini` are not writable at all; see self-protection.
 
 ### Autonomous agents: declare what is a directory
 
