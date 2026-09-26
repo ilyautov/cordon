@@ -232,6 +232,10 @@ function observe(
 
   // Provenance is recorded here, before any decision.
   const envelope = cordon.observe(event.content, source)
+  // Known by the same key as the view declaration: Gemini names an MCP tool
+  // bare, and a `contacts` on any server must not record the bindings the
+  // owner declared for one server's `contacts`.
+  cordon.recordLookup({ ...event.call, tool: key }, [envelope.text])
 
   if (event.unreadable) {
     // There was content and we did not read it as text. So the model read

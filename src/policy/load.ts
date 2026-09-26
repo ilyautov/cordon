@@ -3,7 +3,7 @@ import { homedir } from 'node:os'
 import { isAbsolute, join } from 'node:path'
 import { parse } from 'yaml'
 import type { ArgumentRole, EffectClass, PresenceMode, SourceView } from '../core/types.js'
-import { DEFAULT_POLICY, type Policy } from './defaults.js'
+import { DEFAULT_POLICY, type Lookup, type Policy } from './defaults.js'
 
 const EFFECTS: ReadonlySet<string> = new Set<EffectClass>([
   'read', 'summarize', 'create', 'update', 'delete',
@@ -93,6 +93,10 @@ function validate(parsed: unknown, path: string): Policy {
 
   if (Object.hasOwn(input, 'arguments')) {
     policy.arguments = asRoles(input['arguments'], `${path}: arguments`)
+  }
+
+  if (Object.hasOwn(input, 'lookups')) {
+    policy.lookups = asLookups(input['lookups'], `${path}: lookups`)
   }
 
   if ('destinations' in input) {
@@ -213,7 +217,7 @@ function journalPath(value: unknown, path: string): string | null {
 }
 
 const TOP_LEVEL = [
-  'mode', 'profile', 'tools', 'trustedSources', 'toolsReturn', 'arguments', 'destinations',
+  'mode', 'profile', 'tools', 'trustedSources', 'toolsReturn', 'arguments', 'destinations', 'lookups',
   'notify', 'exposure', 'task', 'memory', 'mcp', 'output',
 ]
 
@@ -310,6 +314,37 @@ function asRoles(value: unknown, where: string): Record<string, Record<string, A
       roles[name] = role as ArgumentRole
     }
     table[tool] = roles
+  }
+  return table
+}
+
+function asLookups(value: unknown, where: string): Record<string, Lookup> {
+  const input = asObject(value, where)
+  const table = Object.create(null) as Record<string, Lookup>
+  for (const [tool, declared] of Object.entries(input)) {
+    if (tool.trim() === '') throw new Error(`${where}: an empty tool name cannot be a declaration`)
+    const entry = asObject(declared, `${where}.${tool}`)
+    onlyKnown(entry, ['query', 'key', 'values'], where, `${tool}.`)
+    const query = entry['query']
+    const key = entry['key']
+    if (typeof query !== 'string' || query.trim() === '') throw new Error(`${where}.${tool}.query: expected the name of an argument`)
+    if (typeof key !== 'string' || key.trim() === '') throw new Error(`${where}.${tool}.key: expected the name of a field`)
+    const fields = asObject(entry['values'], `${where}.${tool}.values`)
+    const values = Object.create(null) as Record<string, string[]>
+    for (const [field, consumers] of Object.entries(fields)) {
+      if (field.trim() === '') throw new Error(`${where}.${tool}.values: an empty field name binds nothing`)
+      const list = asStrings(consumers, `${where}.${tool}.values.${field}`)
+      // A consumer is a tool and one of its arguments. Without the argument
+      // a bound value would vouch for every field of the tool.
+      for (const consumer of list) {
+        if (!/^.+\.[^.]+$/u.test(consumer)) {
+          throw new Error(`${where}.${tool}.values.${field}: ${consumer} is not written tool.argument`)
+        }
+      }
+      values[field] = list
+    }
+    if (Object.keys(values).length === 0) throw new Error(`${where}.${tool}.values: binds nothing`)
+    table[tool] = { query, key, values }
   }
   return table
 }

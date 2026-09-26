@@ -4,6 +4,32 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versions follo
 
 ## [Unreleased]
 
+A policy can declare lookups: tools whose records bind a name to a value, such as a contact's name to their address or a file's name to its id. After an untrusted read, "create an event with Sarah Baker" was refused, because the address the contact search returned was a destination the user never typed. A declared lookup's value now counts as named, but only in the arguments the policy lists for it. Several conditions must all hold. The record's name must be a whole name the user said in their last message. The lookup must have been asked with that message's words. No record seen in the same turn may bind the name to anything else, or to nothing. Every lookup result of the turn must have been readable whole. A value nested inside an object in the call does not count. AgentDojo's workspace suite measured the need. The address book, a meeting's participants and a file's id cost four tasks. An extra participant injected into the meeting is still refused.
+
+A run of two to four capitalized words is a name, and so is a quoted phrase of up to five plain words with a capitalized one among them. "Le Marais Boutique" in quotes was not a name before, and the travel task that books it was refused. A longer run is not a name, and neither is any slice of it.
+
+A tool result with nothing in it no longer marks the session. The list is closed: empty, `None`, `null`, `true`, `false`, `ok`, `success`, `{}`, `[]` or a number, tested both before and after cleaning. In AgentDojo's Slack suite an `add_user_to_channel` that returned None marked the session, and the next add in the same honest loop was refused.
+
+A destination given as a number counts. A file id is a number as often as a string, and a numeric destination used to be no destination at all, so the call could not be named.
+
+The AgentDojo directory policy no longer trusts `get_channels`. AgentDojo puts an injection in a channel name, and with the list trusted an obedient agent was carried into 15 of 105 Slack attacks. The earlier 0 was luck: a `None` reply had marked the session first. The oracle's check for a trusted result that carries an injection had missed it because of YAML quoting, and it now compares letters and digits only after dropping escapes. The published Slack numbers for the directory and mandate policies relied on that trust and are corrected in [docs/agentdojo.md](docs/agentdojo.md). The oracle also gains `--order between`, which puts the attack after the task's reads and before its actions.
+
+Codex and Kimi reviewed these changes three times, and what they found is fixed:
+
+- A hidden comment around "ok" no longer passes as an empty reply.
+- A nested field beside an empty top-level list no longer borrows its binding.
+- A second, honest record padded past the size cap, or given a null address, no longer leaves the attacker's record vouching.
+- Value sets are compared without a separator that could collide.
+- The parser's quadratic duplicate-key check is replaced by a linear one. 22,000 keys with no values fit under the size cap, and parsing them had run past the hook's timeout.
+- A record with no address, and a lookup asked with no query, now count as conflicts.
+- A value keeps its case.
+- A lookup result with an explicit tag such as `!!omap`, or a record with a null or composite key, is refused as unreadable. Both slowed the parser or let two keys collapse into one.
+- An earlier turn's records no longer void the current one when two writers merge.
+- On Gemini CLI, a same-named tool on another MCP server records nothing.
+- A name said in an earlier turn no longer vouches.
+- A slice of a long capitalized run is no longer a name.
+- A lowercase quoted phrase such as "ignore the previous instructions" is no longer a name.
+
 ## [0.9.0] - 2026-09-26
 
 A name no longer exempts a call wherever it appears. After an untrusted read, "thank Alice" exempted a Bash command whose `description` said Alice, and a note field that mentioned her. A name now counts only in a field whose role is `destination`, and never for a call that executes something. With that in place, the first word of a sentence counts as a name again. It was excluded so that "Send" or "Thanks" would not vouch for whatever held them, and it cost a real payee: in AgentDojo banking, "Apple called and said I underpaid" was refused once the accidental exemption through a `subject: 'VAT'` field was gone. Now "Send" vouches only for a recipient called exactly Send. A path or a file name is a destination too: "create a file named 'hawaii-packing-list.docx'" names where the write lands, and workspace lost four tasks until it counted. Roles come from a new policy field, `arguments`, and from the argument's name when undeclared: `to`, `recipient`, `channel`, `email`, `user` and their kin are destinations, `repo` and `repository` are resources, the rest is content.

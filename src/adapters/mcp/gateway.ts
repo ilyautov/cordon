@@ -410,14 +410,17 @@ function observeToolResult(
   }
 
   const source = classifySource({ kind: 'tool', label: sourceLabel(call), tool: call.tool }, policy)
+  const texts: string[] = []
   for (const block of content) {
     const entry = asRecord(block)
     if (entry !== null && entry['type'] === 'text' && typeof entry['text'] === 'string') {
       observeInto(entry, 'text', call.tool, source, cordon)
+      texts.push(entry['text'] as string)
     } else {
       cordon.markUnredacted()
     }
   }
+  cordon.recordLookup(call, texts)
   return value
 }
 

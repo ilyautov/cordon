@@ -364,4 +364,22 @@ describe('the policy: argument roles and the task mandate', () => {
   it('a tool name inherited from the prototype is not a declaration', () => {
     expect(Object.hasOwn(load('arguments: {}\n').arguments, 'toString')).toBe(false)
   })
+
+  it('reads lookups', () => {
+    const policy = load('lookups:\n  contacts:\n    query: query\n    key: name\n    values:\n      email: [send_email.recipients]\n')
+    expect(policy.lookups['contacts']).toEqual({ query: 'query', key: 'name', values: { email: ['send_email.recipients'] } })
+  })
+
+  it('a lookup consumer without an argument stops the load', () => {
+    // A bare tool name would let the bound value fill any of its arguments.
+    expect(() => load('lookups:\n  contacts:\n    query: q\n    key: name\n    values:\n      email: [send_email]\n'))
+      .toThrow(/tool\.argument/)
+  })
+
+  it('a lookup that binds nothing, or has an unknown key, stops the load', () => {
+    expect(() => load('lookups:\n  contacts:\n    query: q\n    key: name\n    values: {}\n')).toThrow(/binds nothing/)
+    expect(() => load('lookups:\n  contacts:\n    query: q\n    key: name\n    values:\n      "": [a.b]\n')).toThrow(/lookups/)
+    expect(() => load('lookups:\n  contacts:\n    query: q\n    key: name\n    trust: all\n    values:\n      email: [a.b]\n'))
+      .toThrow(/unknown key/)
+  })
 })

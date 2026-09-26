@@ -1,5 +1,19 @@
 import type { ArgumentRole, EffectClass, PresenceMode, ResourceBounds, SourceView } from '../core/types.js'
 
+/** One lookup tool: how it is asked, and what its records bind. */
+export interface Lookup {
+  /** The argument the lookup is asked with. It must be words the user said. */
+  query: string
+  /** The field that names each record. */
+  key: string
+  /**
+   * Fields bound to that name, each with the arguments it may fill, written
+   * `tool.argument`. A file id found by name may fill an append and still not
+   * a delete, if only the append is listed.
+   */
+  values: Record<string, string[]>
+}
+
 export interface Policy {
   mode: PresenceMode
   profile: {
@@ -43,6 +57,14 @@ export interface Policy {
    * there is no human to name a destination during the run.
    */
   destinations: string[]
+  /**
+   * Tools whose results bind a name to a value: a contact's name to its
+   * address, a file's name to its id. After an untrusted read, a value bound
+   * this way to a name the user said counts as named by the user, in the
+   * call arguments listed for it and nowhere else. Only the declared fields
+   * are read; the rest of the result stays untrusted as before.
+   */
+  lookups: Record<string, Lookup>
   notify: {
     /**
      * The file autonomous-mode events are written to.
@@ -147,6 +169,7 @@ export const DEFAULT_POLICY: Policy = {
   toolsReturn: {},
   arguments: {},
   destinations: [],
+  lookups: {},
   notify: { file: null },
   exposure: true,
   task: null,

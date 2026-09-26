@@ -380,3 +380,24 @@ describe('handle: the names a source can be called', () => {
     expect(out).toEqual({})
   })
 })
+
+describe('handle: lookups', () => {
+  it('a declared lookup read through PostToolUse vouches for its value in the next call', () => {
+    // The adapter only hands the text over; the binding is the core's.
+    const e = env()
+    e.policy.tools = { mcp__ws__search_contacts_by_name: ['read'], mcp__ws__create_calendar_event: ['create'] }
+    e.policy.lookups = {
+      mcp__ws__search_contacts_by_name: {
+        query: 'query', key: 'name', values: { email: ['mcp__ws__create_calendar_event.participants'] },
+      },
+    }
+    handle({ kind: 'UserPromptSubmit', sessionId: 'lk', prompt: 'Create a lunch event with Sarah Baker.' }, e)
+    handle({ kind: 'PostToolUse', sessionId: 'lk', call: { tool: 'mcp__ws__search_contacts_by_name', args: { query: 'Sarah Baker' } },
+      response: '- email: sarah.baker@gmail.com\n  name: Sarah Baker\n' }, e)
+    const call = { tool: 'mcp__ws__create_calendar_event', args: { participants: ['sarah.baker@gmail.com'] } }
+    const out = handle({ kind: 'PreToolUse', sessionId: 'lk', call }, e)
+    expect(out.hookSpecificOutput?.permissionDecision).not.toBe('deny')
+    const other = { tool: 'mcp__ws__create_calendar_event', args: { participants: ['mark.black@evil.example'] } }
+    expect(handle({ kind: 'PreToolUse', sessionId: 'lk', call: other }, e).hookSpecificOutput?.permissionDecision).toBe('deny')
+  })
+})

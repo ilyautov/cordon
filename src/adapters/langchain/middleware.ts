@@ -207,6 +207,7 @@ function observeResult<R>(result: R, call: ToolCall, cordon: Cordon, policy: Pol
 
   if (typeof content === 'string') {
     const cleaned = observeText(content, call.tool, source, cordon)
+    cordon.recordLookup(call, [cleaned])
     return (cleaned === content ? result : withContent(result, cleaned)) as R
   }
 
@@ -216,9 +217,11 @@ function observeResult<R>(result: R, call: ToolCall, cordon: Cordon, policy: Pol
   }
 
   let changed = false
+  const texts: string[] = []
   const blocks = content.map((block) => {
     if (typeof block === 'object' && block !== null && block.type === 'text' && typeof block.text === 'string') {
       const cleaned = observeText(block.text, call.tool, source, cordon)
+      texts.push(cleaned)
       if (cleaned !== block.text) changed = true
       return { ...block, text: cleaned }
     }
@@ -227,6 +230,7 @@ function observeResult<R>(result: R, call: ToolCall, cordon: Cordon, policy: Pol
     cordon.markUnredacted()
     return block
   })
+  cordon.recordLookup(call, texts)
   return (changed ? withContent(result, blocks as MessageContent) : result) as R
 }
 

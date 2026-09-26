@@ -154,6 +154,36 @@ arguments:
 destinations: [ops@example.com, '#deploys', acme/website]
 ```
 
+**`lookups`**: tools whose records bind a name to a value, such as a contact's name to their address or a file's name to its id. After an untrusted read, the address the contact search returned for "Sarah Baker" is a destination the user never typed. A lookup declared here makes it count as named, but only in the arguments listed for it, and only when all of the following hold:
+
+- the record's name is a whole name the user said in their last message: a run of two to four capitalized words like Sarah Baker, a quoted phrase with a capitalized word in it, or an atom. A name from an earlier message does not count;
+- the lookup was asked with words from that same message;
+- no record seen in the same turn binds that name to a different value, or to no value. Records from a lookup asked with no query count here, though they never vouch;
+- the lookup ran in the current turn, after the user's last message;
+- every lookup result of the turn could be read whole. One that could not, because it is not YAML or JSON, is over 256 KB, repeats a key in a record, uses an alias or a tag, or has a null or composite key, voids every binding of the turn: it could have held the second record for a name.
+
+Only the declared fields are read. The rest of the result, a file's content or an event's description, stays untrusted as before. A value counts only in the declared argument itself or as an element of its list, never in an object nested inside the call. A list, such as a meeting's participants, is checked element by element, so one extra participant is refused.
+
+A name is compared case-folded; a value is compared exactly as written, since `AbCd` and `abcd` can be two different files. Conflicts are counted per lookup tool: two declared tools that bind one name to different values do not see each other, which is why the records of every declared lookup should come from your own system.
+
+On Gemini CLI an MCP lookup is declared under `server/tool`, the same key as its view in `toolsReturn`, so a same-named tool on another server records nothing. Its consumers keep the bare tool name, `create_event.participants`, because that is the name Gemini gives the gate. The MCP gateway has no user turns, so the task text counts as the message, and one unreadable result voids the bindings for the rest of the run.
+
+```yaml
+lookups:
+  mcp__crm__search_contacts:
+    query: query          # the argument the lookup is asked with
+    key: name             # the field that names each record
+    values:
+      email: [mcp__mail__send.to, mcp__calendar__create_event.participants]
+  mcp__drive__search_files_by_name:
+    query: filename
+    key: filename
+    values:
+      id: [mcp__drive__append_to_file.file_id]   # an append, and not a delete
+```
+
+What remains is a record that is the only one under the user's name and was written by the attacker, for example a calendar invite titled like the user's meeting, when the real meeting is not in the results. Declare a lookup only when the records it returns are written by your own system: an address book is a good candidate, a calendar that anyone can send invites to is a weaker one.
+
 **`mcp.pin`**: `true` or `false`, default `true`. When it is on, the MCP gateway pins each server's tools the first time it sees them, then hides and refuses any tool that changed or appeared since. See [install-mcp.md](install-mcp.md#tool-pinning).
 
 A key the loader does not know stops the load, whether at the top level or inside `profile`, `notify`, `memory`, `mcp` or `output`. Every field has a default, so a misspelled key used to fall silently to that default. `exposur: false` would have left the rule on, and nothing would have shown it.
@@ -214,18 +244,17 @@ After an untrusted read, a write to a file that configures an agent escalates: `
 
 ### Autonomous agents: declare what is a directory
 
-With `mode: autonomous` and nothing else declared, every tool result is untrusted, and after the first read the agent can act only on destinations the user named. On AgentDojo that left an obedient scripted agent 3 of 21 Slack tasks ([agentdojo.md](agentdojo.md)). Most of the refusals were not about injected text at all: the channel list came from `get_channels`, and `External_0` read from it counted as a destination the page chose.
+With `mode: autonomous` and nothing else declared, every tool result is untrusted, and after the first read the agent can act only on destinations the user named. On AgentDojo that left an obedient scripted agent 3 of 21 Slack tasks ([agentdojo.md](agentdojo.md)). Most of the refusals were not about injected text at all: `External_0` read from the channel list counted as a destination the page chose.
 
-Some tools return the system's own records rather than text somebody wrote: a channel list, a user directory, a balance, a price list, an address book. Declare those trusted, by tool name:
+Some tools return the system's own records rather than text somebody wrote: a balance, a price list, a user directory. Declare those trusted, by tool name:
 
 ```yaml
 trustedSources:
-  - mcp__slack__get_channels
   - mcp__slack__get_users_in_channel
-  - mcp__crm__search_contacts
+  - mcp__bank__get_balance
 ```
 
-Be strict about what goes on the list. A tool qualifies when every field it returns is written by your system, not by a person outside it. Message bodies, emails, documents, reviews, calendar descriptions and web pages never qualify, even from your own systems: that is where injections live. A trusted result sets no exposure mark and taints nothing, so a wrong entry here is a hole, not friction. On AgentDojo this declaration raised the scripted agent from 3 to 7 Slack tasks, and none of the trusted results carried an injection.
+Be strict about what goes on the list. A tool qualifies when every field it returns is written by your system, not by a person outside it. Message bodies, emails, documents, reviews, calendar descriptions and web pages never qualify, even from your own systems: that is where injections live. Names do not qualify either when outsiders choose them. A channel list looks like system data, but anyone who can create a channel writes its name, and AgentDojo puts an injection in one: with `get_channels` on this list, an obedient agent was carried into 15 of 105 attacks. A trusted result sets no exposure mark and taints nothing, so a wrong entry here is a hole, not friction.
 
 If the agent can wait for a human, `mode: interactive` is the larger lever: the same refusals become questions. On the same benchmark, the scripted agent completed every Slack task with 1.6 questions per task on average.
 

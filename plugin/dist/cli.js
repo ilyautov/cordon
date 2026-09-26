@@ -49,10 +49,10 @@ var require_identity = __commonJS({
     var NODE_TYPE = /* @__PURE__ */ Symbol.for("yaml.node.type");
     var isAlias = (node) => !!node && typeof node === "object" && node[NODE_TYPE] === ALIAS;
     var isDocument = (node) => !!node && typeof node === "object" && node[NODE_TYPE] === DOC;
-    var isMap = (node) => !!node && typeof node === "object" && node[NODE_TYPE] === MAP;
+    var isMap2 = (node) => !!node && typeof node === "object" && node[NODE_TYPE] === MAP;
     var isPair = (node) => !!node && typeof node === "object" && node[NODE_TYPE] === PAIR;
-    var isScalar = (node) => !!node && typeof node === "object" && node[NODE_TYPE] === SCALAR;
-    var isSeq = (node) => !!node && typeof node === "object" && node[NODE_TYPE] === SEQ;
+    var isScalar2 = (node) => !!node && typeof node === "object" && node[NODE_TYPE] === SCALAR;
+    var isSeq2 = (node) => !!node && typeof node === "object" && node[NODE_TYPE] === SEQ;
     function isCollection(node) {
       if (node && typeof node === "object")
         switch (node[NODE_TYPE]) {
@@ -73,7 +73,7 @@ var require_identity = __commonJS({
         }
       return false;
     }
-    var hasAnchor = (node) => (isScalar(node) || isCollection(node)) && !!node.anchor;
+    var hasAnchor = (node) => (isScalar2(node) || isCollection(node)) && !!node.anchor;
     exports.ALIAS = ALIAS;
     exports.DOC = DOC;
     exports.MAP = MAP;
@@ -85,11 +85,11 @@ var require_identity = __commonJS({
     exports.isAlias = isAlias;
     exports.isCollection = isCollection;
     exports.isDocument = isDocument;
-    exports.isMap = isMap;
+    exports.isMap = isMap2;
     exports.isNode = isNode;
     exports.isPair = isPair;
-    exports.isScalar = isScalar;
-    exports.isSeq = isSeq;
+    exports.isScalar = isScalar2;
+    exports.isSeq = isSeq2;
   }
 });
 
@@ -101,7 +101,7 @@ var require_visit = __commonJS({
     var BREAK = /* @__PURE__ */ Symbol("break visit");
     var SKIP = /* @__PURE__ */ Symbol("skip children");
     var REMOVE = /* @__PURE__ */ Symbol("remove node");
-    function visit2(node, visitor) {
+    function visit3(node, visitor) {
       const visitor_ = initVisitor(visitor);
       if (identity.isDocument(node)) {
         const cd = visit_(null, node.contents, visitor_, Object.freeze([node]));
@@ -110,9 +110,9 @@ var require_visit = __commonJS({
       } else
         visit_(null, node, visitor_, Object.freeze([]));
     }
-    visit2.BREAK = BREAK;
-    visit2.SKIP = SKIP;
-    visit2.REMOVE = REMOVE;
+    visit3.BREAK = BREAK;
+    visit3.SKIP = SKIP;
+    visit3.REMOVE = REMOVE;
     function visit_(key, node, visitor, path) {
       const ctrl = callVisitor(key, node, visitor, path);
       if (identity.isNode(ctrl) || identity.isPair(ctrl)) {
@@ -246,7 +246,7 @@ var require_visit = __commonJS({
         throw new Error(`Cannot replace node with ${pt} parent`);
       }
     }
-    exports.visit = visit2;
+    exports.visit = visit3;
     exports.visitAsync = visitAsync;
   }
 });
@@ -256,7 +256,7 @@ var require_directives = __commonJS({
   "node_modules/yaml/dist/doc/directives.js"(exports) {
     "use strict";
     var identity = require_identity();
-    var visit2 = require_visit();
+    var visit3 = require_visit();
     var escapeChars = {
       "!": "%21",
       ",": "%2C",
@@ -400,7 +400,7 @@ var require_directives = __commonJS({
         let tagNames;
         if (doc && tagEntries.length > 0 && identity.isNode(doc.contents)) {
           const tags = {};
-          visit2.visit(doc.contents, (_key, node) => {
+          visit3.visit(doc.contents, (_key, node) => {
             if (identity.isNode(node) && node.tag)
               tags[node.tag] = true;
           });
@@ -427,7 +427,7 @@ var require_anchors = __commonJS({
   "node_modules/yaml/dist/doc/anchors.js"(exports) {
     "use strict";
     var identity = require_identity();
-    var visit2 = require_visit();
+    var visit3 = require_visit();
     function anchorIsValid(anchor) {
       if (/[\x00-\x19\s,[\]{}]/.test(anchor)) {
         const sa = JSON.stringify(anchor);
@@ -438,7 +438,7 @@ var require_anchors = __commonJS({
     }
     function anchorNames(root) {
       const anchors = /* @__PURE__ */ new Set();
-      visit2.visit(root, {
+      visit3.visit(root, {
         Value(_key, node) {
           if (node.anchor)
             anchors.add(node.anchor);
@@ -618,7 +618,7 @@ var require_Alias = __commonJS({
   "node_modules/yaml/dist/nodes/Alias.js"(exports) {
     "use strict";
     var anchors = require_anchors();
-    var visit2 = require_visit();
+    var visit3 = require_visit();
     var identity = require_identity();
     var Node = require_Node();
     var toJS = require_toJS();
@@ -644,7 +644,7 @@ var require_Alias = __commonJS({
           nodes = ctx.aliasResolveCache;
         } else {
           nodes = [];
-          visit2.visit(doc, {
+          visit3.visit(doc, {
             Node: (_key, node) => {
               if (identity.isAlias(node) || identity.hasAnchor(node))
                 nodes.push(node);
@@ -1093,16 +1093,16 @@ var require_foldFlowLines = __commonJS({
         onFold();
       let res = text.slice(0, folds[0]);
       for (let i2 = 0; i2 < folds.length; ++i2) {
-        const fold4 = folds[i2];
+        const fold5 = folds[i2];
         const end2 = folds[i2 + 1] || text.length;
-        if (fold4 === 0)
+        if (fold5 === 0)
           res = `
 ${indent}${text.slice(0, end2)}`;
         else {
-          if (mode === FOLD_QUOTED && escapedFolds[fold4])
-            res += `${text[fold4]}\\`;
+          if (mode === FOLD_QUOTED && escapedFolds[fold5])
+            res += `${text[fold5]}\\`;
           res += `
-${indent}${text.slice(fold4 + 1, end2)}`;
+${indent}${text.slice(fold5 + 1, end2)}`;
         }
       }
       return res;
@@ -4197,9 +4197,9 @@ var require_resolve_flow_collection = __commonJS({
     var blockMsg = "Block collections are not allowed within flow collections";
     var isBlock = (token) => token && (token.type === "block-map" || token.type === "block-seq");
     function resolveFlowCollection({ composeNode, composeEmptyNode }, ctx, fc, onError, tag) {
-      const isMap = fc.start.source === "{";
-      const fcName = isMap ? "flow map" : "flow sequence";
-      const NodeClass = tag?.nodeClass ?? (isMap ? YAMLMap.YAMLMap : YAMLSeq.YAMLSeq);
+      const isMap2 = fc.start.source === "{";
+      const fcName = isMap2 ? "flow map" : "flow sequence";
+      const NodeClass = tag?.nodeClass ?? (isMap2 ? YAMLMap.YAMLMap : YAMLSeq.YAMLSeq);
       const coll = new NodeClass(ctx.schema);
       coll.flow = true;
       const atRoot = ctx.atRoot;
@@ -4235,7 +4235,7 @@ var require_resolve_flow_collection = __commonJS({
             offset = props.end;
             continue;
           }
-          if (!isMap && ctx.options.strict && utilContainsNewline.containsNewline(key))
+          if (!isMap2 && ctx.options.strict && utilContainsNewline.containsNewline(key))
             onError(
               key,
               // checked by containsNewline()
@@ -4275,7 +4275,7 @@ var require_resolve_flow_collection = __commonJS({
             }
           }
         }
-        if (!isMap && !sep4 && !props.found) {
+        if (!isMap2 && !sep4 && !props.found) {
           const valueNode = value ? composeNode(ctx, value, props, onError) : composeEmptyNode(ctx, props.end, sep4, null, props, onError);
           coll.items.push(valueNode);
           offset = valueNode.range[2];
@@ -4298,7 +4298,7 @@ var require_resolve_flow_collection = __commonJS({
             startOnNewline: false
           });
           if (valueProps.found) {
-            if (!isMap && !props.found && ctx.options.strict) {
+            if (!isMap2 && !props.found && ctx.options.strict) {
               if (sep4)
                 for (const st of sep4) {
                   if (st === valueProps.found)
@@ -4330,7 +4330,7 @@ var require_resolve_flow_collection = __commonJS({
           const pair = new Pair.Pair(keyNode, valueNode);
           if (ctx.options.keepSourceTokens)
             pair.srcToken = collItem;
-          if (isMap) {
+          if (isMap2) {
             const map = coll;
             if (utilMapIncludes.mapIncludes(ctx, map.items, keyNode))
               onError(keyStart, "DUPLICATE_KEY", "Map keys must be unique");
@@ -4346,7 +4346,7 @@ var require_resolve_flow_collection = __commonJS({
           offset = valueNode ? valueNode.range[2] : valueProps.end;
         }
       }
-      const expectedEnd = isMap ? "}" : "]";
+      const expectedEnd = isMap2 ? "}" : "]";
       const [ce, ...ee] = fc.end;
       let cePos = offset;
       if (ce?.source === expectedEnd)
@@ -4741,8 +4741,8 @@ var require_resolve_flow_scalar = __commonJS({
         if (ch === "\r" && source[i + 1] === "\n")
           continue;
         if (ch === "\n") {
-          const { fold: fold4, offset } = foldNewline(source, i);
-          res += fold4;
+          const { fold: fold5, offset } = foldNewline(source, i);
+          res += fold5;
           i = offset;
         } else if (ch === "\\") {
           let next = source[++i];
@@ -4782,19 +4782,19 @@ var require_resolve_flow_scalar = __commonJS({
       return res;
     }
     function foldNewline(source, offset) {
-      let fold4 = "";
+      let fold5 = "";
       let ch = source[offset + 1];
       while (ch === " " || ch === "	" || ch === "\n" || ch === "\r") {
         if (ch === "\r" && source[offset + 2] !== "\n")
           break;
         if (ch === "\n")
-          fold4 += "\n";
+          fold5 += "\n";
         offset += 1;
         ch = source[offset + 1];
       }
-      if (!fold4)
-        fold4 = " ";
-      return { fold: fold4, offset };
+      if (!fold5)
+        fold5 = " ";
+      return { fold: fold5, offset };
     }
     var escapeCodes = {
       "0": "\0",
@@ -5566,15 +5566,15 @@ var require_cst_visit = __commonJS({
     var BREAK = /* @__PURE__ */ Symbol("break visit");
     var SKIP = /* @__PURE__ */ Symbol("skip children");
     var REMOVE = /* @__PURE__ */ Symbol("remove item");
-    function visit2(cst, visitor) {
+    function visit3(cst, visitor) {
       if ("type" in cst && cst.type === "document")
         cst = { start: cst.start, value: cst.value };
       _visit(Object.freeze([]), cst, visitor);
     }
-    visit2.BREAK = BREAK;
-    visit2.SKIP = SKIP;
-    visit2.REMOVE = REMOVE;
-    visit2.itemAtPath = (cst, path) => {
+    visit3.BREAK = BREAK;
+    visit3.SKIP = SKIP;
+    visit3.REMOVE = REMOVE;
+    visit3.itemAtPath = (cst, path) => {
       let item = cst;
       for (const [field3, index] of path) {
         const tok = item?.[field3];
@@ -5585,8 +5585,8 @@ var require_cst_visit = __commonJS({
       }
       return item;
     };
-    visit2.parentCollection = (cst, path) => {
-      const parent = visit2.itemAtPath(cst, path.slice(0, -1));
+    visit3.parentCollection = (cst, path) => {
+      const parent = visit3.itemAtPath(cst, path.slice(0, -1));
       const field3 = path[path.length - 1][0];
       const coll = parent?.[field3];
       if (coll && "items" in coll)
@@ -5617,7 +5617,7 @@ var require_cst_visit = __commonJS({
       }
       return typeof ctrl === "function" ? ctrl(item, path) : ctrl;
     }
-    exports.visit = visit2;
+    exports.visit = visit3;
   }
 });
 
@@ -5633,7 +5633,7 @@ var require_cst = __commonJS({
     var FLOW_END = "";
     var SCALAR = "";
     var isCollection = (token) => !!token && "items" in token;
-    var isScalar = (token) => !!token && (token.type === "scalar" || token.type === "single-quoted-scalar" || token.type === "double-quoted-scalar" || token.type === "block-scalar");
+    var isScalar2 = (token) => !!token && (token.type === "scalar" || token.type === "single-quoted-scalar" || token.type === "double-quoted-scalar" || token.type === "block-scalar");
     function prettyToken(token) {
       switch (token) {
         case BOM:
@@ -5717,7 +5717,7 @@ var require_cst = __commonJS({
     exports.FLOW_END = FLOW_END;
     exports.SCALAR = SCALAR;
     exports.isCollection = isCollection;
-    exports.isScalar = isScalar;
+    exports.isScalar = isScalar2;
     exports.prettyToken = prettyToken;
     exports.tokenType = tokenType;
   }
@@ -7247,7 +7247,7 @@ var require_public_api = __commonJS({
         return docs;
       return Object.assign([], { empty: true }, composer$1.streamInfo());
     }
-    function parseDocument(source, options = {}) {
+    function parseDocument2(source, options = {}) {
       const { lineCounter: lineCounter2, prettyErrors } = parseOptions(options);
       const parser$1 = new parser.Parser(lineCounter2?.addNewLine);
       const composer$1 = new composer.Composer(options);
@@ -7273,7 +7273,7 @@ var require_public_api = __commonJS({
       } else if (options === void 0 && reviver && typeof reviver === "object") {
         options = reviver;
       }
-      const doc = parseDocument(src, options);
+      const doc = parseDocument2(src, options);
       if (!doc)
         return null;
       doc.warnings.forEach((warning) => log.warn(doc.options.logLevel, warning));
@@ -7309,7 +7309,7 @@ var require_public_api = __commonJS({
     }
     exports.parse = parse3;
     exports.parseAllDocuments = parseAllDocuments;
-    exports.parseDocument = parseDocument;
+    exports.parseDocument = parseDocument2;
     exports.stringify = stringify;
   }
 });
@@ -7333,7 +7333,7 @@ var require_dist = __commonJS({
     var lineCounter = require_line_counter();
     var parser = require_parser();
     var publicApi = require_public_api();
-    var visit2 = require_visit();
+    var visit3 = require_visit();
     exports.Composer = composer.Composer;
     exports.Document = Document.Document;
     exports.Schema = Schema.Schema;
@@ -7361,8 +7361,8 @@ var require_dist = __commonJS({
     exports.parseAllDocuments = publicApi.parseAllDocuments;
     exports.parseDocument = publicApi.parseDocument;
     exports.stringify = publicApi.stringify;
-    exports.visit = visit2.visit;
-    exports.visitAsync = visit2.visitAsync;
+    exports.visit = visit3.visit;
+    exports.visitAsync = visit3.visitAsync;
   }
 });
 
@@ -7442,6 +7442,7 @@ var DEFAULT_POLICY = {
   toolsReturn: {},
   arguments: {},
   destinations: [],
+  lookups: {},
   notify: { file: null },
   exposure: true,
   task: null,
@@ -7526,6 +7527,9 @@ function validate(parsed, path) {
   if (Object.hasOwn(input, "arguments")) {
     policy.arguments = asRoles(input["arguments"], `${path}: arguments`);
   }
+  if (Object.hasOwn(input, "lookups")) {
+    policy.lookups = asLookups(input["lookups"], `${path}: lookups`);
+  }
   if ("destinations" in input) {
     policy.destinations = asStrings(input.destinations, `${path}: destinations`);
     for (const entry of policy.destinations) {
@@ -7603,6 +7607,7 @@ var TOP_LEVEL = [
   "toolsReturn",
   "arguments",
   "destinations",
+  "lookups",
   "notify",
   "exposure",
   "task",
@@ -7669,6 +7674,34 @@ function asRoles(value, where) {
   }
   return table;
 }
+function asLookups(value, where) {
+  const input = asObject(value, where);
+  const table = /* @__PURE__ */ Object.create(null);
+  for (const [tool, declared] of Object.entries(input)) {
+    if (tool.trim() === "") throw new Error(`${where}: an empty tool name cannot be a declaration`);
+    const entry = asObject(declared, `${where}.${tool}`);
+    onlyKnown(entry, ["query", "key", "values"], where, `${tool}.`);
+    const query = entry["query"];
+    const key = entry["key"];
+    if (typeof query !== "string" || query.trim() === "") throw new Error(`${where}.${tool}.query: expected the name of an argument`);
+    if (typeof key !== "string" || key.trim() === "") throw new Error(`${where}.${tool}.key: expected the name of a field`);
+    const fields2 = asObject(entry["values"], `${where}.${tool}.values`);
+    const values = /* @__PURE__ */ Object.create(null);
+    for (const [field3, consumers] of Object.entries(fields2)) {
+      if (field3.trim() === "") throw new Error(`${where}.${tool}.values: an empty field name binds nothing`);
+      const list = asStrings(consumers, `${where}.${tool}.values.${field3}`);
+      for (const consumer of list) {
+        if (!/^.+\.[^.]+$/u.test(consumer)) {
+          throw new Error(`${where}.${tool}.values.${field3}: ${consumer} is not written tool.argument`);
+        }
+      }
+      values[field3] = list;
+    }
+    if (Object.keys(values).length === 0) throw new Error(`${where}.${tool}.values: binds nothing`);
+    table[tool] = { query, key, values };
+  }
+  return table;
+}
 function asEffects(value, where) {
   const list = asStrings(value, where);
   for (const effect of list) {
@@ -7700,18 +7733,18 @@ var MAX_FIELDS = 2e3;
 var MAX_DEPTH = 8;
 function fields(args) {
   const out = [];
-  const visit2 = (key, node, depth) => {
+  const visit3 = (key, node, depth, holder) => {
     if (out.length >= MAX_FIELDS) throw new Error("the call arguments branch too widely");
     if (depth > MAX_DEPTH) throw new Error("the call arguments are too deep");
-    out.push({ key, value: node, depth });
+    out.push({ key, value: node, depth, holder });
     if (node === null || typeof node !== "object") return;
     if (Array.isArray(node)) {
-      for (const item of node) visit2(key, item, depth + 1);
+      for (const item of node) visit3(key, item, depth + 1, node);
       return;
     }
-    for (const [name, value] of Object.entries(node)) visit2(name, value, depth + 1);
+    for (const [name, value] of Object.entries(node)) visit3(name, value, depth + 1, node);
   };
-  for (const [key, value] of Object.entries(args)) visit2(key, value, 0);
+  for (const [key, value] of Object.entries(args)) visit3(key, value, 0, args);
   return out;
 }
 
@@ -8054,6 +8087,110 @@ function declaredFiles(policy) {
   return new Set(files.filter((file) => typeof file === "string").map((file) => fold2(file)));
 }
 
+// src/provenance/bindings.ts
+var import_yaml2 = __toESM(require_dist(), 1);
+var MAX_LOOKUP_TEXT = 256 * 1024;
+function fold3(value) {
+  return value.normalize("NFKC").trim().toLowerCase();
+}
+function exact(value) {
+  return value.trim();
+}
+function readLookup(tool, lookup, args, text, turn) {
+  const asked = Object.hasOwn(args, lookup.query) ? args[lookup.query] : void 0;
+  const query = typeof asked === "string" ? fold3(asked) : "";
+  if (text.length > MAX_LOOKUP_TEXT) return "unreadable";
+  const parsed = parseRecords(text);
+  if (parsed === "unreadable") return parsed;
+  const records = Array.isArray(parsed) ? parsed : [parsed];
+  const out = [];
+  for (const record of records) {
+    if (typeof record !== "object" || record === null || Array.isArray(record)) continue;
+    const fields2 = record;
+    if (!Object.hasOwn(fields2, lookup.key)) continue;
+    const name = plain(fields2[lookup.key]);
+    if (name === null) return "unreadable";
+    if (fold3(name) === "") continue;
+    for (const field3 of Object.keys(lookup.values)) {
+      const values = Object.hasOwn(fields2, field3) ? valuesOf(fields2[field3]) : [];
+      out.push({ tool, field: field3, key: fold3(name), values, query, turn });
+    }
+  }
+  return out;
+}
+function parseRecords(text) {
+  try {
+    const document = (0, import_yaml2.parseDocument)(text, { uniqueKeys: false, resolveKnownTags: false });
+    if (document.errors.length > 0) return "unreadable";
+    let tagged = false;
+    (0, import_yaml2.visit)(document, {
+      Node(_, node) {
+        if (node.tag !== void 0) tagged = true;
+      }
+    });
+    if (tagged) return "unreadable";
+    const top = document.contents;
+    const records = (0, import_yaml2.isSeq)(top) ? top.items : [top];
+    for (const record of records) {
+      if (!(0, import_yaml2.isMap)(record)) continue;
+      const seen = /* @__PURE__ */ new Set();
+      for (const pair of record.items) {
+        if (!(0, import_yaml2.isScalar)(pair.key) || pair.key.value === null || pair.key.value === void 0) return "unreadable";
+        const key = String(pair.key.value);
+        if (seen.has(key)) return "unreadable";
+        seen.add(key);
+      }
+    }
+    const parsed = document.toJS({ maxAliasCount: 0 });
+    if (typeof parsed !== "object" || parsed === null) return "unreadable";
+    return parsed;
+  } catch {
+    return "unreadable";
+  }
+}
+function plain(value) {
+  if (typeof value === "string") return value;
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  return null;
+}
+function valuesOf(value) {
+  const list = Array.isArray(value) ? value : [value];
+  const out = /* @__PURE__ */ new Set();
+  for (const item of list) {
+    const text = plain(item);
+    if (text === null) return [];
+    const kept = exact(text);
+    if (kept !== "") out.add(kept);
+  }
+  return [...out].sort();
+}
+function vouched(observations, voided, said, lookups, turn) {
+  const out = /* @__PURE__ */ new Set();
+  if (voided) return out;
+  const current = observations.filter((o) => o.turn === turn && Object.hasOwn(lookups, o.tool));
+  const seen = /* @__PURE__ */ new Map();
+  const conflicted = /* @__PURE__ */ new Set();
+  for (const o of current) {
+    const id = JSON.stringify([o.tool, o.field, o.key]);
+    const set = JSON.stringify(o.values);
+    const before = seen.get(id);
+    if (before === void 0) seen.set(id, set);
+    else if (before !== set) conflicted.add(id);
+  }
+  for (const o of current) {
+    if (conflicted.has(JSON.stringify([o.tool, o.field, o.key]))) continue;
+    if (o.query === "" || !said.has(o.key) || !said.has(o.query)) continue;
+    const consumers = lookups[o.tool].values[o.field] ?? [];
+    for (const consumer of consumers) {
+      for (const value of o.values) out.add(vouchKey(consumer, value));
+    }
+  }
+  return out;
+}
+function vouchKey(consumer, value) {
+  return JSON.stringify([consumer, exact(value)]);
+}
+
 // src/provenance/normalize.ts
 import { homedir as homedir4 } from "node:os";
 import { posix } from "node:path";
@@ -8255,7 +8392,7 @@ var INDIVISIBLE = /* @__PURE__ */ new Set([
 ]);
 var MAX_CUT_SHARE = 2 / 3;
 var MAX_CUT_CHARS = 300;
-function fold3(name) {
+function fold4(name) {
   return name.toLowerCase().replace(/[_-]/gu, "");
 }
 function put(target, key, value) {
@@ -8274,7 +8411,7 @@ function quarantine(args, spansByArg) {
     if (typeof value !== "string") {
       return refuse(`argument ${name} is not a string, there is nothing to cut`);
     }
-    if (INDIVISIBLE.has(fold3(name))) {
+    if (INDIVISIBLE.has(fold4(name))) {
       return refuse(`argument ${name} is indivisible: a truncated value is a different call`);
     }
     if (!valid(spans, value.length)) {
@@ -8431,11 +8568,12 @@ function decide(call, ctx) {
   if (leaving) {
     return escalate(ctx, leaving);
   }
-  const stray = strayResource(call.tool, parts, ctx);
+  const bound = boundBy(call.tool, own2, ctx);
+  const stray = strayResource(call.tool, parts, ctx, bound);
   if (stray) return escalate(ctx, stray, ctx.exposure?.source);
-  const scan = scanTaint(parts, ctx.taint, ctx.userAtoms ?? []);
+  const scan = scanTaint(parts, ctx.taint, ctx.userAtoms ?? [], bound);
   if (!scan.tainted) {
-    const exposed = exposedCall(call.tool, verdict.effects, parts, ctx);
+    const exposed = exposedCall(call.tool, verdict.effects, parts, ctx, bound);
     if (exposed) return escalate(ctx, exposed, ctx.exposure?.source);
     return { kind: "allow" };
   }
@@ -8444,7 +8582,7 @@ function decide(call, ctx) {
   if (!verdict.effects.some((effect) => IRREVERSIBLE.has(effect))) {
     const targets = scan.targets.filter((atom) => !isDate(atom));
     if (targets.length === 0 || identifierReadUnderMark(verdict.effects, targets, ctx)) {
-      const exposed = exposedCall(call.tool, verdict.effects, parts, ctx);
+      const exposed = exposedCall(call.tool, verdict.effects, parts, ctx, bound);
       if (exposed) return escalate(ctx, exposed, ctx.exposure?.source);
       return { kind: "allow" };
     }
@@ -8570,14 +8708,15 @@ function escalate(ctx, reason, source) {
   const kind = ctx.policy.mode === "interactive" ? "ask" : "deny";
   return source === void 0 ? { kind, reason } : { kind, reason, source };
 }
-function exposedCall(tool, effects, parts, ctx) {
+function exposedCall(tool, effects, parts, ctx, bound) {
   if (ctx.policy.exposure === false) return null;
   const exposure = ctx.exposure;
   if (exposure === void 0 || exposure === null) return null;
   if (!effects.some((effect) => EXPOSURE_SENSITIVE.has(effect))) return null;
   const targets = /* @__PURE__ */ new Set();
-  for (const { value } of parts) {
-    if (typeof value !== "string") continue;
+  for (const part of parts) {
+    const { value } = part;
+    if (typeof value !== "string" || bound(part)) continue;
     for (const atom of atoms(value)) {
       if (!isDate(atom)) targets.add(atom);
     }
@@ -8587,27 +8726,38 @@ function exposedCall(tool, effects, parts, ctx) {
   const mandateApplies = !effects.includes("exec");
   const allNamed = [...targets].every((atom) => named.has(atom) || mandateApplies && inMandate(atom, mandate));
   if (targets.size > 0 && allNamed) return null;
-  if (exposure.memory !== true && allNamed && !effects.includes("exec") && namesADestination(tool, parts, ctx.userNames ?? [], mandate, ctx.policy.arguments ?? {})) return null;
+  if (exposure.memory !== true && allNamed && !effects.includes("exec") && namesADestination(tool, parts, ctx.userNames ?? [], mandate, ctx.policy.arguments ?? {}, bound)) return null;
   if (exposure.memory === true) {
     return `untrusted content is back in this session through memory (${exposure.source}); the call acts beyond reading and its destination was not named by you`;
   }
   return `this session read untrusted content (${exposure.source}) since your last message; the call acts beyond reading and its destination was not named by you \u2014 name the destination in your message, or declare it under destinations in the policy`;
 }
-function strayResource(tool, parts, ctx) {
+function strayResource(tool, parts, ctx, bound) {
   if (ctx.policy.exposure === false) return null;
   const exposure = ctx.exposure;
   if (exposure === void 0 || exposure === null) return null;
-  const stray = unnamedResource(tool, parts, ctx);
+  const stray = unnamedResource(tool, parts, ctx, bound);
   if (stray === null) return null;
   return `this session read untrusted content (${exposure.source}); the call reaches ${safeLabel(stray)}, a resource you did not name \u2014 name it in your message, or add it to destinations in the policy`;
 }
-function namesADestination(tool, parts, userNames, mandate, roles) {
+function namesADestination(tool, parts, userNames, mandate, roles, bound) {
   const names2 = new Set(userNames);
-  const destinations = parts.filter(({ key, value }) => typeof value === "string" && roleOf(tool, key, roles) === "destination");
-  return destinations.length > 0 && destinations.every(({ value }) => {
-    const whole = value.trim().normalize("NFKC").toLowerCase();
-    return names2.has(whole) || inMandate(whole, mandate);
+  const destinations = parts.filter(({ key, value }) => (typeof value === "string" || typeof value === "number" && Number.isFinite(value)) && roleOf(tool, key, roles) === "destination");
+  return destinations.length > 0 && destinations.every((part) => {
+    const whole = String(part.value).trim().normalize("NFKC").toLowerCase();
+    return names2.has(whole) || inMandate(whole, mandate) || bound(part);
   });
+}
+function boundBy(tool, own2, ctx) {
+  const vouched2 = ctx.vouched;
+  if (vouched2 === void 0 || vouched2.size === 0) return () => false;
+  return ({ key, value, depth, holder }) => {
+    const text = typeof value === "string" ? value : typeof value === "number" && Number.isFinite(value) ? String(value) : null;
+    if (text === null || !Object.hasOwn(own2, key)) return false;
+    const argument = own2[key];
+    const inPlace = depth === 0 ? holder === own2 : depth === 1 && Array.isArray(argument) && holder === argument;
+    return inPlace && vouched2.has(vouchKey(`${tool}.${key}`, text));
+  };
 }
 function inMandate(value, mandate) {
   const whole = value.trim().normalize("NFKC").toLowerCase();
@@ -8616,10 +8766,12 @@ function inMandate(value, mandate) {
     return pattern.startsWith("*") ? whole.endsWith(pattern.replace(/^\*+/u, "")) : whole === pattern;
   });
 }
-function unnamedResource(tool, parts, ctx) {
+function unnamedResource(tool, parts, ctx, bound) {
   const said = /* @__PURE__ */ new Set([...ctx.userWords ?? [], ...ctx.userNames ?? [], ...ctx.userAtoms ?? []]);
   const mandate = ctx.policy.destinations ?? [];
-  for (const { key, value } of parts) {
+  for (const part of parts) {
+    const { key, value } = part;
+    if (bound(part)) continue;
     if (typeof value !== "string" || value.trim() === "") continue;
     if (roleOf(tool, key, ctx.policy.arguments ?? {}) !== "resource") continue;
     const whole = value.trim().normalize("NFKC").toLowerCase();
@@ -8652,16 +8804,18 @@ var IRREVERSIBLE = /* @__PURE__ */ new Set([
   "exec"
 ]);
 var EXPOSURE_SENSITIVE = /* @__PURE__ */ new Set([...IRREVERSIBLE, "create"]);
-function scanTaint(parts, taint, userAtoms) {
+function scanTaint(parts, taint, userAtoms, bound = () => false) {
   const named = new Set(userAtoms);
   const spans = {};
   const targets = /* @__PURE__ */ new Set();
   const sources = /* @__PURE__ */ new Map();
   let tainted = false;
   let nested = false;
-  for (const { key, value, depth } of parts) {
+  for (const part of parts) {
+    const { key, value, depth } = part;
     if (typeof value !== "string") continue;
     if (named.has(value.trim().toLowerCase())) continue;
+    if (bound(part)) continue;
     const match = taint.check(value);
     if (!match.tainted) continue;
     tainted = true;
@@ -8922,7 +9076,7 @@ function skeleton(name) {
   }
   return out;
 }
-function plain(name) {
+function plain2(name) {
   return skeleton(name) === name;
 }
 function shadows(listed, others) {
@@ -8931,7 +9085,7 @@ function shadows(listed, others) {
     const own2 = skeleton(tool.name);
     for (const other of others) {
       const imitated = other.names.find(
-        (name) => name !== tool.name && skeleton(name) === own2 && !(plain(tool.name) && !plain(name))
+        (name) => name !== tool.name && skeleton(name) === own2 && !(plain2(tool.name) && !plain2(name))
       );
       if (imitated !== void 0) {
         found2.push({ name: tool.name, imitates: imitated, server: other.server });
@@ -9104,19 +9258,32 @@ function renderOutbound(found2) {
 }
 
 // src/provenance/names.ts
-var QUOTED = /(?:'([^'\s]{1,64})'|"([^"\s]{1,64})"|`([^`\s]{1,64})`|\u2018([^\u2019\s]{1,64})\u2019|\u201C([^\u201D\s]{1,64})\u201D)/gu;
+var QUOTED = /(?:'([^'\n]{1,64})'|"([^"\n]{1,64})"|`([^`\n]{1,64})`|\u2018([^\u2019\n]{1,64})\u2019|\u201C([^\u201D\n]{1,64})\u201D)/gu;
+var MAX_PHRASE_WORDS = 5;
 var TOKEN = /^[\p{L}\p{N}][\p{L}\p{N}_.#@-]*$/u;
 var CAPITALIZED = new RegExp("\\p{Lu}[\\p{L}\\p{N}_-]{2,}", "gu");
+var RUN = new RegExp("\\p{Lu}[\\p{L}\\p{N}_-]*(?: \\p{Lu}[\\p{L}\\p{N}_-]*)+", "gu");
+var MAX_RUN_WORDS = 4;
 function names(text) {
   const found2 = /* @__PURE__ */ new Set();
   const source = text.normalize("NFKC");
   for (const match of source.matchAll(QUOTED)) {
     const token = match.slice(1).find((group) => group !== void 0);
-    if (token !== void 0 && TOKEN.test(token)) found2.add(token.toLowerCase());
+    if (token === void 0) continue;
+    const parts = token.split(" ");
+    if (parts.length > MAX_PHRASE_WORDS || !parts.every((part) => TOKEN.test(part))) continue;
+    if (parts.length > 1 && !parts.some((part) => new RegExp("^\\p{Lu}", "u").test(part))) continue;
+    found2.add(token.toLowerCase());
   }
   for (const match of source.matchAll(CAPITALIZED)) {
     const at = match.index;
     if (at > 0 && /[\p{L}\p{N}_-]/u.test(source[at - 1])) continue;
+    found2.add(match[0].toLowerCase());
+  }
+  for (const match of source.matchAll(RUN)) {
+    const at = match.index;
+    if (at > 0 && /[\p{L}\p{N}_-]/u.test(source[at - 1])) continue;
+    if (match[0].split(" ").length > MAX_RUN_WORDS) continue;
     found2.add(match[0].toLowerCase());
   }
   return [...found2];
@@ -12488,6 +12655,7 @@ function merge(spans) {
 }
 
 // src/session/store.ts
+var MAX_LOOKUPS = 500;
 var MAX_USER_ATOMS = 500;
 var EFFECTS2 = /* @__PURE__ */ new Set([
   "read",
@@ -12600,6 +12768,9 @@ var SessionStore = class {
     const userAtoms = Object.hasOwn(data, "userAtoms") ? data["userAtoms"] : void 0;
     const userNames = Object.hasOwn(data, "userNames") ? data["userNames"] : void 0;
     const userWords = Object.hasOwn(data, "userWords") ? data["userWords"] : void 0;
+    const lookups = Object.hasOwn(data, "lookups") ? data["lookups"] : void 0;
+    const lookupsVoidAt = Object.hasOwn(data, "lookupsVoidAt") ? data["lookupsVoidAt"] : void 0;
+    const turnNames = Object.hasOwn(data, "turnNames") ? data["turnNames"] : void 0;
     if (typeof version !== "number" || !READABLE.has(version) || typeof turn !== "number" || !Number.isInteger(turn) || turn < 0) {
       throw new Error(`the session state ${shown(sessionId)} is incompatible`);
     }
@@ -12621,6 +12792,15 @@ var SessionStore = class {
     if (userWords !== void 0 && (!Array.isArray(userWords) || userWords.some((item) => typeof item !== "string"))) {
       throw new Error(`the session state ${shown(sessionId)} is incompatible`);
     }
+    if (lookups !== void 0 && (!Array.isArray(lookups) || !lookups.every(isObservation))) {
+      throw new Error(`the session state ${shown(sessionId)} is incompatible`);
+    }
+    if (lookupsVoidAt !== void 0 && lookupsVoidAt !== null && (typeof lookupsVoidAt !== "number" || !Number.isInteger(lookupsVoidAt))) {
+      throw new Error(`the session state ${shown(sessionId)} is incompatible`);
+    }
+    if (turnNames !== void 0 && !isTurnNames(turnNames)) {
+      throw new Error(`the session state ${shown(sessionId)} is incompatible`);
+    }
     return {
       turn,
       taint: TaintStore.fromJSON(taint),
@@ -12629,7 +12809,10 @@ var SessionStore = class {
       exposure: isExposure(exposure) ? exposure : null,
       userAtoms: Array.isArray(userAtoms) ? userAtoms.slice(-MAX_USER_ATOMS) : [],
       userNames: Array.isArray(userNames) ? userNames.slice(-MAX_USER_ATOMS) : [],
-      userWords: Array.isArray(userWords) ? userWords.slice(-MAX_USER_ATOMS) : []
+      userWords: Array.isArray(userWords) ? userWords.slice(-MAX_USER_ATOMS) : [],
+      lookups: Array.isArray(lookups) ? lookups : [],
+      lookupsVoidAt: typeof lookupsVoidAt === "number" ? lookupsVoidAt : null,
+      turnNames: isTurnNames(turnNames) ? turnNames : { turn: 0, names: [] }
     };
   }
   save(sessionId, state) {
@@ -12644,7 +12827,10 @@ var SessionStore = class {
       exposure: state.exposure ?? null,
       userAtoms: (state.userAtoms ?? []).slice(-MAX_USER_ATOMS),
       userNames: (state.userNames ?? []).slice(-MAX_USER_ATOMS),
-      userWords: (state.userWords ?? []).slice(-MAX_USER_ATOMS)
+      userWords: (state.userWords ?? []).slice(-MAX_USER_ATOMS),
+      lookups: state.lookups ?? [],
+      lookupsVoidAt: state.lookupsVoidAt ?? null,
+      turnNames: state.turnNames ?? { turn: 0, names: [] }
     });
     atomicWrite(dir, path, body);
     for (const piece of this.read.get(sessionId) ?? []) {
@@ -12752,8 +12938,48 @@ function mergeStates(into, other) {
     exposure: into.exposure ?? other.exposure ?? null,
     userAtoms: mergeUserAtoms(into.userAtoms ?? [], other.userAtoms ?? []),
     userNames: mergeUserAtoms(into.userNames ?? [], other.userNames ?? []),
-    userWords: mergeUserAtoms(into.userWords ?? [], other.userWords ?? [])
+    userWords: mergeUserAtoms(into.userWords ?? [], other.userWords ?? []),
+    ...mergeLookups(into, other),
+    turnNames: mergeTurnNames(into.turnNames, other.turnNames)
   };
+}
+function mergeTurnNames(a, b) {
+  const one = a ?? { turn: 0, names: [] };
+  const two = b ?? { turn: 0, names: [] };
+  if (one.turn !== two.turn) return one.turn > two.turn ? one : two;
+  return { turn: one.turn, names: mergeUserAtoms(one.names, two.names) };
+}
+function mergeLookups(a, b) {
+  const out = [];
+  const keys = /* @__PURE__ */ new Set();
+  const all = [...a.lookups ?? [], ...b.lookups ?? []];
+  const turn = Math.max(a.turn, b.turn, ...all.map((o) => o.turn));
+  for (const o of all) {
+    if (o.turn !== turn) continue;
+    const key = JSON.stringify([o.tool, o.field, o.key, o.values, o.query, o.turn]);
+    if (keys.has(key)) continue;
+    keys.add(key);
+    out.push(o);
+  }
+  const marks = [a.lookupsVoidAt ?? null, b.lookupsVoidAt ?? null].filter((t) => t !== null);
+  let voidAt = marks.length > 0 ? Math.max(...marks) : null;
+  if (out.length > MAX_LOOKUPS) voidAt = Math.max(voidAt ?? 0, ...out.map((o) => o.turn));
+  return { lookups: out.slice(-MAX_LOOKUPS), lookupsVoidAt: voidAt };
+}
+function isObservation(value) {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const o = value;
+  const own2 = (name) => Object.hasOwn(o, name) ? o[name] : void 0;
+  const turn = own2("turn");
+  const values = own2("values");
+  return typeof own2("tool") === "string" && typeof own2("field") === "string" && typeof own2("key") === "string" && typeof own2("query") === "string" && typeof turn === "number" && Number.isInteger(turn) && turn >= 0 && Array.isArray(values) && values.every((v) => typeof v === "string");
+}
+function isTurnNames(value) {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const data = value;
+  const turn = Object.hasOwn(data, "turn") ? data["turn"] : void 0;
+  const names2 = Object.hasOwn(data, "names") ? data["names"] : void 0;
+  return typeof turn === "number" && Number.isInteger(turn) && turn >= 0 && Array.isArray(names2) && names2.every((name) => typeof name === "string");
 }
 function mergeUserAtoms(a, b) {
   const out = [];
@@ -12769,6 +12995,7 @@ function mergeDirectives(a, b) {
 }
 
 // src/cordon.ts
+var INERT = /^(?:|"?(?:none|null|undefined|true|false|ok|success)"?|\{\}|\[\]|-?\d+(?:\.\d+)?)$/iu;
 var Cordon = class {
   policy;
   cordonHome;
@@ -12797,6 +13024,12 @@ var Cordon = class {
   userAtoms = [];
   userNames = [];
   userWords = [];
+  /** What declared lookups bound in this turn (`provenance/bindings.ts`). */
+  lookups = [];
+  /** The turn whose bindings are void: a record was lost or unreadable. */
+  lookupsVoidAt = null;
+  /** Names and atoms of the current turn's message: what a binding may key on. */
+  turnNames = { turn: 0, names: [] };
   /**
    * MCP tools held back in this process. Not persisted: the pins on disk are
    * the state, and every start of the gateway compares against them afresh.
@@ -12818,6 +13051,9 @@ var Cordon = class {
     this.userAtoms = restored.userAtoms ?? [];
     this.userNames = restored.userNames ?? [];
     this.userWords = restored.userWords ?? [];
+    this.lookups = restored.lookups ?? [];
+    this.lookupsVoidAt = restored.lookupsVoidAt ?? null;
+    this.turnNames = restored.turnNames ?? { turn: 0, names: [] };
     this.cert = issue(this.policy, this.turn);
     this.directive = restored.directive ?? null;
     if (this.directive) this.cert = narrow(this.cert, this.directive);
@@ -12877,7 +13113,8 @@ var Cordon = class {
     if (role === "content") {
       this.taint.record(clean, source);
       if (!substitute && clean !== text) this.taint.record(text, source);
-      if (source.trust === "untrusted") this.exposure = { at: this.turn, source: source.label };
+      const inert = INERT.test(clean.trim()) && INERT.test(text.trim());
+      if (source.trust === "untrusted" && !inert) this.exposure = { at: this.turn, source: source.label };
     }
     if (source.trust === "untrusted" && source.kind !== "mcp-description") this.lastSource = source;
     this.persist();
@@ -12931,6 +13168,7 @@ var Cordon = class {
       userAtoms: this.userAtoms,
       userNames: this.userNames,
       userWords: this.userWords,
+      vouched: this.vouched(),
       heldTools: this.heldTools
     });
     this.recordMemory(call, decision);
@@ -13153,8 +13391,38 @@ var Cordon = class {
       exposure: this.exposure,
       userAtoms: this.userAtoms,
       userNames: this.userNames,
-      userWords: this.userWords
+      userWords: this.userWords,
+      lookups: this.lookups,
+      lookupsVoidAt: this.lookupsVoidAt,
+      turnNames: this.turnNames
     });
+  }
+  /**
+   * A declared lookup's result: the names it binds, for the gate to read
+   * this turn. `texts` are the pieces of the result as the model received
+   * them, cleaned. A tool the policy does not declare binds nothing.
+   */
+  recordLookup(call, texts) {
+    const lookups = this.policy.lookups ?? {};
+    if (!Object.hasOwn(lookups, call.tool)) return;
+    const args = typeof call.args === "object" && call.args !== null ? call.args : {};
+    const found2 = readLookup(call.tool, lookups[call.tool], args, texts.join("\n"), this.turn);
+    if (found2 === "unreadable") {
+      this.lookupsVoidAt = this.turn;
+      this.persist();
+      return;
+    }
+    if (found2.length === 0) return;
+    this.lookups = [...this.lookups.filter((o) => o.turn === this.turn), ...found2];
+    if (this.lookups.length > MAX_LOOKUPS) {
+      this.lookupsVoidAt = this.turn;
+      this.lookups = this.lookups.slice(-MAX_LOOKUPS);
+    }
+    this.persist();
+  }
+  vouched() {
+    const said = new Set(this.turnNames.turn === this.turn ? this.turnNames.names : []);
+    return vouched(this.lookups, this.lookupsVoidAt === this.turn, said, this.policy.lookups ?? {}, this.turn);
   }
   /**
    * What the human named in their own words: atoms, and separately names
@@ -13165,6 +13433,9 @@ var Cordon = class {
    * without bound.
    */
   rememberNamed(text) {
+    const current = this.turnNames.turn === this.turn ? this.turnNames.names : [];
+    const said = /* @__PURE__ */ new Set([...current, ...names(text), ...atoms(text)]);
+    this.turnNames = { turn: this.turn, names: [...said].slice(-MAX_USER_ATOMS) };
     for (const atom of [...atoms(text), ...pastedSecrets(text)]) {
       if (!this.userAtoms.includes(atom)) this.userAtoms.push(atom);
     }
@@ -13473,8 +13744,8 @@ function isTrusted(origin2, policy) {
   });
 }
 function climbs(label) {
-  const plain2 = label.replace(/%2e/giu, ".");
-  return plain2.split(/[/\\]/u).includes("..");
+  const plain3 = label.replace(/%2e/giu, ".");
+  return plain3.split(/[/\\]/u).includes("..");
 }
 
 // src/adapters/claude-code/output.ts
@@ -13560,7 +13831,7 @@ function extractText(tool, response) {
   if (typeof response === "string") return { known: true, parts: [{ text: response, content: true }] };
   if (TEXTLESS.has(tool)) return { known: true, parts: [] };
   const scan = { parts: [], known: true, nodes: 0, size: 0 };
-  visit(response, "", 0, scan);
+  visit2(response, "", 0, scan);
   return scan.known ? { known: true, parts: scan.parts } : { known: false, parts: [] };
 }
 function replaceText(tool, response, parts) {
@@ -13570,7 +13841,7 @@ function replaceText(tool, response, parts) {
   if (TEXTLESS.has(tool)) return response;
   return rebuild(response, "", 0, parts, { at: 0 });
 }
-function visit(node, key, depth, scan) {
+function visit2(node, key, depth, scan) {
   if (!scan.known) return;
   if (depth > MAX_DEPTH3 || ++scan.nodes > MAX_NODES) {
     scan.known = false;
@@ -13593,11 +13864,11 @@ function visit(node, key, depth, scan) {
     return;
   }
   if (Array.isArray(node)) {
-    for (const item of node) visit(item, key, depth + 1, scan);
+    for (const item of node) visit2(item, key, depth + 1, scan);
     return;
   }
   if (typeof node === "object" && node !== null) {
-    for (const [name, value] of Object.entries(node)) visit(value, name, depth + 1, scan);
+    for (const [name, value] of Object.entries(node)) visit2(value, name, depth + 1, scan);
   }
 }
 function rebuild(node, key, depth, parts, cursor) {
@@ -13825,6 +14096,7 @@ function observe(cordon, event, env) {
     if (envelope.text !== part.text) changed = true;
     return envelope.text;
   });
+  cordon.recordLookup(event.call, cleaned.filter((_, index) => extracted.parts[index].content));
   if (!substitute) return report(cordon, event.call.tool, source, found2);
   if (!changed) return {};
   const updated = replaceText(event.call.tool, event.response, cleaned);
@@ -14106,6 +14378,7 @@ function observe2(cordon, event, env) {
     env.policy
   );
   const envelope = cordon.observe(event.content, source);
+  cordon.recordLookup({ ...event.call, tool: key }, [envelope.text]);
   if (event.unreadable) {
     cordon.markUnredacted();
   }
@@ -14461,14 +14734,17 @@ function observeToolResult(value, call, cordon, policy) {
     return value;
   }
   const source = classifySource({ kind: "tool", label: sourceLabel(call), tool: call.tool }, policy);
+  const texts = [];
   for (const block of content) {
     const entry = asRecord(block);
     if (entry !== null && entry["type"] === "text" && typeof entry["text"] === "string") {
       observeInto(entry, "text", call.tool, source, cordon);
+      texts.push(entry["text"]);
     } else {
       cordon.markUnredacted();
     }
   }
+  cordon.recordLookup(call, texts);
   return value;
 }
 function observeResourceRead(value, pending, cordon, policy) {

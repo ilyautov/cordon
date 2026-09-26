@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from 'node:crypto'
 import { readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import type { Observation } from '../provenance/bindings.js'
 import { makeDirectory } from '../core/mkdir.js'
 import type { EffectClass, ExposureMark } from '../core/types.js'
 import { TaintStore } from '../provenance/store.js'
@@ -57,7 +58,29 @@ export interface SessionState {
   userNames?: string[]
   /** Words of the user's own messages, for naming a resource: `pacman`, `infra-docs`. */
   userWords?: string[]
+  /**
+   * What declared lookup tools bound, in this turn (`provenance/bindings.ts`).
+   * Absent means none. Merged as a union: a second record for the same name
+   * is exactly what makes a binding ambiguous, so no writer's record may be
+   * dropped in favour of another's.
+   */
+  lookups?: Observation[]
+  /**
+   * The turn whose bindings are void, or null: the record list hit its cap,
+   * or a lookup result could not be read whole. A conflict could be in what
+   * was lost, so bindings vouch for nothing in that turn. Merged as the
+   * later turn.
+   */
+  lookupsVoidAt?: number | null
+  /**
+   * The names and atoms of the current turn's message, which is all a
+   * binding may key on. Merged as the later turn, and united within a turn.
+   */
+  turnNames?: { turn: number; names: string[] }
 }
+
+/** The cap on lookup records kept for one turn. */
+export const MAX_LOOKUPS = 500
 
 /** The cap on atoms the user named. Exceeding it drops the OLDEST ones (FIFO). */
 export const MAX_USER_ATOMS = 500
@@ -233,6 +256,9 @@ export class SessionStore {
     const userAtoms = Object.hasOwn(data, 'userAtoms') ? data['userAtoms'] : undefined
     const userNames = Object.hasOwn(data, 'userNames') ? data['userNames'] : undefined
     const userWords = Object.hasOwn(data, 'userWords') ? data['userWords'] : undefined
+    const lookups = Object.hasOwn(data, 'lookups') ? data['lookups'] : undefined
+    const lookupsVoidAt = Object.hasOwn(data, 'lookupsVoidAt') ? data['lookupsVoidAt'] : undefined
+    const turnNames = Object.hasOwn(data, 'turnNames') ? data['turnNames'] : undefined
     if (
       typeof version !== 'number' || !READABLE.has(version) ||
       typeof turn !== 'number' || !Number.isInteger(turn) || turn < 0
@@ -284,6 +310,20 @@ export class SessionStore {
     ) {
       throw new Error(`the session state ${shown(sessionId)} is incompatible`)
     }
+    // Validated, not filtered: a record dropped quietly could be the second
+    // one that made a name ambiguous.
+    if (lookups !== undefined && (!Array.isArray(lookups) || !lookups.every(isObservation))) {
+      throw new Error(`the session state ${shown(sessionId)} is incompatible`)
+    }
+    if (
+      lookupsVoidAt !== undefined && lookupsVoidAt !== null &&
+      (typeof lookupsVoidAt !== 'number' || !Number.isInteger(lookupsVoidAt))
+    ) {
+      throw new Error(`the session state ${shown(sessionId)} is incompatible`)
+    }
+    if (turnNames !== undefined && !isTurnNames(turnNames)) {
+      throw new Error(`the session state ${shown(sessionId)} is incompatible`)
+    }
 
     return {
       turn,
@@ -294,6 +334,9 @@ export class SessionStore {
       userAtoms: Array.isArray(userAtoms) ? (userAtoms as string[]).slice(-MAX_USER_ATOMS) : [],
       userNames: Array.isArray(userNames) ? (userNames as string[]).slice(-MAX_USER_ATOMS) : [],
       userWords: Array.isArray(userWords) ? (userWords as string[]).slice(-MAX_USER_ATOMS) : [],
+      lookups: Array.isArray(lookups) ? (lookups as Observation[]) : [],
+      lookupsVoidAt: typeof lookupsVoidAt === 'number' ? lookupsVoidAt : null,
+      turnNames: isTurnNames(turnNames) ? turnNames : { turn: 0, names: [] },
     }
   }
 
@@ -310,6 +353,9 @@ export class SessionStore {
       userAtoms: (state.userAtoms ?? []).slice(-MAX_USER_ATOMS),
       userNames: (state.userNames ?? []).slice(-MAX_USER_ATOMS),
       userWords: (state.userWords ?? []).slice(-MAX_USER_ATOMS),
+      lookups: state.lookups ?? [],
+      lookupsVoidAt: state.lookupsVoidAt ?? null,
+      turnNames: state.turnNames ?? { turn: 0, names: [] },
     })
 
     atomicWrite(dir, path, body)
@@ -510,7 +556,64 @@ function mergeStates(into: SessionState, other: SessionState): SessionState {
     userAtoms: mergeUserAtoms(into.userAtoms ?? [], other.userAtoms ?? []),
     userNames: mergeUserAtoms(into.userNames ?? [], other.userNames ?? []),
     userWords: mergeUserAtoms(into.userWords ?? [], other.userWords ?? []),
+    ...mergeLookups(into, other),
+    turnNames: mergeTurnNames(into.turnNames, other.turnNames),
   }
+}
+
+function mergeTurnNames(
+  a: SessionState['turnNames'],
+  b: SessionState['turnNames'],
+): NonNullable<SessionState['turnNames']> {
+  const one = a ?? { turn: 0, names: [] }
+  const two = b ?? { turn: 0, names: [] }
+  if (one.turn !== two.turn) return one.turn > two.turn ? one : two
+  return { turn: one.turn, names: mergeUserAtoms(one.names, two.names) }
+}
+
+/**
+ * A union of both writers' records, never a choice between them. Past the
+ * cap the turn is voided instead of records being dropped.
+ */
+function mergeLookups(a: SessionState, b: SessionState): Pick<SessionState, 'lookups' | 'lookupsVoidAt'> {
+  const out: Observation[] = []
+  const keys = new Set<string>()
+  // Only the latest turn's records vouch, so only they count toward the cap:
+  // a late piece still holding an earlier turn's records would void a turn
+  // that lost nothing.
+  const all = [...(a.lookups ?? []), ...(b.lookups ?? [])]
+  const turn = Math.max(a.turn, b.turn, ...all.map((o) => o.turn))
+  for (const o of all) {
+    if (o.turn !== turn) continue
+    const key = JSON.stringify([o.tool, o.field, o.key, o.values, o.query, o.turn])
+    if (keys.has(key)) continue
+    keys.add(key)
+    out.push(o)
+  }
+  const marks = [a.lookupsVoidAt ?? null, b.lookupsVoidAt ?? null].filter((t): t is number => t !== null)
+  let voidAt: number | null = marks.length > 0 ? Math.max(...marks) : null
+  if (out.length > MAX_LOOKUPS) voidAt = Math.max(voidAt ?? 0, ...out.map((o) => o.turn))
+  return { lookups: out.slice(-MAX_LOOKUPS), lookupsVoidAt: voidAt }
+}
+
+function isObservation(value: unknown): value is Observation {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false
+  const o = value as Record<string, unknown>
+  const own = (name: string): unknown => Object.hasOwn(o, name) ? o[name] : undefined
+  const turn = own('turn')
+  const values = own('values')
+  return typeof own('tool') === 'string' && typeof own('field') === 'string' && typeof own('key') === 'string' &&
+    typeof own('query') === 'string' && typeof turn === 'number' && Number.isInteger(turn) && turn >= 0 &&
+    Array.isArray(values) && values.every((v) => typeof v === 'string')
+}
+
+function isTurnNames(value: unknown): value is { turn: number; names: string[] } {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false
+  const data = value as Record<string, unknown>
+  const turn = Object.hasOwn(data, 'turn') ? data['turn'] : undefined
+  const names = Object.hasOwn(data, 'names') ? data['names'] : undefined
+  return typeof turn === 'number' && Number.isInteger(turn) && turn >= 0 &&
+    Array.isArray(names) && names.every((name) => typeof name === 'string')
 }
 
 /**

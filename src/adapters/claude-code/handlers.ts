@@ -187,6 +187,9 @@ function observe(
     if (envelope.text !== part.text) changed = true
     return envelope.text
   })
+  // A lookup the policy declares binds names to values for the gate. The
+  // core decides what that means; the adapter only hands over the text.
+  cordon.recordLookup(event.call, cleaned.filter((_, index) => extracted.parts[index]!.content))
 
   // A source the human sees as source text is never substituted, and the
   // check stands BEFORE `changed`: there is a finding in the file that was

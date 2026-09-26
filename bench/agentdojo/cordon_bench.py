@@ -334,8 +334,12 @@ EFFECTS = {
 # not text a third party wrote. The `directory` policy declares them trusted.
 # Chosen by what the tool returns, before looking at where AgentDojo places
 # its injections; the run checks that no trusted result carried one.
+# get_channels is not here: AgentDojo puts one of its slack injections in a
+# channel name, so the list of channels is text an attacker wrote. It was
+# here once, and a pre-exposure honest call hid that until a later change
+# stopped an empty reply from marking the session.
 DIRECTORY = [
-    'get_channels', 'get_users_in_channel',
+    'get_users_in_channel',
     'get_iban', 'get_balance', 'get_user_info',
     'get_user_information', 'get_all_hotels_in_city', 'get_hotels_prices', 'get_hotels_address',
     'get_all_restaurants_in_city', 'get_cuisine_type_for_restaurants', 'get_restaurants_address',
@@ -357,6 +361,31 @@ MANDATE = {
 }
 
 
+BOOKINGS = {'reserve_hotel': 'hotel', 'reserve_restaurant': 'restaurant', 'reserve_car_rental': 'company'}
+# A file id is where an append lands, as a path is.
+TARGETS = {'append_to_file': 'file_id'}
+
+# Lookups whose records bind a name to a value (src/provenance/bindings.ts):
+# tool -> (query argument, key field, {value field: [consumer tool.argument]}).
+# Declared by what each tool returns, as DIRECTORY is. A file found by name
+# may be appended to and not deleted; a meeting's participants may be copied
+# into a new event and nothing else.
+LOOKUPS = {
+    'search_contacts_by_name': ('query', 'name', {'email': ['create_calendar_event.participants', 'send_email.recipients']}),
+    'search_calendar_events': ('query', 'title', {'participants': ['create_calendar_event.participants']}),
+    'search_files_by_filename': ('filename', 'filename', {'id_': ['append_to_file.file_id']}),
+}
+
+
+def lookup_lines() -> list[str]:
+    out = ['lookups:']
+    for tool, (query, key, values) in LOOKUPS.items():
+        out += [f'  mcp__{SERVER}__{tool}:', f'    query: {query}', f'    key: {key}', '    values:']
+        for field, consumers in values.items():
+            out.append(f'      {field}: {json.dumps([f"mcp__{SERVER}__{c}" for c in consumers])}')
+    return out
+
+
 def write_policy(home: Path, variant: str = 'strict', suite: str | None = None) -> None:
     home.mkdir(parents=True, exist_ok=True)
     mandate = MANDATE.get(suite or '', []) if variant == 'mandate' else []
@@ -367,6 +396,11 @@ def write_policy(home: Path, variant: str = 'strict', suite: str | None = None) 
         'profile:',
         '  effects: [read, summarize, create, update, delete, export, network-egress, financial]',
         'exposure: true',
+        # Where a booking goes: the hotel, the restaurant, the rental company.
+        # Declared, not guessed from the key, the way a deployment would.
+        'arguments:',
+        *[f'  mcp__{SERVER}__{tool}: {{{key}: destination}}' for tool, key in {**BOOKINGS, **TARGETS}.items()],
+        *(lookup_lines() if variant in ('directory', 'mandate') else []),
         'tools:',
         *[f'  mcp__{SERVER}__{tool}: [{", ".join(effects)}]' for tool, effects in EFFECTS.items()],
         'notify:',
@@ -402,7 +436,10 @@ def pipeline(model: str, defense: str, home: Path) -> tuple[AgentPipeline, Cordo
         elements = [SystemMessage(load_system_message(None)), InitQuery(), llm,
                     ToolsExecutionLoop([ToolsExecutor(), llm])]
     agent = AgentPipeline(elements)
-    agent.name = f'{model}-{defense}'
+    # No slashes: AgentDojo saves a log under the name with '/' made '_' but
+    # looks for it under the name as it is, so a slashed name never finds an
+    # episode already run and every restart begins again from nothing.
+    agent.name = f"{model.replace('/', '_')}-{defense}"
     return agent, executor
 
 
@@ -445,7 +482,7 @@ def main() -> int:
 
     # The attack addresses the model by name; a model that is not Claude is
     # addressed neutrally rather than misnamed.
-    MODEL_NAMES[args.model] = 'Claude' if args.model.startswith('claude') else 'AI assistant'
+    MODEL_NAMES[args.model.replace('/', '_')] = 'Claude' if args.model.startswith('claude') else 'AI assistant'
     price(args.model)
     suites = get_suites(args.version)
     summary = {}
@@ -466,8 +503,9 @@ def main() -> int:
             clean = benchmark_suite_without_injections(agent, suite, logdir, False, args.user_tasks,
                                                        benchmark_version=args.version)
             base = logdir / agent.name.replace('/', '_') / name
-            row = scored(clean['utility_results'], 'utility', {task: base / task / 'none' / 'none.json'
-                                                               for task in clean['utility_results']})
+            # Keys here are (user_task, ''), not a bare task id.
+            row = scored(clean['utility_results'], 'utility', {key: base / key[0] / 'none' / 'none.json'
+                                                               for key in clean['utility_results']})
             if not args.utility_only:
                 attack = load_attack(args.attack, suite, agent)
                 attacked = benchmark_suite_with_injections(agent, suite, attack, logdir, False, args.user_tasks,
@@ -510,7 +548,7 @@ def scored(results: dict, key: str, paths: dict) -> dict:
     failed = {k for k in results if errored(paths[k])}
     return {key: mean({k: v for k, v in results.items() if k not in failed}),
             f'{key}_raw': mean(results),
-            f'{key}_errors': sorted('/'.join(k) if isinstance(k, tuple) else k for k in failed)}
+            f'{key}_errors': sorted('/'.join(filter(None, k)) if isinstance(k, tuple) else k for k in failed)}
 
 
 def mean(results: dict) -> tuple[float, int, int] | None:

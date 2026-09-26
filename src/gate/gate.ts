@@ -5,6 +5,7 @@ import { secretKinds } from './secrets.js'
 import { memoryTarget } from './memory.js'
 import type { Policy } from '../policy/defaults.js'
 import { canonicalForms, fold as foldSegment, touchesCordonItself } from '../policy/selfprotect.js'
+import { vouchKey } from '../provenance/bindings.js'
 import { atoms } from '../provenance/normalize.js'
 import type { TaintStore } from '../provenance/store.js'
 import { covers } from '../scope/certificate.js'
@@ -46,6 +47,12 @@ export interface GateContext {
   userNames?: readonly string[]
   /** Words of the user's messages: a resource the user named. */
   userWords?: readonly string[]
+  /**
+   * Values a declared lookup bound to a name the user said, as
+   * `tool.argument` NUL value (`provenance/bindings.ts`). Each counts as
+   * named by the user in that argument of that tool and nowhere else.
+   */
+  vouched?: ReadonlySet<string>
   /**
    * MCP tools held back because they changed or appeared after the owner
    * approved the server. Optional: only the MCP gateway lists tools.
@@ -158,12 +165,13 @@ function decide(call: ToolCall, ctx: GateContext): Decision {
 
   // Before provenance, so that no exit below can carry the call past it: a
   // quarantine rewrite kept the repository an outside review aimed it at.
-  const stray = strayResource(call.tool, parts, ctx)
+  const bound = boundBy(call.tool, own, ctx)
+  const stray = strayResource(call.tool, parts, ctx, bound)
   if (stray) return escalate(ctx, stray, ctx.exposure?.source)
 
-  const scan = scanTaint(parts, ctx.taint, ctx.userAtoms ?? [])
+  const scan = scanTaint(parts, ctx.taint, ctx.userAtoms ?? [], bound)
   if (!scan.tainted) {
-    const exposed = exposedCall(call.tool, verdict.effects, parts, ctx)
+    const exposed = exposedCall(call.tool, verdict.effects, parts, ctx, bound)
     if (exposed) return escalate(ctx, exposed, ctx.exposure?.source)
     return { kind: 'allow' }
   }
@@ -187,7 +195,7 @@ function decide(call: ToolCall, ctx: GateContext): Decision {
   if (!verdict.effects.some((effect) => IRREVERSIBLE.has(effect))) {
     const targets = scan.targets.filter((atom) => !isDate(atom))
     if (targets.length === 0 || identifierReadUnderMark(verdict.effects, targets, ctx)) {
-      const exposed = exposedCall(call.tool, verdict.effects, parts, ctx)
+      const exposed = exposedCall(call.tool, verdict.effects, parts, ctx, bound)
       if (exposed) return escalate(ctx, exposed, ctx.exposure?.source)
       return { kind: 'allow' }
     }
@@ -402,6 +410,7 @@ function exposedCall(
   effects: readonly EffectClass[],
   parts: readonly Field[],
   ctx: GateContext,
+  bound: (field: Field) => boolean,
 ): string | null {
   // The valve: a policy that says exposure: false asks for exactly the
   // pre-exposure behaviour, and doctor names the price of that out loud.
@@ -418,8 +427,9 @@ function exposedCall(
   // target here either, for the same reason as in the taint rule: it matches
   // by coincidence and cannot be used to aim an action.
   const targets = new Set<string>()
-  for (const { value } of parts) {
-    if (typeof value !== 'string') continue
+  for (const part of parts) {
+    const { value } = part
+    if (typeof value !== 'string' || bound(part)) continue
     for (const atom of atoms(value)) {
       if (!isDate(atom)) targets.add(atom)
     }
@@ -440,7 +450,7 @@ function exposedCall(
   // does not vouch for what the note asks.
   if (
     exposure.memory !== true && allNamed && !effects.includes('exec') &&
-    namesADestination(tool, parts, ctx.userNames ?? [], mandate, ctx.policy.arguments ?? {})
+    namesADestination(tool, parts, ctx.userNames ?? [], mandate, ctx.policy.arguments ?? {}, bound)
   ) return null
 
   if (exposure.memory === true) {
@@ -463,11 +473,16 @@ function exposedCall(
  * into their private ones, and every call on the way was a read or aimed at
  * the named repository.
  */
-function strayResource(tool: string, parts: readonly Field[], ctx: GateContext): string | null {
+function strayResource(
+  tool: string,
+  parts: readonly Field[],
+  ctx: GateContext,
+  bound: (field: Field) => boolean,
+): string | null {
   if (ctx.policy.exposure === false) return null
   const exposure = ctx.exposure
   if (exposure === undefined || exposure === null) return null
-  const stray = unnamedResource(tool, parts, ctx)
+  const stray = unnamedResource(tool, parts, ctx, bound)
   if (stray === null) return null
   return (
     `this session read untrusted content (${exposure.source}); the call reaches ${safeLabel(stray)}, ` +
@@ -487,16 +502,42 @@ function namesADestination(
   userNames: readonly string[],
   mandate: readonly string[],
   roles: Readonly<Record<string, Readonly<Record<string, ArgumentRole>>>>,
+  bound: (field: Field) => boolean,
 ): boolean {
   const names = new Set(userNames)
   // Every destination the call names, at any depth: an element of
   // `recipients` carries its field's key. All of them must be named, so a
   // named Alice cannot carry an unnamed Eve along in the same list.
-  const destinations = parts.filter(({ key, value }) => typeof value === 'string' && roleOf(tool, key, roles) === 'destination')
-  return destinations.length > 0 && destinations.every(({ value }) => {
-    const whole = (value as string).trim().normalize('NFKC').toLowerCase()
-    return names.has(whole) || inMandate(whole, mandate)
+  // A number counts too: a file id is one as often as a string, and a bound
+  // id vouches for it either way.
+  const destinations = parts.filter(({ key, value }) =>
+    (typeof value === 'string' || (typeof value === 'number' && Number.isFinite(value))) &&
+    roleOf(tool, key, roles) === 'destination')
+  return destinations.length > 0 && destinations.every((part) => {
+    const whole = String(part.value).trim().normalize('NFKC').toLowerCase()
+    return names.has(whole) || inMandate(whole, mandate) || bound(part)
   })
+}
+
+/**
+ * Whether a field holds a value a declared lookup vouches for in this
+ * argument of this tool. Only the argument itself or an element of its list,
+ * checked by the container rather than by the key's name: a key buried in a
+ * nested object is chosen by whoever built the object and names no argument
+ * of the tool, even when a top-level list of the same name sits beside it.
+ */
+function boundBy(tool: string, own: Record<string, unknown>, ctx: GateContext): (field: Field) => boolean {
+  const vouched = ctx.vouched
+  if (vouched === undefined || vouched.size === 0) return () => false
+  return ({ key, value, depth, holder }) => {
+    // An id is a number as often as a string in a tool's schema; the lookup
+    // side reads it the same way.
+    const text = typeof value === 'string' ? value : typeof value === 'number' && Number.isFinite(value) ? String(value) : null
+    if (text === null || !Object.hasOwn(own, key)) return false
+    const argument = own[key]
+    const inPlace = depth === 0 ? holder === own : depth === 1 && Array.isArray(argument) && holder === argument
+    return inPlace && vouched.has(vouchKey(`${tool}.${key}`, text))
+  }
 }
 
 /** A value the policy declares for the task: exact, or `*suffix`. */
@@ -513,10 +554,17 @@ function inMandate(value: string, mandate: readonly string[]): boolean {
  * of their messages, a name, an atom, or a segment of `owner/repo` that is
  * each of those. The policy's destinations name resources too.
  */
-function unnamedResource(tool: string, parts: readonly Field[], ctx: GateContext): string | null {
+function unnamedResource(
+  tool: string,
+  parts: readonly Field[],
+  ctx: GateContext,
+  bound: (field: Field) => boolean,
+): string | null {
   const said = new Set([...(ctx.userWords ?? []), ...(ctx.userNames ?? []), ...(ctx.userAtoms ?? [])])
   const mandate = ctx.policy.destinations ?? []
-  for (const { key, value } of parts) {
+  for (const part of parts) {
+    const { key, value } = part
+    if (bound(part)) continue
     if (typeof value !== 'string' || value.trim() === '') continue
     if (roleOf(tool, key, ctx.policy.arguments ?? {}) !== 'resource') continue
     const whole = value.trim().normalize('NFKC').toLowerCase()
@@ -611,7 +659,12 @@ interface Scan {
   sources: Source[]
 }
 
-function scanTaint(parts: readonly Field[], taint: TaintStore, userAtoms: readonly string[]): Scan {
+function scanTaint(
+  parts: readonly Field[],
+  taint: TaintStore,
+  userAtoms: readonly string[],
+  bound: (field: Field) => boolean = () => false,
+): Scan {
   const named = new Set(userAtoms)
   const spans: Record<string, Array<[number, number]>> = {}
   const targets = new Set<string>()
@@ -619,7 +672,8 @@ function scanTaint(parts: readonly Field[], taint: TaintStore, userAtoms: readon
   let tainted = false
   let nested = false
 
-  for (const { key, value, depth } of parts) {
+  for (const part of parts) {
+    const { key, value, depth } = part
     if (typeof value !== 'string') continue
     // A value that is, whole, what the user named in their own message aims
     // nothing the user did not ask for, even when a page repeats it. AgentDojo
@@ -627,6 +681,9 @@ function scanTaint(parts: readonly Field[], taint: TaintStore, userAtoms: readon
     // in the transaction history. Only the whole value: a longer text around
     // the named value is still checked as usual.
     if (named.has(value.trim().toLowerCase())) continue
+    // A value a declared lookup bound to a name the user said, in an argument
+    // the policy lets it fill: the same as the user naming it.
+    if (bound(part)) continue
     const match = taint.check(value)
     if (!match.tainted) continue
 

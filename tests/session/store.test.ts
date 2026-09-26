@@ -370,6 +370,87 @@ describe('two writers on one session', () => {
     expect(new SessionStore(dir).load('s').userNames).toEqual(expect.arrayContaining(['alice', 'general']))
   })
 
+  it('lookup records from different writers unite, so a conflict survives the merge', () => {
+    // Two PostToolUse processes, each saw one record for the same name. A
+    // choice between them would lose exactly the ambiguity that refuses.
+    const dir = home()
+    const first = new SessionStore(dir)
+    const second = new SessionStore(dir)
+    const one = first.load('s')
+    const two = second.load('s')
+    const record = { tool: 'contacts', field: 'email', key: 'sarah baker', query: 'sarah baker', turn: 1 }
+    one.lookups = [{ ...record, values: ['sarah.baker@gmail.com'] }]
+    two.lookups = [{ ...record, values: ['mark.black@evil.example'] }]
+    first.save('s', one)
+    second.save('s', two)
+    const merged = new SessionStore(dir).load('s').lookups ?? []
+    expect(merged.map((o) => o.values[0])).toEqual(expect.arrayContaining(['sarah.baker@gmail.com', 'mark.black@evil.example']))
+  })
+
+  it('records of an earlier turn do not count toward the cap when pieces merge', () => {
+    // Codex review: a late piece still holding 500 records of turn 1 merged
+    // with one record of turn 2 and voided turn 2.
+    const dir = home()
+    const first = new SessionStore(dir)
+    const second = new SessionStore(dir)
+    const one = first.load('s')
+    const two = second.load('s')
+    const record = { tool: 'contacts', field: 'email', query: 'q', values: ['a@x.example'] }
+    one.turn = 1
+    one.lookups = Array.from({ length: 500 }, (_, i) => ({ ...record, key: `p${i}`, turn: 1 }))
+    two.turn = 2
+    two.lookups = [{ ...record, key: 'sarah baker', turn: 2 }]
+    first.save('s', one)
+    second.save('s', two)
+    const merged = new SessionStore(dir).load('s')
+    expect(merged.lookupsVoidAt).toBeNull()
+    expect(merged.lookups?.map((o) => o.key)).toEqual(['sarah baker'])
+  })
+
+  it('a lookup overflow merges as the later turn', () => {
+    const dir = home()
+    const first = new SessionStore(dir)
+    const second = new SessionStore(dir)
+    const one = first.load('s')
+    const two = second.load('s')
+    one.lookupsVoidAt = 3
+    two.lookupsVoidAt = null
+    first.save('s', one)
+    second.save('s', two)
+    expect(new SessionStore(dir).load('s').lookupsVoidAt).toBe(3)
+  })
+
+  it('a malformed lookup record is an incompatible state, not an empty one', () => {
+    const dir = home()
+    const store = new SessionStore(dir)
+    const state = store.load('s')
+    state.lookups = [{ tool: 'contacts', field: 'email', key: 'k', query: 'q', turn: 1, values: [1 as unknown as string] }]
+    store.save('s', state)
+    expect(() => new SessionStore(dir).load('s')).toThrow(/incompatible/)
+  })
+
+  it('a lookup record with a turn that is not a whole number is incompatible', () => {
+    const dir = home()
+    const store = new SessionStore(dir)
+    const state = store.load('s')
+    state.lookups = [{ tool: 'contacts', field: 'email', key: 'k', query: 'q', turn: 1.5, values: [] }]
+    store.save('s', state)
+    expect(() => new SessionStore(dir).load('s')).toThrow(/incompatible/)
+  })
+
+  it('the names of the current turn come from the latest turn, united within it', () => {
+    const dir = home()
+    const first = new SessionStore(dir)
+    const second = new SessionStore(dir)
+    const one = first.load('s')
+    const two = second.load('s')
+    one.turnNames = { turn: 2, names: ['sarah baker'] }
+    two.turnNames = { turn: 1, names: ['mark black'] }
+    first.save('s', one)
+    second.save('s', two)
+    expect(new SessionStore(dir).load('s').turnNames).toEqual({ turn: 2, names: ['sarah baker'] })
+  })
+
   it('user atoms named to different writers unite', () => {
     const dir = home()
     const first = new SessionStore(dir)

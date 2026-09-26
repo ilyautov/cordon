@@ -6,6 +6,7 @@ import { pastedSecrets } from './gate/secrets.js'
 import { FileNotifier, SILENT, type Notifier } from './notify/notifier.js'
 import { cutOutbound, outboundAfterRead } from './output/egress.js'
 import type { Policy } from './policy/defaults.js'
+import { readLookup, vouched, type Observation } from './provenance/bindings.js'
 import { names, words } from './provenance/names.js'
 import { atoms } from './provenance/normalize.js'
 import { TaintStore } from './provenance/store.js'
@@ -15,7 +16,7 @@ import { issue, narrow, parseDirective, parseTrustMemory } from './scope/certifi
 import { MemoryLedger, type MemoryEntry } from './session/memory.js'
 import { ApprovalStore, approvalId } from './session/approvals.js'
 import { PinStore } from './session/pins.js'
-import { MAX_USER_ATOMS, SessionStore } from './session/store.js'
+import { MAX_LOOKUPS, MAX_USER_ATOMS, SessionStore } from './session/store.js'
 
 export interface Envelope {
   /** The cleaned text. It may be handed to the model only when `substitute`. */
@@ -54,6 +55,13 @@ export interface CordonOptions {
  */
 export type PieceRole = 'content' | 'label'
 
+/**
+ * A tool reply that carries no words anyone wrote: empty, a bare literal, a
+ * number, an empty collection. No instruction fits in one, so reading it does
+ * not mark the session.
+ */
+const INERT = /^(?:|"?(?:none|null|undefined|true|false|ok|success)"?|\{\}|\[\]|-?\d+(?:\.\d+)?)$/iu
+
 export class Cordon {
   private readonly policy: Policy
   private readonly cordonHome: string
@@ -82,6 +90,12 @@ export class Cordon {
   private userAtoms: string[] = []
   private userNames: string[] = []
   private userWords: string[] = []
+  /** What declared lookups bound in this turn (`provenance/bindings.ts`). */
+  private lookups: Observation[] = []
+  /** The turn whose bindings are void: a record was lost or unreadable. */
+  private lookupsVoidAt: number | null = null
+  /** Names and atoms of the current turn's message: what a binding may key on. */
+  private turnNames: { turn: number; names: string[] } = { turn: 0, names: [] }
   /**
    * MCP tools held back in this process. Not persisted: the pins on disk are
    * the state, and every start of the gateway compares against them afresh.
@@ -111,6 +125,9 @@ export class Cordon {
     this.userAtoms = restored.userAtoms ?? []
     this.userNames = restored.userNames ?? []
     this.userWords = restored.userWords ?? []
+    this.lookups = restored.lookups ?? []
+    this.lookupsVoidAt = restored.lookupsVoidAt ?? null
+    this.turnNames = restored.turnNames ?? { turn: 0, names: [] }
 
     // The certificate is NOT restored from disk: it is issued from the policy
     // on every run. Only the requested narrowing comes from disk, and it is
@@ -225,7 +242,15 @@ export class Cordon {
       // heading the source wrote ABOUT the content is not the content the
       // model read — recording those would mark the session for the user's
       // own values echoed back.
-      if (source.trust === 'untrusted') this.exposure = { at: this.turn, source: source.label }
+      // A reply with nothing in it is the exception: a write that returns
+      // None marked the session in AgentDojo's slack suite, and the next
+      // call of the same honest loop was refused. The list is closed, so
+      // anything that is not exactly one of these literals still marks.
+      // Both texts are tested: a hidden comment around "ok" is inert once
+      // cleaned, and a source the human reads as source text reaches the
+      // model whole.
+      const inert = INERT.test(clean.trim()) && INERT.test(text.trim())
+      if (source.trust === 'untrusted' && !inert) this.exposure = { at: this.turn, source: source.label }
     }
     // A tool description is read once for the whole session, in a batch, so
     // "the last one" is an arbitrary name; the live MCP run showed it being
@@ -297,6 +322,7 @@ export class Cordon {
       userAtoms: this.userAtoms,
       userNames: this.userNames,
       userWords: this.userWords,
+      vouched: this.vouched(),
       heldTools: this.heldTools,
     })
 
@@ -553,7 +579,43 @@ export class Cordon {
       userAtoms: this.userAtoms,
       userNames: this.userNames,
       userWords: this.userWords,
+      lookups: this.lookups,
+      lookupsVoidAt: this.lookupsVoidAt,
+      turnNames: this.turnNames,
     })
+  }
+
+  /**
+   * A declared lookup's result: the names it binds, for the gate to read
+   * this turn. `texts` are the pieces of the result as the model received
+   * them, cleaned. A tool the policy does not declare binds nothing.
+   */
+  recordLookup(call: ToolCall, texts: readonly string[]): void {
+    const lookups = this.policy.lookups ?? {}
+    if (!Object.hasOwn(lookups, call.tool)) return
+    const args = typeof call.args === 'object' && call.args !== null ? call.args as Record<string, unknown> : {}
+    const found = readLookup(call.tool, lookups[call.tool]!, args, texts.join('\n'), this.turn)
+    if (found === 'unreadable') {
+      // What could not be read could have held the second record for a name:
+      // the whole turn's bindings go, not only this result's.
+      this.lookupsVoidAt = this.turn
+      this.persist()
+      return
+    }
+    if (found.length === 0) return
+    this.lookups = [...this.lookups.filter((o) => o.turn === this.turn), ...found]
+    // Past the cap the turn is voided rather than trimmed: the record that
+    // would be dropped could be the second one that made a name ambiguous.
+    if (this.lookups.length > MAX_LOOKUPS) {
+      this.lookupsVoidAt = this.turn
+      this.lookups = this.lookups.slice(-MAX_LOOKUPS)
+    }
+    this.persist()
+  }
+
+  private vouched(): ReadonlySet<string> {
+    const said = new Set(this.turnNames.turn === this.turn ? this.turnNames.names : [])
+    return vouched(this.lookups, this.lookupsVoidAt === this.turn, said, this.policy.lookups ?? {}, this.turn)
   }
 
   /**
@@ -565,6 +627,9 @@ export class Cordon {
    * without bound.
    */
   private rememberNamed(text: string): void {
+    const current = this.turnNames.turn === this.turn ? this.turnNames.names : []
+    const said = new Set([...current, ...names(text), ...atoms(text)])
+    this.turnNames = { turn: this.turn, names: [...said].slice(-MAX_USER_ATOMS) }
     for (const atom of [...atoms(text), ...pastedSecrets(text)]) {
       if (!this.userAtoms.includes(atom)) this.userAtoms.push(atom)
     }

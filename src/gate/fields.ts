@@ -7,6 +7,8 @@ export interface Field {
   key: string
   value: unknown
   depth: number
+  /** The object or array the value sits in: the arguments themselves at depth 0. */
+  holder: object
 }
 
 /**
@@ -20,18 +22,18 @@ export interface Field {
 export function fields(args: Record<string, unknown>): Field[] {
   const out: Field[] = []
 
-  const visit = (key: string, node: unknown, depth: number): void => {
+  const visit = (key: string, node: unknown, depth: number, holder: object): void => {
     if (out.length >= MAX_FIELDS) throw new Error('the call arguments branch too widely')
     if (depth > MAX_DEPTH) throw new Error('the call arguments are too deep')
-    out.push({ key, value: node, depth })
+    out.push({ key, value: node, depth, holder })
     if (node === null || typeof node !== 'object') return
     if (Array.isArray(node)) {
-      for (const item of node) visit(key, item, depth + 1)
+      for (const item of node) visit(key, item, depth + 1, node)
       return
     }
-    for (const [name, value] of Object.entries(node)) visit(name, value, depth + 1)
+    for (const [name, value] of Object.entries(node)) visit(name, value, depth + 1, node)
   }
 
-  for (const [key, value] of Object.entries(args)) visit(key, value, 0)
+  for (const [key, value] of Object.entries(args)) visit(key, value, 0, args)
   return out
 }
