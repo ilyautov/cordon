@@ -365,6 +365,11 @@ describe('the policy: argument roles and the task mandate', () => {
     expect(Object.hasOwn(load('arguments: {}\n').arguments, 'toString')).toBe(false)
   })
 
+  it('reads the controlled role', () => {
+    const policy = load('arguments:\n  update_scheduled:\n    amount: controlled\n')
+    expect(policy.arguments['update_scheduled']).toEqual({ amount: 'controlled' })
+  })
+
   it('reads lookups', () => {
     const policy = load('lookups:\n  contacts:\n    query: query\n    key: name\n    values:\n      email: [send_email.recipients]\n')
     expect(policy.lookups['contacts']).toEqual({ query: 'query', key: 'name', values: { email: ['send_email.recipients'] } })

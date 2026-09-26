@@ -76,7 +76,18 @@ export interface SessionState {
    * The names and atoms of the current turn's message, which is all a
    * binding may key on. Merged as the later turn, and united within a turn.
    */
-  turnNames?: { turn: number; names: string[] }
+  turnNames?: TurnNames
+}
+
+/**
+ * What the current turn's message said: names and atoms a binding may key
+ * on, and the values it assigned to controlled fields, each as a JSON pair of
+ * the field and the value.
+ */
+export interface TurnNames {
+  turn: number
+  names: string[]
+  assigned?: string[]
 }
 
 /** The cap on lookup records kept for one turn. */
@@ -564,11 +575,15 @@ function mergeStates(into: SessionState, other: SessionState): SessionState {
 function mergeTurnNames(
   a: SessionState['turnNames'],
   b: SessionState['turnNames'],
-): NonNullable<SessionState['turnNames']> {
+): TurnNames {
   const one = a ?? { turn: 0, names: [] }
   const two = b ?? { turn: 0, names: [] }
   if (one.turn !== two.turn) return one.turn > two.turn ? one : two
-  return { turn: one.turn, names: mergeUserAtoms(one.names, two.names) }
+  return {
+    turn: one.turn,
+    names: mergeUserAtoms(one.names, two.names),
+    assigned: mergeUserAtoms(one.assigned ?? [], two.assigned ?? []),
+  }
 }
 
 /**
@@ -607,13 +622,15 @@ function isObservation(value: unknown): value is Observation {
     Array.isArray(values) && values.every((v) => typeof v === 'string')
 }
 
-function isTurnNames(value: unknown): value is { turn: number; names: string[] } {
+function isTurnNames(value: unknown): value is TurnNames {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false
   const data = value as Record<string, unknown>
   const turn = Object.hasOwn(data, 'turn') ? data['turn'] : undefined
   const names = Object.hasOwn(data, 'names') ? data['names'] : undefined
+  const assigned = Object.hasOwn(data, 'assigned') ? data['assigned'] : undefined
+  const strings = (list: unknown): boolean => Array.isArray(list) && list.every((item) => typeof item === 'string')
   return typeof turn === 'number' && Number.isInteger(turn) && turn >= 0 &&
-    Array.isArray(names) && names.every((name) => typeof name === 'string')
+    strings(names) && (assigned === undefined || strings(assigned))
 }
 
 /**

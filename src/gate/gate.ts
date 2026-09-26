@@ -48,11 +48,16 @@ export interface GateContext {
   /** Words of the user's messages: a resource the user named. */
   userWords?: readonly string[]
   /**
-   * Values a declared lookup bound to a name the user said, as
-   * `tool.argument` NUL value (`provenance/bindings.ts`). Each counts as
-   * named by the user in that argument of that tool and nowhere else.
+   * Values a declared lookup bound to a name the user said, as `vouchKey`
+   * spells them (`provenance/bindings.ts`). Each counts as named by the user
+   * in that argument of that tool and nowhere else.
    */
   vouched?: ReadonlySet<string>
+  /**
+   * Values the user's current message assigned to controlled fields, each a
+   * JSON pair of the field and the value (`provenance/assignments.ts`).
+   */
+  assigned?: ReadonlySet<string>
   /**
    * MCP tools held back because they changed or appeared after the owner
    * approved the server. Optional: only the MCP gateway lists tools.
@@ -168,6 +173,12 @@ function decide(call: ToolCall, ctx: GateContext): Decision {
   const bound = boundBy(call.tool, own, ctx)
   const stray = strayResource(call.tool, parts, ctx, bound)
   if (stray) return escalate(ctx, stray, ctx.exposure?.source)
+  // Before provenance for the same reason: a write back to the file read, or
+  // a quarantine rewrite, carried an attacker's amount through untouched
+  // (Codex). A target the user named, or a lookup vouched for, says where the
+  // call goes and nothing about what it changes there.
+  const loose = uncontrolled(call.tool, verdict.effects, parts, ctx)
+  if (loose) return escalate(ctx, loose, ctx.exposure?.source)
 
   const scan = scanTaint(parts, ctx.taint, ctx.userAtoms ?? [], bound)
   if (!scan.tainted) {
@@ -464,6 +475,52 @@ function exposedCall(
     'the call acts beyond reading and its destination was not named by you — ' +
     'name the destination in your message, or declare it under destinations in the policy'
   )
+}
+
+/**
+ * Under the exposure mark, the first controlled field whose value the user's
+ * current message did not assign, as a refusal; otherwise null.
+ *
+ * Any depth, and by the key folded the way every other argument name is: a
+ * controlled amount inside an object is still the amount, and `Amount` is
+ * `amount` to a server that folds case (Kimi). A value that is not a string
+ * or a finite number is refused rather than read as absent. A string must be
+ * the assigned value exactly. A number must be exactly the number the user
+ * wrote: 1,200.50 is 1200.5, 0 is not -0, and an integer past 2^53, which a
+ * double cannot hold, matches nothing.
+ */
+function uncontrolled(tool: string, effects: readonly EffectClass[], parts: readonly Field[], ctx: GateContext): string | null {
+  if (ctx.policy.exposure === false) return null
+  const exposure = ctx.exposure
+  if (exposure === undefined || exposure === null) return null
+  if (!effects.some((effect) => EXPOSURE_SENSITIVE.has(effect))) return null
+  const declared = Object.hasOwn(ctx.policy.arguments ?? {}, tool) ? ctx.policy.arguments![tool]! : {}
+  const controlled = new Map<string, string>()
+  for (const [field, role] of Object.entries(declared)) if (role === 'controlled') controlled.set(fold(field), field)
+  if (controlled.size === 0) return null
+  const assigned = [...(ctx.assigned ?? [])].map((pair) => JSON.parse(pair) as [string, string])
+  for (const { key, value } of parts) {
+    const field = controlled.get(fold(key))
+    if (field === undefined) continue
+    const stated = assigned.filter(([name]) => name === field).map(([, text]) => text)
+    if (!stated.some((text) => matches(value, text))) {
+      return (
+        `this session read untrusted content (${exposure.source}); the call sets ${field} ` +
+        `to a value you did not state in your message — write it out, for example ${field} to …`
+      )
+    }
+  }
+  return null
+}
+
+/** Whether a call's value is exactly what the user wrote for the field. */
+function matches(value: unknown, stated: string): boolean {
+  if (typeof value === 'string') return value.trim() === stated
+  if (typeof value !== 'number' || !Number.isFinite(value)) return false
+  if (!/^[+-]?\d+(?:\.\d+)?$/u.test(stated)) return false
+  const number = Number(stated)
+  if (!stated.includes('.') && !Number.isSafeInteger(number)) return false
+  return Object.is(number, value)
 }
 
 /**

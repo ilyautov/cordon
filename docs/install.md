@@ -148,6 +148,27 @@ arguments:
   mcp__github__get_file_contents: {project: resource}
 ```
 
+A fourth role, `controlled`, is only ever declared. It is for a field that changes something the target does not say, such as an amount, a date or a status. The exposure rule answers where a call goes. A lookup can vouch for the right payment while a page talks the agent into the wrong amount on it. Under the exposure mark, a controlled field must hold a value the user assigned to it in their current message, whatever named the target. Such an assignment is three things in a row:
+
+- **The field's name**, with its underscores written as spaces or not, in any case.
+- **One connector:** `=`, `:`, `→`, `to`, `is`, `at` or `equals`.
+- **The value**, in one of two forms:
+  - **Bare.** Only a number, a date or a time, written whole: `amount to 1,200.50`, `date: 2026-10-01`, `start at 10:00`. The thousands separators in the `1,200.50` form are dropped. Any other form assigns nothing: `1.200,50`, `1e3` and a number split by a space are not read.
+  - **Quoted.** Anything else: `status to 'Approved'`, `new_start_time to '2024-05-20 10:00'`.
+
+The rule is syntax, not meaning:
+
+- A number elsewhere in the message assigns nothing, so "don't pay 99000" and "the amount 99000 was disputed" state no amount.
+- A question does assign: "did you set amount = 1200?" does.
+- Words inside another quoted value assign nothing.
+
+A number in the call must be exactly the number written: `1,200.50` matches 1200.5, and nothing is rounded. The field is found by its folded name at any depth, so `Amount` is `amount`. A field left out of the call passes. A null, a list or an object in it does not. Without the mark nothing changes.
+
+```yaml
+arguments:
+  mcp__bank__update_scheduled_transaction: {id: destination, amount: controlled, date: controlled}
+```
+
 **`destinations`**: the task's mandate, for an agent that runs without a human to name things. A value listed here counts as named by the user under the exposure mark, in a destination or a resource field, and never for a call that executes something. An entry is an exact value, or `*` followed by a suffix (`*@example.com`, `*.example.com`). An entry that is only `*` is a load error: a mandate that names everything names nothing.
 
 ```yaml

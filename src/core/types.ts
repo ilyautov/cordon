@@ -14,8 +14,11 @@ export type EffectClass =
  * What an argument is to the call. A destination is where the call is aimed
  * (a recipient, a channel); a resource is what it acts on (a repository);
  * content is what it carries. Only a destination can be named by a name.
+ * A controlled field is content that changes something, an amount or a date:
+ * under the exposure mark it must hold a value the user assigned to it in
+ * their current message (`provenance/assignments.ts`). Only ever declared.
  */
-export type ArgumentRole = 'destination' | 'resource' | 'content'
+export type ArgumentRole = 'destination' | 'resource' | 'content' | 'controlled'
 
 /** Presence mode. An explicit setting from the policy, never a heuristic. */
 export type PresenceMode = 'interactive' | 'autonomous'

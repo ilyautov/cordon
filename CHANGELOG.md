@@ -4,9 +4,19 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versions follo
 
 ## [Unreleased]
 
+An argument can be declared `controlled`: an amount, a date, a status. Under the exposure mark, such a field must hold a value the user assigned to it by name in their current message, such as `amount to 1200` or `status to 'Approved'`. That holds even when the target was named or vouched for by a lookup. The battery's `lookup/right-id-wrong-amount` got through because the lookup vouched for the right payment and nothing answered for the amount a notice talked the agent into. With the amount declared controlled, the new row `lookup/right-id-wrong-amount-controlled` is stopped. Codex and Kimi shaped the rule in two reviews:
+
+- A number anywhere in the message is not an assignment, and neither is a value with no connector.
+- A bare value is a number, date or time in a strict form, and the text is not normalized, so a superscript two is not a 2.
+- A field named inside another quoted value assigns nothing.
+- Numbers compare exactly: `1,200.50` matches 1200.5, and 0 does not match -0.
+- The field is found by its folded name at any depth.
+- The check runs before provenance, where a quarantine rewrite had kept the attacker's amount.
+- A null is not an absent field. The role is never a default. Declaring `amount` controlled everywhere would cost honest tasks whose amount is computed, such as a refund of the difference.
+
 Lookup conflicts are counted per argument, across lookups. An honest address book and a planted directory entry that bind one name to different addresses in the same argument used to vouch each for its own. They now cancel out. An argument that only one of them fills is not in dispute. Codex found it in the design council, and the battery pins it as `lookup/second-lookup-disagrees`.
 
-The adversarial battery gains a `lookup` category: five attacks on the bindings, and an honest control. The working profile now reads 55% → 10% over 40 attacks. The two new rows that get through are the documented residuals. One is a record that is alone under the user's name and was written by the attacker. The other is a bound target whose other fields the page talked the agent into changing, for example the right payment with the wrong amount.
+The adversarial battery gains a `lookup` category: five attacks on the bindings, and an honest control. The working profile now reads 56% → 10% over 41 attacks. The two new rows that get through are the documented residuals. One is a record that is alone under the user's name and was written by the attacker. The other is a bound target whose other fields the page talked the agent into changing, for example the right payment with the wrong amount.
 
 The AgentDojo oracle writes one line per user task: whether it was completed, the refusals, the rewrites, the calls that ran against the calls expected, and its utility under each attack. `blocked-honest` listed any refused task, even one completed in the end, so it could not serve as the list of losses. Utility under attack is reported as well.
 

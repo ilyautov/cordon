@@ -7656,7 +7656,7 @@ function asViews(value, where) {
   }
   return table;
 }
-var ROLES = /* @__PURE__ */ new Set(["destination", "resource", "content"]);
+var ROLES = /* @__PURE__ */ new Set(["destination", "resource", "content", "controlled"]);
 function asRoles(value, where) {
   const input = asObject(value, where);
   const table = /* @__PURE__ */ Object.create(null);
@@ -8207,8 +8207,8 @@ function atoms(text) {
   for (const match of source.matchAll(/(?:https?:\/\/|mailto:)\S+/giu)) {
     const link = trimTail(match[0]);
     found2.add(link);
-    const bare = link.replace(/^https?:\/\//u, "");
-    if (bare !== link && bare !== "") found2.add(bare);
+    const bare2 = link.replace(/^https?:\/\//u, "");
+    if (bare2 !== link && bare2 !== "") found2.add(bare2);
   }
   for (const match of source.matchAll(/(?<![\w@/.:-])(?:www\.[a-z0-9-]+(?:\.[a-z0-9-]+)+|[a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,}\/)\S*/giu)) {
     found2.add(trimTail(match[0]));
@@ -8573,6 +8573,8 @@ function decide(call, ctx) {
   const bound = boundBy(call.tool, own2, ctx);
   const stray = strayResource(call.tool, parts, ctx, bound);
   if (stray) return escalate(ctx, stray, ctx.exposure?.source);
+  const loose = uncontrolled(call.tool, verdict.effects, parts, ctx);
+  if (loose) return escalate(ctx, loose, ctx.exposure?.source);
   const scan = scanTaint(parts, ctx.taint, ctx.userAtoms ?? [], bound);
   if (!scan.tainted) {
     const exposed = exposedCall(call.tool, verdict.effects, parts, ctx, bound);
@@ -8733,6 +8735,34 @@ function exposedCall(tool, effects, parts, ctx, bound) {
     return `untrusted content is back in this session through memory (${exposure.source}); the call acts beyond reading and its destination was not named by you`;
   }
   return `this session read untrusted content (${exposure.source}) since your last message; the call acts beyond reading and its destination was not named by you \u2014 name the destination in your message, or declare it under destinations in the policy`;
+}
+function uncontrolled(tool, effects, parts, ctx) {
+  if (ctx.policy.exposure === false) return null;
+  const exposure = ctx.exposure;
+  if (exposure === void 0 || exposure === null) return null;
+  if (!effects.some((effect) => EXPOSURE_SENSITIVE.has(effect))) return null;
+  const declared = Object.hasOwn(ctx.policy.arguments ?? {}, tool) ? ctx.policy.arguments[tool] : {};
+  const controlled = /* @__PURE__ */ new Map();
+  for (const [field3, role] of Object.entries(declared)) if (role === "controlled") controlled.set(fold(field3), field3);
+  if (controlled.size === 0) return null;
+  const assigned = [...ctx.assigned ?? []].map((pair) => JSON.parse(pair));
+  for (const { key, value } of parts) {
+    const field3 = controlled.get(fold(key));
+    if (field3 === void 0) continue;
+    const stated = assigned.filter(([name]) => name === field3).map(([, text]) => text);
+    if (!stated.some((text) => matches(value, text))) {
+      return `this session read untrusted content (${exposure.source}); the call sets ${field3} to a value you did not state in your message \u2014 write it out, for example ${field3} to \u2026`;
+    }
+  }
+  return null;
+}
+function matches(value, stated) {
+  if (typeof value === "string") return value.trim() === stated;
+  if (typeof value !== "number" || !Number.isFinite(value)) return false;
+  if (!/^[+-]?\d+(?:\.\d+)?$/u.test(stated)) return false;
+  const number = Number(stated);
+  if (!stated.includes(".") && !Number.isSafeInteger(number)) return false;
+  return Object.is(number, value);
 }
 function strayResource(tool, parts, ctx, bound) {
   if (ctx.policy.exposure === false) return null;
@@ -9364,13 +9394,13 @@ function stripInvisible(input) {
   const findings = [];
   let clean = input;
   for (const { detail, re } of [...ALWAYS, ...CONTEXTUAL]) {
-    const matches = clean.match(re);
-    if (!matches) continue;
+    const matches2 = clean.match(re);
+    if (!matches2) continue;
     findings.push({
       kind: "invisible",
       detail,
-      sample: `${matches.length} ${matches.length === 1 ? "occurrence" : "occurrences"}: ${sample(
-        matches.map(codePoint).join(" "),
+      sample: `${matches2.length} ${matches2.length === 1 ? "occurrence" : "occurrences"}: ${sample(
+        matches2.map(codePoint).join(" "),
         60
       )}`
     });
@@ -12949,7 +12979,11 @@ function mergeTurnNames(a, b) {
   const one = a ?? { turn: 0, names: [] };
   const two = b ?? { turn: 0, names: [] };
   if (one.turn !== two.turn) return one.turn > two.turn ? one : two;
-  return { turn: one.turn, names: mergeUserAtoms(one.names, two.names) };
+  return {
+    turn: one.turn,
+    names: mergeUserAtoms(one.names, two.names),
+    assigned: mergeUserAtoms(one.assigned ?? [], two.assigned ?? [])
+  };
 }
 function mergeLookups(a, b) {
   const out = [];
@@ -12981,7 +13015,9 @@ function isTurnNames(value) {
   const data = value;
   const turn = Object.hasOwn(data, "turn") ? data["turn"] : void 0;
   const names2 = Object.hasOwn(data, "names") ? data["names"] : void 0;
-  return typeof turn === "number" && Number.isInteger(turn) && turn >= 0 && Array.isArray(names2) && names2.every((name) => typeof name === "string");
+  const assigned = Object.hasOwn(data, "assigned") ? data["assigned"] : void 0;
+  const strings2 = (list) => Array.isArray(list) && list.every((item) => typeof item === "string");
+  return typeof turn === "number" && Number.isInteger(turn) && turn >= 0 && strings2(names2) && (assigned === void 0 || strings2(assigned));
 }
 function mergeUserAtoms(a, b) {
   const out = [];
@@ -12994,6 +13030,49 @@ function mergeDirectives(a, b) {
   if (a === null) return b;
   if (b === null) return a;
   return a.filter((effect) => b.includes(effect));
+}
+
+// src/provenance/assignments.ts
+var CONNECTOR = String.raw`\s*(?:=|:|→|\s(?:to|is|at|equals)\s)\s*`;
+var QUOTED2 = String.raw`(?<![\p{L}\p{N}])(?:'([^'\n]{1,64})'|"([^"\n]{1,64})")(?![\p{L}\p{N}])`;
+var BARE2 = String.raw`([+-]?\d[^\s'"]{0,63})(?![^\s'"])`;
+var NUMBER = /^[+-]?(?:\d+|\d{1,3}(?:,\d{3})+)(?:\.\d+)?$/u;
+var DATE = /^\d{4}-\d{2}-\d{2}$/u;
+var TIME = /^\d{1,2}:\d{2}(?::\d{2})?$/u;
+function assignments(text, fields2) {
+  if (fields2.length === 0) return [];
+  const spelled = /* @__PURE__ */ new Map();
+  for (const field3 of fields2) {
+    for (const spelling of [field3, field3.replace(/[_-]+/gu, " ")]) spelled.set(spelling.toLowerCase(), field3);
+  }
+  const names2 = [...spelled.keys()].sort((a, b) => b.length - a.length).map(escape);
+  const pattern = new RegExp(
+    String.raw`(?<![\p{L}\p{N}_-])(${names2.join("|")})(?![\p{L}\p{N}_-])${CONNECTOR}(?:${QUOTED2}|${BARE2})|${QUOTED2}`,
+    "giu"
+  );
+  const out = [];
+  for (const match of text.matchAll(pattern)) {
+    if (match[1] === void 0) continue;
+    const field3 = spelled.get(match[1].toLowerCase());
+    const quoted = match[2] ?? match[3];
+    if (quoted !== void 0) {
+      if (quoted.trim() !== "") out.push([field3, quoted.trim()]);
+      continue;
+    }
+    const value = bare(match[4], text.slice(match.index + match[0].length));
+    if (value !== null) out.push([field3, value]);
+  }
+  return out;
+}
+function bare(token, rest) {
+  const trimmed = token.replace(/[.,;:!?)\]]+$/u, "");
+  if (/^\s\d/u.test(rest)) return null;
+  if (NUMBER.test(trimmed)) return trimmed.replace(/,/gu, "");
+  if (DATE.test(trimmed) || TIME.test(trimmed)) return trimmed;
+  return null;
+}
+function escape(text) {
+  return text.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
 }
 
 // src/cordon.ts
@@ -13171,6 +13250,7 @@ var Cordon = class {
       userNames: this.userNames,
       userWords: this.userWords,
       vouched: this.vouched(),
+      assigned: new Set(this.turnNames.turn === this.turn ? this.turnNames.assigned ?? [] : []),
       heldTools: this.heldTools
     });
     this.recordMemory(call, decision);
@@ -13422,6 +13502,14 @@ var Cordon = class {
     }
     this.persist();
   }
+  /** Every argument name the policy declares controlled, on any tool. */
+  controlledFields() {
+    const fields2 = /* @__PURE__ */ new Set();
+    for (const roles of Object.values(this.policy.arguments ?? {})) {
+      for (const [field3, role] of Object.entries(roles)) if (role === "controlled") fields2.add(field3);
+    }
+    return [...fields2];
+  }
   vouched() {
     const said = new Set(this.turnNames.turn === this.turn ? this.turnNames.names : []);
     return vouched(this.lookups, this.lookupsVoidAt === this.turn, said, this.policy.lookups ?? {}, this.turn);
@@ -13435,9 +13523,17 @@ var Cordon = class {
    * without bound.
    */
   rememberNamed(text) {
-    const current = this.turnNames.turn === this.turn ? this.turnNames.names : [];
-    const said = /* @__PURE__ */ new Set([...current, ...names(text), ...atoms(text)]);
-    this.turnNames = { turn: this.turn, names: [...said].slice(-MAX_USER_ATOMS) };
+    const current = this.turnNames.turn === this.turn ? this.turnNames : { turn: this.turn, names: [] };
+    const said = /* @__PURE__ */ new Set([...current.names, ...names(text), ...atoms(text)]);
+    const assigned = /* @__PURE__ */ new Set([
+      ...current.assigned ?? [],
+      ...assignments(text, this.controlledFields()).map((pair) => JSON.stringify(pair))
+    ]);
+    this.turnNames = {
+      turn: this.turn,
+      names: [...said].slice(-MAX_USER_ATOMS),
+      assigned: [...assigned].slice(-MAX_USER_ATOMS)
+    };
     for (const atom of [...atoms(text), ...pastedSecrets(text)]) {
       if (!this.userAtoms.includes(atom)) this.userAtoms.push(atom);
     }

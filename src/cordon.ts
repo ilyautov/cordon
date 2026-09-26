@@ -16,7 +16,8 @@ import { issue, narrow, parseDirective, parseTrustMemory } from './scope/certifi
 import { MemoryLedger, type MemoryEntry } from './session/memory.js'
 import { ApprovalStore, approvalId } from './session/approvals.js'
 import { PinStore } from './session/pins.js'
-import { MAX_LOOKUPS, MAX_USER_ATOMS, SessionStore } from './session/store.js'
+import { MAX_LOOKUPS, MAX_USER_ATOMS, SessionStore, type TurnNames } from './session/store.js'
+import { assignments } from './provenance/assignments.js'
 
 export interface Envelope {
   /** The cleaned text. It may be handed to the model only when `substitute`. */
@@ -95,7 +96,7 @@ export class Cordon {
   /** The turn whose bindings are void: a record was lost or unreadable. */
   private lookupsVoidAt: number | null = null
   /** Names and atoms of the current turn's message: what a binding may key on. */
-  private turnNames: { turn: number; names: string[] } = { turn: 0, names: [] }
+  private turnNames: TurnNames = { turn: 0, names: [] }
   /**
    * MCP tools held back in this process. Not persisted: the pins on disk are
    * the state, and every start of the gateway compares against them afresh.
@@ -323,6 +324,7 @@ export class Cordon {
       userNames: this.userNames,
       userWords: this.userWords,
       vouched: this.vouched(),
+      assigned: new Set(this.turnNames.turn === this.turn ? this.turnNames.assigned ?? [] : []),
       heldTools: this.heldTools,
     })
 
@@ -613,6 +615,15 @@ export class Cordon {
     this.persist()
   }
 
+  /** Every argument name the policy declares controlled, on any tool. */
+  private controlledFields(): string[] {
+    const fields = new Set<string>()
+    for (const roles of Object.values(this.policy.arguments ?? {})) {
+      for (const [field, role] of Object.entries(roles)) if (role === 'controlled') fields.add(field)
+    }
+    return [...fields]
+  }
+
   private vouched(): ReadonlySet<string> {
     const said = new Set(this.turnNames.turn === this.turn ? this.turnNames.names : [])
     return vouched(this.lookups, this.lookupsVoidAt === this.turn, said, this.policy.lookups ?? {}, this.turn)
@@ -627,9 +638,17 @@ export class Cordon {
    * without bound.
    */
   private rememberNamed(text: string): void {
-    const current = this.turnNames.turn === this.turn ? this.turnNames.names : []
-    const said = new Set([...current, ...names(text), ...atoms(text)])
-    this.turnNames = { turn: this.turn, names: [...said].slice(-MAX_USER_ATOMS) }
+    const current = this.turnNames.turn === this.turn ? this.turnNames : { turn: this.turn, names: [] }
+    const said = new Set([...current.names, ...names(text), ...atoms(text)])
+    const assigned = new Set([
+      ...(current.assigned ?? []),
+      ...assignments(text, this.controlledFields()).map((pair) => JSON.stringify(pair)),
+    ])
+    this.turnNames = {
+      turn: this.turn,
+      names: [...said].slice(-MAX_USER_ATOMS),
+      assigned: [...assigned].slice(-MAX_USER_ATOMS),
+    }
     for (const atom of [...atoms(text), ...pastedSecrets(text)]) {
       if (!this.userAtoms.includes(atom)) this.userAtoms.push(atom)
     }

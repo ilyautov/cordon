@@ -297,7 +297,7 @@ function asViews(value: unknown, where: string): Record<string, SourceView> {
   return table
 }
 
-const ROLES: ReadonlySet<string> = new Set(['destination', 'resource', 'content'])
+const ROLES: ReadonlySet<string> = new Set(['destination', 'resource', 'content', 'controlled'])
 
 /** Null prototype, for the same reason as asViews: the keys come from the file. */
 function asRoles(value: unknown, where: string): Record<string, Record<string, ArgumentRole>> {
