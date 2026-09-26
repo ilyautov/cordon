@@ -7828,7 +7828,7 @@ function roleOf(tool, key, declared) {
   const table = Object.hasOwn(declared, tool) ? declared[tool] : void 0;
   if (table !== void 0 && Object.hasOwn(table, key)) return table[key];
   const folded = fold(key);
-  if (DESTINATION_KEYS.has(folded)) return "destination";
+  if (DESTINATION_KEYS.has(folded) || PATH_KEYS.has(folded)) return "destination";
   if (RESOURCE_KEYS.has(folded)) return "resource";
   return "content";
 }

@@ -968,6 +968,18 @@ describe('gate: a destination the user named by name', () => {
     expect(gate({ tool: 'wb_reply', args: { recipient: 'Eve', text: 'Send' } }, exposed(said)).kind).toBe('deny')
   })
 
+  it('a file the user named in quotes is where a create is aimed', () => {
+    // AgentDojo workspace, user_task_31: "create a new file named
+    // 'hawaii-packing-list.docx'". The file name is the destination of a write.
+    const ctx = {
+      ...setup({ mode: 'autonomous', tools: { create_file: ['create'] } }),
+      exposure: EXPOSED,
+      userNames: names("Please create a new file named 'hawaii-packing-list.docx' with the list"),
+    }
+    expect(gate({ tool: 'create_file', args: { filename: 'hawaii-packing-list.docx', content: 'Swimwear' } }, ctx).kind).toBe('allow')
+    expect(gate({ tool: 'create_file', args: { filename: 'other.docx', content: 'Swimwear' } }, ctx).kind).toBe('deny')
+  })
+
   it('a name does not lift a mark that came back through memory', () => {
     // The user said the name in this session; the note was written in an
     // earlier one, under a page's influence, and nothing the user said here

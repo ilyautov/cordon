@@ -140,7 +140,7 @@ memory:
   tools: [mem0_add]
 ```
 
-**`arguments`**: the role of a tool's arguments, by tool and argument name: `destination` (who receives the call: a recipient, a channel), `resource` (what the call reaches: a repository) or `content` (what it carries). Only a destination field can carry a name that exempts a call from the exposure rule, and a resource field is what the resource rule reads. Undeclared arguments get a role from their name: `to`, `recipient`, `channel`, `email`, `user` and similar are destinations; `repo`, `repository`, `owner`, `org`, `organization` and `namespace` are resources; everything else is content.
+**`arguments`**: the role of a tool's arguments, by tool and argument name: `destination` (who receives the call: a recipient, a channel), `resource` (what the call reaches: a repository) or `content` (what it carries). Only a destination field can carry a name that exempts a call from the exposure rule, and a resource field is what the resource rule reads. Undeclared arguments get a role from their name: `to`, `recipient`, `channel`, `email`, `user` and similar are destinations, and so are paths and file names, the place a write lands; `repo`, `repository`, `owner`, `org`, `organization` and `namespace` are resources; everything else is content.
 
 ```yaml
 arguments:

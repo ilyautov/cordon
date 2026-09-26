@@ -71,7 +71,9 @@ export function roleOf(
   const table = Object.hasOwn(declared, tool) ? declared[tool] : undefined
   if (table !== undefined && Object.hasOwn(table, key)) return table[key]!
   const folded = fold(key)
-  if (DESTINATION_KEYS.has(folded)) return 'destination'
+  // A path is where a write lands, the same as a recipient is where a
+  // message does: "create a file named 'hawaii-packing-list.docx'" names it.
+  if (DESTINATION_KEYS.has(folded) || PATH_KEYS.has(folded)) return 'destination'
   if (RESOURCE_KEYS.has(folded)) return 'resource'
   return 'content'
 }
