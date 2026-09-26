@@ -22,6 +22,8 @@ A link written without a scheme is now an atom. `www.name.com` and `host.tld/pat
 
 The journal at `notify.file` now rotates. At 50 MB it is renamed to `<file>.1`, replacing the previous one, and a new file is started. An autonomous agent writes it for weeks, and before this it grew until it filled the disk it shares with the agent's work. Two hook processes can see a full file at once; the second finds nothing to rename and writes its event anyway.
 
+The source label now has one copy, in `src/core/argument-keys.ts`, instead of four identical ones in the adapters. It decides which declared trusted source a result counts as, which makes it a security rule, and the adapters are supposed to hold none. It still reads only top-level arguments, on purpose: a label found in a nested field would let a call carry a trusted link beside the one it actually fetches.
+
 ## [0.7.0] - 2026-09-26
 
 The release for teams: `cordon audit` before deployment, MCP tool pinning at run time, `cordon init` profiles, `cordon log`, a managed-settings deployment guide, and npm provenance on the published package. Refusals on Claude Code now also leave with exit code 2.

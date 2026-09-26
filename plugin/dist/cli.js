@@ -7719,6 +7719,16 @@ var COMMAND_KEYS = /* @__PURE__ */ new Set(["command", "cmd", "script", "shell"]
 function fold(name) {
   return name.toLowerCase().replace(/[_-]/gu, "");
 }
+function sourceLabel(call) {
+  const args = Object.entries(call.args);
+  for (const set of [URL_KEYS, PATH_KEYS]) {
+    for (const [key, value] of args) {
+      if (!set.has(fold(key))) continue;
+      if (typeof value === "string" && value !== "") return value;
+    }
+  }
+  return call.tool;
+}
 
 // src/policy/selfprotect.ts
 import { readlinkSync, realpathSync as realpathSync2 } from "node:fs";
@@ -13096,16 +13106,6 @@ function sourceKind(tool) {
   if (tool === "Read" || tool === "Glob" || tool === "Grep" || tool === "NotebookRead") return "file";
   return "tool";
 }
-function sourceLabel(call) {
-  const args = Object.entries(call.args);
-  for (const set of [URL_KEYS, PATH_KEYS]) {
-    for (const [key, value] of args) {
-      if (!set.has(fold(key))) continue;
-      if (typeof value === "string" && value !== "") return value;
-    }
-  }
-  return call.tool;
-}
 function deny(reason) {
   return {
     hookSpecificOutput: {
@@ -13340,7 +13340,7 @@ function observe2(cordon, event, env) {
   const source = classifySource(
     {
       kind: sourceKind2(event.call.tool, event.mcpServer),
-      label: sourceLabel2(event.call),
+      label: sourceLabel(event.call),
       tool: key
     },
     env.policy
@@ -13412,16 +13412,6 @@ var FILE_TOOLS = /* @__PURE__ */ new Set([
   "glob",
   "search_file_content"
 ]);
-function sourceLabel2(call) {
-  const args = Object.entries(call.args);
-  for (const set of [URL_KEYS, PATH_KEYS]) {
-    for (const [key, value] of args) {
-      if (!set.has(fold(key))) continue;
-      if (typeof value === "string" && value !== "") return value;
-    }
-  }
-  return call.tool;
-}
 
 // src/adapters/gemini-cli/main.ts
 function runHook2(stdin, home = cordonHome()) {
@@ -13702,7 +13692,7 @@ function observeToolResult(value, call, cordon, policy) {
     cordon.markUnredacted();
     return value;
   }
-  const source = classifySource({ kind: "tool", label: sourceLabel3(call), tool: call.tool }, policy);
+  const source = classifySource({ kind: "tool", label: sourceLabel(call), tool: call.tool }, policy);
   for (const block of content) {
     const entry = asRecord(block);
     if (entry !== null && entry["type"] === "text" && typeof entry["text"] === "string") {
@@ -13758,16 +13748,6 @@ function observeInto(entry, key, tool, source, cordon) {
   } else if (envelope.findings.length > 0) {
     cordon.notice(tool, `a hidden layer was found in the result of ${tool}; it was not substituted`, source);
   }
-}
-function sourceLabel3(call) {
-  const args = Object.entries(call.args);
-  for (const set of [URL_KEYS, PATH_KEYS]) {
-    for (const [key, value] of args) {
-      if (!set.has(fold(key))) continue;
-      if (typeof value === "string" && value !== "") return value;
-    }
-  }
-  return call.tool;
 }
 function asRecord(value) {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return null;

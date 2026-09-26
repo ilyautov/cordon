@@ -10,7 +10,7 @@ import type { Finding } from '../../sanitize/types.js'
 import { classifySource } from '../../provenance/trust.js'
 import { extractText, replaceText } from './output.js'
 import { renderDecision, silentOnFailure, type HookEvent, type HookOutput } from './protocol.js'
-import { PATH_KEYS, URL_KEYS, fold } from '../../core/argument-keys.js'
+import { sourceLabel } from '../../core/argument-keys.js'
 
 export interface AdapterEnv {
   policy: Policy
@@ -274,34 +274,6 @@ function sourceKind(tool: string): Source['kind'] {
   if (tool === 'Bash') return 'bash'
   if (tool === 'Read' || tool === 'Glob' || tool === 'Grep' || tool === 'NotebookRead') return 'file'
   return 'tool'
-}
-
-/**
- * Links and paths in a call's arguments. The source is named by them.
- *
- * The names are folded to one form: `file_path` and `filePath` are chosen by
- * the MCP server, and they mean the same thing.
- */
-
-/**
- * The source's name: a link or a path from the call's arguments, and the tool
- * name when there are none.
- *
- * The tool name instead of a link looks like a harmless detail, but it kills
- * `trustedSources` entirely: the user declares a prefix like `/srv/docs`
- * trusted, and the word `Read` arrives for comparison, so the declaration
- * never matches. It also means the event log shows which document led to the
- * refusal instead of "Read".
- */
-function sourceLabel(call: ToolCall): string {
-  const args = Object.entries(call.args)
-  for (const set of [URL_KEYS, PATH_KEYS]) {
-    for (const [key, value] of args) {
-      if (!set.has(fold(key))) continue
-      if (typeof value === 'string' && value !== '') return value
-    }
-  }
-  return call.tool
 }
 
 

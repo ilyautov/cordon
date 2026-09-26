@@ -23,6 +23,7 @@ This page tracks what Cordon took from the tools it is compared with in [compari
 - **A classifier or LLM judge.** Lakera, Prompt Shields, PromptGuard and NeMo self-check decide by meaning. Cordon's first invariant is no model in the decision path ([AGENTS.md](../AGENTS.md)). A classifier can run beside Cordon, and Cordon's decision does not depend on it.
 - **A confusables filter.** Cordon never matches text against keywords, so lookalike letters cannot slip past a keyword. What matters is that a fullwidth or mathematical-bold link on a page still matches the plain link in a call. It does, through NFKC in provenance (`tests/provenance/store.test.ts`), and mixed scripts inside one word are flagged by sanitize.
 - **Per-call approvals kept by Cordon.** In interactive mode the harness asks the human on every escalated call, which is a one-shot approval by construction. Caching an approval across calls is state an attacker can aim at (see "Things that look like improvements" in [AGENTS.md](../AGENTS.md)).
+- **A source label read from nested arguments.** The label decides which declared trusted source a result counts as. Reading it from a nested field would let a call carry a trusted link beside the one it actually fetches, and the result would be classified by the decoy. Only top-level `url`, `path` and their spellings name a source; everything else is named by the tool.
 - **A hosted dashboard, SSO, telemetry.** Each would put a network service into the path. The journal is a file for the shipper you already run.
 
 ## Open

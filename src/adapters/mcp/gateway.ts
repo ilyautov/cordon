@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { createInterface } from 'node:readline'
 import type { Readable, Writable } from 'node:stream'
 import { Cordon } from '../../cordon.js'
-import { PATH_KEYS, URL_KEYS, fold } from '../../core/argument-keys.js'
+import { sourceLabel } from '../../core/argument-keys.js'
 import { makeDirectory } from '../../core/mkdir.js'
 import type { Source, ToolCall } from '../../core/types.js'
 import type { Policy } from '../../policy/defaults.js'
@@ -485,23 +485,6 @@ function observeInto(
   } else if (envelope.findings.length > 0) {
     cordon.notice(tool, `a hidden layer was found in the result of ${tool}; it was not substituted`, source)
   }
-}
-
-/**
- * The source's name: a link or a path from the call's arguments, and the
- * tool name when there are none. The same rule as in both hook adapters —
- * a tool name instead of a link would kill trustedSources entirely, because
- * the declared prefix is then compared against the word "Read".
- */
-function sourceLabel(call: ToolCall): string {
-  const args = Object.entries(call.args)
-  for (const set of [URL_KEYS, PATH_KEYS]) {
-    for (const [key, value] of args) {
-      if (!set.has(fold(key))) continue
-      if (typeof value === 'string' && value !== '') return value
-    }
-  }
-  return call.tool
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {

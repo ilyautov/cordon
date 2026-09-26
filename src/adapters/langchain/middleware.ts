@@ -3,7 +3,7 @@ import { join } from 'node:path'
 import { createMiddleware, ToolMessage } from 'langchain'
 import { isHumanMessage, type BaseMessage, type MessageContent } from '@langchain/core/messages'
 import { Cordon } from '../../cordon.js'
-import { PATH_KEYS, URL_KEYS, fold } from '../../core/argument-keys.js'
+import { sourceLabel } from '../../core/argument-keys.js'
 import type { Source, ToolCall } from '../../core/types.js'
 import type { Policy } from '../../policy/defaults.js'
 import { classifySource } from '../../provenance/trust.js'
@@ -235,19 +235,3 @@ function withContent(message: ToolMessage, content: MessageContent): ToolMessage
   })
 }
 
-/**
- * The source's name: a link or a path from the call's arguments, and the tool
- * name when there are none. The same rule as in both hook adapters — a tool
- * name instead of a link would kill trustedSources entirely, because the
- * declared prefix is then compared against the word "read_page".
- */
-function sourceLabel(call: ToolCall): string {
-  const args = Object.entries(call.args)
-  for (const set of [URL_KEYS, PATH_KEYS]) {
-    for (const [key, value] of args) {
-      if (!set.has(fold(key))) continue
-      if (typeof value === 'string' && value !== '') return value
-    }
-  }
-  return call.tool
-}

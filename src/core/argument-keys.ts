@@ -1,3 +1,5 @@
+import type { ToolCall } from './types.js'
+
 /**
  * The argument names a call is read by, in one place.
  *
@@ -37,4 +39,33 @@ export const COMMAND_KEYS: ReadonlySet<string> = new Set(['command', 'cmd', 'scr
 /** One name out of the several spellings a server may have chosen. */
 export function fold(name: string): string {
   return name.toLowerCase().replace(/[_-]/gu, '')
+}
+
+/**
+ * The source's name: a link or a path from the call's arguments, and the tool
+ * name when there are none.
+ *
+ * The tool name instead of a link looks like a harmless detail, but it kills
+ * `trustedSources` entirely: the user declares a prefix like `/srv/docs`
+ * trusted, and the word `Read` arrives for comparison, so the declaration
+ * never matches. It also means the event log shows which document led to the
+ * refusal instead of "Read".
+ *
+ * One copy for all four adapters: it decides which declared trusted source a
+ * result counts as, and a rule that lived in an adapter would be a rule the
+ * other transports do not have.
+ *
+ * Only top-level arguments are read. A label found deeper would let a call
+ * carry a trusted link in a nested field beside the one it actually uses,
+ * and the result would be classified by the decoy.
+ */
+export function sourceLabel(call: ToolCall): string {
+  const args = Object.entries(call.args)
+  for (const set of [URL_KEYS, PATH_KEYS]) {
+    for (const [key, value] of args) {
+      if (!set.has(fold(key))) continue
+      if (typeof value === 'string' && value !== '') return value
+    }
+  }
+  return call.tool
 }
