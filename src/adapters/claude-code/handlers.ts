@@ -1,6 +1,7 @@
 import { Cordon } from '../../cordon.js'
 import { attribute } from '../../output/attribute.js'
 import { renderFooter } from '../../output/footer.js'
+import { outboundAfterRead, renderOutbound } from '../../output/egress.js'
 import { SessionStore } from '../../session/store.js'
 import { sweep } from '../../session/sweep.js'
 import { humanReport, removingFindings } from '../../output/report.js'
@@ -132,8 +133,8 @@ function display(
     sessions.clearDraft(event.sessionId)
 
     // Provenance is read here and only here, and only read.
-    const { taint } = sessions.load(event.sessionId)
-    const footer = renderFooter(attribute(text, taint))
+    const state = sessions.load(event.sessionId)
+    const footer = renderFooter(attribute(text, state.taint)) + renderOutbound(outboundAfterRead(text, state, env.policy))
     // No footer means silence. An empty substitution would erase the delta.
     if (footer === '') return {}
 

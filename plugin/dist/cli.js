@@ -8931,6 +8931,106 @@ var FileNotifier = class {
 var SILENT = { notify: () => {
 } };
 
+// src/output/egress.ts
+function outbound(answer, known) {
+  const found2 = [];
+  for (const candidate of candidates(answer)) {
+    const who = known(candidate.url);
+    if (who === "user") continue;
+    if (candidate.kind === "link" && (who === "source" || !carriesData(candidate.url))) continue;
+    found2.push({ ...candidate, host: hostOf(candidate.url) });
+  }
+  return found2;
+}
+function outboundAfterRead(answer, session, policy) {
+  if (policy.exposure === false) return [];
+  const exposed = session.exposure !== void 0 && session.exposure !== null || session.unredacted === true;
+  if (!exposed) return [];
+  const named = new Set((session.userAtoms ?? []).map((atom) => atom.toLowerCase()));
+  return outbound(answer, (url) => {
+    const forms = [url, url.replace(/^https?:\/\//iu, "")];
+    if (forms.some((form) => named.has(form.toLowerCase()))) return "user";
+    if (forms.some((form) => session.taint.holds(form))) return "source";
+    return null;
+  });
+}
+function cutOutbound(answer, found2) {
+  let result = answer;
+  for (const item of [...found2].sort((a, b) => b.start - a.start)) {
+    const note = item.kind === "image" ? `[image removed by Cordon: ${item.host}]` : `${item.text === "" ? "" : `${item.text} `}[link removed by Cordon: ${item.host}]`;
+    result = result.slice(0, item.start) + note + result.slice(item.end);
+  }
+  return result;
+}
+var TITLE = String.raw`(?:\s+(?:"[^"\n]*"|'[^'\n]*'))?`;
+var INLINE_IMAGE = new RegExp(String.raw`!\[([^\]\n]*)\]\(\s*<?([^\s)>]+)>?${TITLE}\s*\)`, "gu");
+var INLINE_LINK = new RegExp(String.raw`\[([^\]\n]*)\]\(\s*<?([^\s)>]+)>?${TITLE}\s*\)`, "gu");
+var HTML_IMAGE = /<img\b[^>]*?\bsrc\s*=\s*["']?([^"'\s>]+)["']?[^>]*>/giu;
+var DEFINITION = /^[ \t]{0,3}\[([^\]\n]+)\]:[ \t]*<?(\S+?)>?(?:[ \t]+[^\n]*)?$/gmu;
+var IMAGE_REFERENCE = /!\[([^\]\n]*)\]\[([^\]\n]*)\]/gu;
+var AUTOLINK = /<([a-z][a-z0-9+.-]*:\/\/[^\s>]+)>/giu;
+var BARE = /\b(?:https?|ftp):\/\/[^\s<>()[\]"'`]+/giu;
+function candidates(answer) {
+  const taken = [];
+  const result = [];
+  const add = (candidate) => {
+    if (taken.some(([start, end]) => candidate.start < end && start < candidate.end)) return;
+    taken.push([candidate.start, candidate.end]);
+    result.push(candidate);
+  };
+  for (const match of answer.matchAll(INLINE_IMAGE)) {
+    add({ kind: "image", url: match[2], start: match.index, end: match.index + match[0].length, text: match[1] });
+  }
+  for (const match of answer.matchAll(HTML_IMAGE)) {
+    add({ kind: "image", url: match[1], start: match.index, end: match.index + match[0].length, text: "" });
+  }
+  const imageLabels = new Set([...answer.matchAll(IMAGE_REFERENCE)].map((match) => (match[2] || match[1]).toLowerCase()));
+  for (const match of answer.matchAll(DEFINITION)) {
+    const kind = imageLabels.has(match[1].toLowerCase()) ? "image" : "link";
+    add({ kind, url: match[2], start: match.index, end: match.index + match[0].length, text: "" });
+  }
+  for (const match of answer.matchAll(INLINE_LINK)) {
+    add({ kind: "link", url: match[2], start: match.index, end: match.index + match[0].length, text: match[1] });
+  }
+  for (const match of answer.matchAll(AUTOLINK)) {
+    add({ kind: "link", url: match[1], start: match.index, end: match.index + match[0].length, text: "" });
+  }
+  for (const match of answer.matchAll(BARE)) {
+    const url = match[0].replace(/[.,;:!?]+$/u, "");
+    add({ kind: "link", url, start: match.index, end: match.index + url.length, text: "" });
+  }
+  return result.filter((candidate) => /^[a-z][a-z0-9+.-]*:\/\//iu.test(candidate.url) || candidate.url.startsWith("//"));
+}
+function carriesData(url) {
+  const hash2 = url.indexOf("#");
+  const fragment = hash2 < 0 ? "" : url.slice(hash2 + 1);
+  const beforeHash = hash2 < 0 ? url : url.slice(0, hash2);
+  const question = beforeHash.indexOf("?");
+  if (question >= 0 && question < beforeHash.length - 1) return true;
+  if (dataLike(fragment, 8) || fragment.length >= 32) return true;
+  if (/^[a-z][a-z0-9+.-]*:\/\/[^/?#]*@/iu.test(url)) return true;
+  const path = (question < 0 ? beforeHash : beforeHash.slice(0, question)).replace(/^[a-z][a-z0-9+.-]*:\/\/[^/]*/iu, "");
+  return path.split("/").some((segment) => dataLike(segment.replace(/\.[a-z0-9]{1,5}$/iu, ""), 12) || segment.length >= 48);
+}
+function dataLike(segment, min) {
+  return segment.length >= min && /\d/u.test(segment) && /[a-z]/iu.test(segment) && /^[\w+=%.~-]+$/u.test(segment);
+}
+function hostOf(url) {
+  const authority = /^(?:[a-z][a-z0-9+.-]*:)?\/\/([^/?#\s]*)/iu.exec(url)?.[1] ?? "";
+  const host = /^[a-z0-9.:-]*/iu.exec(authority.replace(/^[^@]*@/u, ""))?.[0] ?? "";
+  return host.replace(/[.:]+$/u, "").toLowerCase() || "an address";
+}
+function renderOutbound(found2) {
+  if (found2.length === 0) return "";
+  const listed = [...new Set(found2.map((item) => `${item.host} (${item.kind})`))];
+  return [
+    "",
+    "Cordon: this answer was written after an untrusted read and carries addresses that would send data out when shown or opened:",
+    `  - ${listed.slice(0, 8).join(", ")}${listed.length > 8 ? `, and ${listed.length - 8} more` : ""}`,
+    "An image loads by itself in a viewer that renders markdown; do not open these links, and do not paste this answer into one."
+  ].join("\n");
+}
+
 // src/provenance/names.ts
 var QUOTED = /(?:'([^'\s]{1,64})'|"([^"\s]{1,64})"|`([^`\s]{1,64})`|\u2018([^\u2019\s]{1,64})\u2019|\u201C([^\u201D\s]{1,64})\u201D)/gu;
 var TOKEN = /^[\p{L}\p{N}][\p{L}\p{N}_.#@-]*$/u;
@@ -11779,8 +11879,8 @@ function binaryToText(value) {
   if (value.length < 32) return [];
   const out = [];
   for (const match of value.matchAll(BASE64_RUN)) {
-    const candidates = /* @__PURE__ */ new Set([match[0], ...match[0].split("/").filter((part) => part.length >= 32)]);
-    for (const candidate of candidates) {
+    const candidates2 = /* @__PURE__ */ new Set([match[0], ...match[0].split("/").filter((part) => part.length >= 32)]);
+    for (const candidate of candidates2) {
       const text = asText(Buffer.from(candidate.replace(/-/gu, "+").replace(/_/gu, "/"), "base64"));
       if (text !== null) out.push(text);
     }
@@ -11883,6 +11983,10 @@ var TaintStore = class _TaintStore {
    */
   untrusted(kinds) {
     return [...this.sources.values()].filter((source) => source.trust === "untrusted" && kinds.has(source.kind));
+  }
+  /** Whether an untrusted source said this atom, verbatim. */
+  holds(atom) {
+    return this.byAtom.has(atom);
   }
   get saturated() {
     return this.full;
@@ -12713,6 +12817,33 @@ var Cordon = class {
       source: source.label
     });
   }
+  /**
+   * The model's answer, with the images and data-carrying links cut that
+   * would send something out when it is shown, after an untrusted read. For
+   * a transport that holds the answer before anyone sees it; the hooks only
+   * see it on its way to the screen and warn instead.
+   *
+   * The cut is journalled: the owner learns that a page tried the channel,
+   * which the transcript alone would hide behind the note.
+   */
+  answer(text) {
+    const found2 = outboundAfterRead(text, {
+      taint: this.taint,
+      exposure: this.exposure,
+      unredacted: this.unredacted,
+      userAtoms: this.userAtoms
+    }, this.policy);
+    if (found2.length === 0) return text;
+    const hosts = [...new Set(found2.map((item) => `${item.host} (${item.kind})`))].join(", ");
+    this.notifier.notify({
+      at: (/* @__PURE__ */ new Date()).toISOString(),
+      decision: "notice",
+      tool: "(answer)",
+      reason: `cut from the answer after an untrusted read, as addresses that would carry data out: ${hosts}`,
+      source: this.exposure?.source ?? null
+    });
+    return cutOutbound(text, found2);
+  }
   certificate() {
     return this.cert;
   }
@@ -12868,7 +12999,7 @@ var SECOND_LEVEL = /* @__PURE__ */ new Set([
   "com.mx"
 ]);
 var MIN_NAME = 3;
-function hostOf(label) {
+function hostOf2(label) {
   try {
     const url = new URL(label);
     if (url.protocol !== "http:" && url.protocol !== "https:") return null;
@@ -12888,7 +13019,7 @@ function isSyndication(host) {
   return SYNDICATION.has(trim(host.toLowerCase()));
 }
 function subjectOf(source) {
-  const raw = hostOf(source.label);
+  const raw = hostOf2(source.label);
   if (!raw) return null;
   const host = trim(raw);
   const names2 = [host];
@@ -13420,8 +13551,8 @@ function display(event, env) {
       return {};
     }
     sessions.clearDraft(event.sessionId);
-    const { taint } = sessions.load(event.sessionId);
-    const footer2 = renderFooter(attribute(text, taint));
+    const state = sessions.load(event.sessionId);
+    const footer2 = renderFooter(attribute(text, state.taint)) + renderOutbound(outboundAfterRead(text, state, env.policy));
     if (footer2 === "") return {};
     return {
       hookSpecificOutput: {
@@ -13718,8 +13849,8 @@ function withHarnessTools(policy, event) {
 function footer(event, env) {
   try {
     if (!env.policy.output.footer) return {};
-    const { taint } = new SessionStore(env.cordonHome).load(event.sessionId);
-    const text = renderFooter(attribute(event.response, taint));
+    const state = new SessionStore(env.cordonHome).load(event.sessionId);
+    const text = renderFooter(attribute(event.response, state.taint)) + renderOutbound(outboundAfterRead(event.response, state, env.policy));
     if (text === "") return {};
     return { systemMessage: text };
   } catch {

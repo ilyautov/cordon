@@ -14,6 +14,8 @@ After an untrusted read, a write to a file that configures an agent escalates: `
 
 Memory now includes Windsurf's `create_memory` and `update_memory`, and every file under `.cursor/rules/`, `.windsurf/rules/`, `.clinerules/` and `.github/instructions/`, whatever its name.
 
+After an untrusted read, the model's answer is checked for addresses that would carry data out when it is shown: every image the user did not name, and every link with a query, userinfo or an identifier in it that was not copied verbatim from what was read. The LangChain middleware cuts them in `wrapModelCall`, before the answer enters the state, and journals the cut. The Claude Code and Gemini CLI footers name them, since a hook sees the answer only on its way to the screen. An image copied from the page still counts: CamoLeak exfiltrated through GitHub's own image proxy with addresses the page supplied. The MCP gateway never sees the answer.
+
 `cordon audit` has five new findings: CA305, a project that points the model endpoint elsewhere (`ANTHROPIC_BASE_URL` and kin, CVE-2026-21852); CA306, a project that starts its own `.mcp.json` servers (CVE-2025-59536); CA307, a VS Code `autoApprove` setting (CVE-2025-53773), with `.vscode/settings.json` read as JSON with comments; CA308, a task that runs on folder open; CA205, `mcp-remote` before 0.1.16 (CVE-2025-6514) and MCP Inspector before 0.14.1 (CVE-2025-49596).
 
 ## [0.8.0] - 2026-09-26

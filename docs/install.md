@@ -342,6 +342,18 @@ The footer can say four things and no more: which sources the answer matched ver
 
 **A failure on this event does not hide the answer.** This is the single place in all of Cordon where fail-closed would be wrong: any error ends in an empty response, and the harness then shows the model's original text. A refusal here would protect nothing — the event decides nothing — while costing the human the sight of the answer. The timeout is set to 5 seconds against the event's default of 10: the hot path is synchronous, and if it did not finish in time then it is broken, not slow.
 
+### Links and images that would carry data out
+
+After an untrusted read, the footer also names the addresses in the answer that would send something out when the answer is shown or opened: every image the user did not name, and every link that carries data (a query, userinfo, an identifier in the path or the fragment) and was not copied verbatim from what was read or from the user's message. An image in a viewer that renders markdown is fetched with no click, which is how EchoLeak (CVE-2025-32711) and the Slack AI and ChatGPT image leaks worked. An allowlist of image hosts is no answer: CamoLeak went through GitHub's own image proxy, one pre-signed address per character, so an image copied from the page counts too.
+
+```
+Cordon: this answer was written after an untrusted read and carries addresses that would send data out when shown or opened:
+  - evil.example (image)
+An image loads by itself in a viewer that renders markdown; do not open these links, and do not paste this answer into one.
+```
+
+The hook sees the answer on its way to the screen and cannot take back the parts already shown, so here it warns and does not cut. The terminal renders no images; the risk is a link opened by hand, or the answer pasted somewhere that renders it. The LangChain middleware holds the answer before anyone sees it and cuts instead; see [install-langchain.md](install-langchain.md). `exposure: false` turns this off together with the rule it belongs to, and so does `output.footer: false`.
+
 ### Turning the footer off
 
 ```yaml

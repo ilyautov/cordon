@@ -4,6 +4,7 @@ import { memoryTarget } from './gate/memory.js'
 import { comparePins, shadows, type HeldTool, type ListedTool } from './gate/pins.js'
 import { pastedSecrets } from './gate/secrets.js'
 import { FileNotifier, SILENT, type Notifier } from './notify/notifier.js'
+import { cutOutbound, outboundAfterRead } from './output/egress.js'
 import type { Policy } from './policy/defaults.js'
 import { names, words } from './provenance/names.js'
 import { atoms } from './provenance/normalize.js'
@@ -388,6 +389,34 @@ export class Cordon {
       reason,
       source: source.label,
     })
+  }
+
+  /**
+   * The model's answer, with the images and data-carrying links cut that
+   * would send something out when it is shown, after an untrusted read. For
+   * a transport that holds the answer before anyone sees it; the hooks only
+   * see it on its way to the screen and warn instead.
+   *
+   * The cut is journalled: the owner learns that a page tried the channel,
+   * which the transcript alone would hide behind the note.
+   */
+  answer(text: string): string {
+    const found = outboundAfterRead(text, {
+      taint: this.taint,
+      exposure: this.exposure,
+      unredacted: this.unredacted,
+      userAtoms: this.userAtoms,
+    }, this.policy)
+    if (found.length === 0) return text
+    const hosts = [...new Set(found.map((item) => `${item.host} (${item.kind})`))].join(', ')
+    this.notifier.notify({
+      at: new Date().toISOString(),
+      decision: 'notice',
+      tool: '(answer)',
+      reason: `cut from the answer after an untrusted read, as addresses that would carry data out: ${hosts}`,
+      source: this.exposure?.source ?? null,
+    })
+    return cutOutbound(text, found)
   }
 
   certificate(): Certificate {

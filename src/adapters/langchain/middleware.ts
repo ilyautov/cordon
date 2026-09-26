@@ -1,7 +1,7 @@
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { createMiddleware, ToolMessage } from 'langchain'
-import { isHumanMessage, type BaseMessage, type MessageContent } from '@langchain/core/messages'
+import { AIMessage, isHumanMessage, type BaseMessage, type MessageContent } from '@langchain/core/messages'
 import { Cordon } from '../../cordon.js'
 import { sourceLabel } from '../../core/argument-keys.js'
 import { rewriteNotice } from '../../core/rewrite-notice.js'
@@ -41,6 +41,13 @@ export interface CordonMiddlewareOptions {
  *   handler never runs, a rewrite calls the handler with the rewritten
  *   arguments. After the handler it is the observer: the result's text is
  *   cleaned and substituted when the source's view allows it.
+ *
+ * - `wrapModelCall` carries the answer. After an untrusted read, an image or
+ *   a link that would carry data out is cut from the model's message before
+ *   it enters the state, so neither the application's renderer nor the next
+ *   turn sees it. A token stream the application renders as it arrives has
+ *   already shown the tokens by then; the cut reaches the state and the
+ *   final result, not a live stream.
  *
  * The adapter holds no security logic: every decision comes from `Cordon`,
  * so a LangChain agent and both hook harnesses answer the same call the same
@@ -103,6 +110,26 @@ export function createCordonMiddleware(options: CordonMiddlewareOptions) {
       // at the one moment the human's words are being taken in.
       cordon.onUserPrompt(text)
       return undefined
+    },
+
+    wrapModelCall: async (request, handler) => {
+      const result = await handler(request)
+      // A Command is a state update, not an answer, and has no text to cut.
+      if (!AIMessage.isInstance(result)) return result
+      const content = result.content
+      if (typeof content === 'string') {
+        const cut = cordon.answer(content)
+        return cut === content ? result : withAnswer(result, cut)
+      }
+      let changed = false
+      const blocks = content.map((block) => {
+        if (typeof block !== 'object' || block === null || block.type !== 'text' || typeof block.text !== 'string') return block
+        const cut = cordon.answer(block.text)
+        if (cut === block.text) return block
+        changed = true
+        return { ...block, text: cut }
+      })
+      return changed ? withAnswer(result, blocks as MessageContent) : result
     },
 
     wrapToolCall: async (request, handler) => {
@@ -239,6 +266,20 @@ function withNotice<R>(result: R, notice: string): R {
     ? `${content}\n\n${notice}`
     : [...content, { type: 'text', text: notice }] as MessageContent
   return withContent(result, next) as R
+}
+
+/** The model's message with the answer cut, everything else as it came. */
+function withAnswer(message: AIMessage, content: MessageContent): AIMessage {
+  return new AIMessage({
+    content,
+    tool_calls: message.tool_calls ?? [],
+    invalid_tool_calls: message.invalid_tool_calls ?? [],
+    additional_kwargs: message.additional_kwargs,
+    response_metadata: message.response_metadata,
+    ...(message.id === undefined ? {} : { id: message.id }),
+    ...(message.name === undefined ? {} : { name: message.name }),
+    ...(message.usage_metadata === undefined ? {} : { usage_metadata: message.usage_metadata }),
+  })
 }
 
 function withContent(message: ToolMessage, content: MessageContent): ToolMessage {

@@ -126,6 +126,11 @@ export class TaintStore {
     return [...this.sources.values()].filter((source) => source.trust === 'untrusted' && kinds.has(source.kind))
   }
 
+  /** Whether an untrusted source said this atom, verbatim. */
+  holds(atom: string): boolean {
+    return this.byAtom.has(atom)
+  }
+
   get saturated(): boolean {
     return this.full
   }

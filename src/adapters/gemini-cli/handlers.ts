@@ -2,6 +2,7 @@ import { Cordon } from '../../cordon.js'
 import { viewIsUnknown, type EffectClass, type Source, type ToolCall } from '../../core/types.js'
 import { attribute } from '../../output/attribute.js'
 import { renderFooter } from '../../output/footer.js'
+import { outboundAfterRead, renderOutbound } from '../../output/egress.js'
 import { humanReport, removingFindings } from '../../output/report.js'
 import type { Policy } from '../../policy/defaults.js'
 import { classifySource } from '../../provenance/trust.js'
@@ -172,8 +173,8 @@ function withHarnessTools(policy: Policy, event: HookEvent): Policy {
 function footer(event: Extract<HookEvent, { kind: 'AfterAgent' }>, env: AdapterEnv): HookOutput {
   try {
     if (!env.policy.output.footer) return {}
-    const { taint } = new SessionStore(env.cordonHome).load(event.sessionId)
-    const text = renderFooter(attribute(event.response, taint))
+    const state = new SessionStore(env.cordonHome).load(event.sessionId)
+    const text = renderFooter(attribute(event.response, state.taint)) + renderOutbound(outboundAfterRead(event.response, state, env.policy))
     if (text === '') return {}
     return { systemMessage: text }
   } catch {

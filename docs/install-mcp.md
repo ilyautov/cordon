@@ -98,6 +98,7 @@ In practice the mark is set before the first call. Tool descriptions are untrust
 
 - **The harness's built-in tools go past MCP.** Read/Write/Bash in Claude Code or Cursor are not MCP calls and never cross the gateway. The gateway covers MCP tools, not the host. For Claude Code the two complement each other: the hooks cover the built-ins, the gateway covers the servers.
 - **The exposure mark is not lifted inside a session.** On the hooks a new user message lifts it, on the argument that the human has seen the turn's outcome. Over MCP no message ever arrives, so the mark stands for the life of the process. The recipes: one gateway (one server entry) per task, restarted between tasks — a restart starts a clean session — or `exposure: false` with the price named by `cordon doctor`.
+- **The model's answer.** The gateway sits between the client and a server; the answer the model writes never crosses it. A markdown image or a data-carrying link in the answer is the client's to render and the hooks' or the middleware's to catch, not the gateway's.
 - **One upstream per process.** There is no multi-server routing; the client's own server list does that job.
 
 ## The direction of failure
