@@ -4,6 +4,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versions follo
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-09-26
+
 A name no longer exempts a call wherever it appears. After an untrusted read, "thank Alice" exempted a Bash command whose `description` said Alice, and a note field that mentioned her. A name now counts only in a field whose role is `destination`, and never for a call that executes something. With that in place, the first word of a sentence counts as a name again. It was excluded so that "Send" or "Thanks" would not vouch for whatever held them, and it cost a real payee: in AgentDojo banking, "Apple called and said I underpaid" was refused once the accidental exemption through a `subject: 'VAT'` field was gone. Now "Send" vouches only for a recipient called exactly Send. A path or a file name is a destination too: "create a file named 'hawaii-packing-list.docx'" names where the write lands, and workspace lost four tasks until it counted. Roles come from a new policy field, `arguments`, and from the argument's name when undeclared: `to`, `recipient`, `channel`, `email`, `user` and their kin are destinations, `repo` and `repository` are resources, the rest is content.
 
 After an untrusted read, a call that reaches a resource the user never mentioned escalates, reads included. This is the GitHub MCP "toxic agent flow": an issue in a public repository leads the agent into the owner's private one, and every call on the way is a read. The battery gains `resource/private-repo-from-public-issue`; it went through before on every profile and now stops on each one that keeps the exposure rule.
