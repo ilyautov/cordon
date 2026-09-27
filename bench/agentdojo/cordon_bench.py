@@ -53,11 +53,27 @@ PRICES = {  # dollars per million tokens: input, output; matched by prefix
 }
 
 
+# OpenAI-compatible providers: prefix, base URL, the variable holding the key.
+PROVIDERS = {
+    'openrouter/': ('https://openrouter.ai/api/v1', 'OPENROUTER_API_KEY'),
+    'cerebras/': ('https://api.cerebras.ai/v1', 'CEREBRAS_API_KEY'),
+    'nvidia/': ('https://integrate.api.nvidia.com/v1', 'NVIDIA_API_KEY'),
+}
+
+
+def provider(model: str) -> str | None:
+    return next((prefix for prefix in PROVIDERS if model.startswith(prefix)), None)
+
+
 def price(model: str) -> tuple[float, float]:
     # OpenRouter's `:free` variants are billed at zero and never fall back
     # to a paid route; anything else through OpenRouter has no price here and
-    # is refused, so the key's credit cannot be spent by a typo.
+    # is refused, so the key's credit cannot be spent by a typo. Cerebras and
+    # NVIDIA keys here are free-tier ones with no card attached: the provider
+    # stops them at the quota rather than billing past it.
     if model.startswith('openrouter/') and model.endswith(':free'):
+        return (0.0, 0.0)
+    if model.startswith(('cerebras/', 'nvidia/')):
         return (0.0, 0.0)
     for prefix, value in PRICES.items():
         if model.startswith(prefix):
@@ -178,7 +194,7 @@ def metered_openai_request(client, model, messages, tools, reasoning_effort, tem
     os.replace(temp, SPEND_FILE)
     if choice is None or error or finish == 'error':
         raise openai.APIError(f'error completion from {model}: {error}',
-                              request=httpx.Request('POST', 'https://openrouter.ai/api/v1'), body=None)
+                              request=httpx.Request('POST', str(client.base_url)), body=None)
     return completion
 
 
@@ -413,15 +429,16 @@ def write_policy(home: Path, variant: str = 'strict', suite: str | None = None) 
 
 
 def make_llm(model: str):
-    if model.startswith('openrouter/'):
+    prefix = provider(model)
+    if prefix is not None:
         import openai
         from agentdojo.agent_pipeline.llms.openai_llm import OpenAILLM
         # Free models are rate-limited; the SDK's own retries honour
         # Retry-After, and AgentDojo's three attempts alone do not outlast a
         # minute's quota.
-        client = openai.OpenAI(base_url='https://openrouter.ai/api/v1', api_key=os.environ['OPENROUTER_API_KEY'],
-                               max_retries=8, timeout=180)
-        return OpenAILLM(client, model.removeprefix('openrouter/'), temperature=0.0)
+        base_url, key = PROVIDERS[prefix]
+        client = openai.OpenAI(base_url=base_url, api_key=os.environ[key], max_retries=8, timeout=180)
+        return OpenAILLM(client, model.removeprefix(prefix), temperature=0.0)
     return AnthropicLLM(AsyncAnthropic(), model, max_tokens=2048)
 
 
