@@ -680,9 +680,11 @@ function unnamedResource(
     if (bound(part)) continue
     if (typeof value !== 'string' || value.trim() === '') continue
     if (roleOf(tool, key, ctx.policy.arguments ?? {}) !== 'resource') continue
-    const whole = value.trim().normalize('NFKC').toLowerCase()
+    // `./sales.csv` is `sales.csv`: the current directory is no part of
+    // the name the user said. `..` stays, since it leaves the directory.
+    const whole = value.trim().normalize('NFKC').toLowerCase().replace(/^(?:\.\/)+/u, '')
     if (said.has(whole) || inMandate(whole, mandate)) continue
-    const segments = whole.split('/').filter((segment) => segment !== '')
+    const segments = whole.split('/').filter((segment) => segment !== '' && segment !== '.')
     if (segments.length > 1 && segments.every((segment) => said.has(segment))) continue
     return value
   }

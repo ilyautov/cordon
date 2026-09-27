@@ -8895,9 +8895,9 @@ function unnamedResource(tool, parts, ctx, bound) {
     if (bound(part)) continue;
     if (typeof value !== "string" || value.trim() === "") continue;
     if (roleOf(tool, key, ctx.policy.arguments ?? {}) !== "resource") continue;
-    const whole = value.trim().normalize("NFKC").toLowerCase();
+    const whole = value.trim().normalize("NFKC").toLowerCase().replace(/^(?:\.\/)+/u, "");
     if (said.has(whole) || inMandate(whole, mandate)) continue;
-    const segments2 = whole.split("/").filter((segment) => segment !== "");
+    const segments2 = whole.split("/").filter((segment) => segment !== "" && segment !== ".");
     if (segments2.length > 1 && segments2.every((segment) => said.has(segment))) continue;
     return value;
   }
