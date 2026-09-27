@@ -16,6 +16,8 @@ Web pages, emails, issues, documents, tool results and MCP tool descriptions can
 
 **AgentDojo** (a public benchmark of 97 agent tasks with injected attacks): with Cordon, an agent that obeys every injection got 0 attacks through on all four suites; without it, 39–100% succeeded. Utility depends on the policy: 96 of 97 tasks in interactive mode at 0.25–1.6 questions per task, 14–75% per suite on a strict autonomous policy. On a live model that follows injections, Laguna S 2.1, 0 of 80 attacks got through against 30 of 80 undefended. The methodology and where Cordon loses are in [docs/agentdojo.md](docs/agentdojo.md).
 
+**Site:** [cordon.aifrontier.tech](https://cordon.aifrontier.tech/en/)
+
 **Install:** [Claude Code](docs/install.md) · [Gemini CLI](docs/install-gemini.md) · [MCP hosts](docs/install-mcp.md) · [LangChain](docs/install-langchain.md)
 
 > ⚠️ **Early development.** Live runs so far:
