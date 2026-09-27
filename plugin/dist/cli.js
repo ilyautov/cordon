@@ -7710,6 +7710,9 @@ function asEffects(value, where) {
   return list;
 }
 
+// src/cordon.ts
+import { createHash as createHash5 } from "node:crypto";
+
 // src/core/types.ts
 function humanSeesRendered(source) {
   if (source.declaredView !== void 0) return source.declaredView === "rendered";
@@ -9011,8 +9014,8 @@ function hostAllowed(raw, hosts) {
 // src/gate/pins.ts
 import { createHash } from "node:crypto";
 function fingerprint(tool) {
-  const canonical = stable({ name: tool.name, description: tool.description ?? null, inputSchema: tool.inputSchema ?? null });
-  return createHash("sha256").update(canonical, "utf8").digest("hex");
+  const canonical2 = stable({ name: tool.name, description: tool.description ?? null, inputSchema: tool.inputSchema ?? null });
+  return createHash("sha256").update(canonical2, "utf8").digest("hex");
 }
 function comparePins(pinned2, listed) {
   if (pinned2 === null) {
@@ -12072,8 +12075,11 @@ import { join as join4 } from "node:path";
 var APPROVAL_TTL_MS = 60 * 60 * 1e3;
 var ID = /^[0-9a-f]{16}$/u;
 function approvalId(sessionId, call) {
-  const canonical = JSON.stringify([sessionId, call.tool, sorted(call.args ?? {})]);
-  return createHash2("sha256").update(canonical, "utf8").digest("hex").slice(0, 16);
+  const canonical2 = JSON.stringify([sessionId, call.tool, sorted(call.args ?? {})]);
+  return createHash2("sha256").update(canonical2, "utf8").digest("hex").slice(0, 16);
+}
+function canonical(value) {
+  return JSON.stringify(sorted(value)) ?? "";
 }
 function sorted(value) {
   if (Array.isArray(value)) return value.map(sorted);
@@ -12082,6 +12088,7 @@ function sorted(value) {
   for (const key of Object.keys(value).sort()) result[key] = sorted(value[key]);
   return result;
 }
+var BINDING = /^(?:[0-9a-f]{64})?$/u;
 var MAX_SHOWN_ARGS = 4e3;
 var ApprovalStore = class {
   dir;
@@ -12097,9 +12104,19 @@ var ApprovalStore = class {
   /** Records that a call waits for the owner. A request already waiting is left as it is. */
   request(id, request) {
     makeDirectory(this.dir, 448);
-    const args = JSON.stringify(sorted(request.args ?? {})) ?? "";
-    const body = JSON.stringify({ tool: request.tool, reason: request.reason, args, at: (/* @__PURE__ */ new Date()).toISOString() });
-    if (this.stale(this.pendingPath(id))) {
+    const args = canonical(request.args ?? {});
+    const binding = request.binding ?? "";
+    if (!BINDING.test(binding)) throw new Error("an approval binding is a sha256 in hex");
+    const body = JSON.stringify({
+      tool: request.tool,
+      reason: request.reason,
+      args,
+      binding,
+      ...request.context === void 0 ? {} : { context: request.context },
+      at: (/* @__PURE__ */ new Date()).toISOString()
+    });
+    const asked = this.bindingOf(id);
+    if (this.stale(this.pendingPath(id)) || asked !== null && asked !== binding) {
       for (const path of [this.pendingPath(id), this.approvedPath(id)]) {
         try {
           unlinkSync(path);
@@ -12120,7 +12137,7 @@ var ApprovalStore = class {
   approve(id) {
     const request = this.read(id);
     if (request === null) return null;
-    writeFileSync2(this.approvedPath(id), "", { mode: 384 });
+    writeFileSync2(this.approvedPath(id), request.binding, { mode: 384 });
     return { tool: request.tool, reason: request.reason, args: request.args };
   }
   stale(path) {
@@ -12136,18 +12153,62 @@ var ApprovalStore = class {
    * Every failure answers false, and false is a refusal: an unreadable store
    * or an approval that is not there never lets a call through.
    */
-  consume(id) {
-    if (!ID.test(id)) return false;
+  consume(id, binding = "") {
+    return this.take(id, binding).taken;
+  }
+  /**
+   * Takes the approval for this call if it was given under this binding.
+   *
+   * Every failure answers not taken, and not taken is a refusal. An approval
+   * under another binding is voided, with its request, so the next refusal
+   * asks the question afresh and the owner sees the current one.
+   */
+  take(id, binding) {
+    if (!ID.test(id)) return { taken: false, void: false };
     try {
-      const fresh = Date.now() - statSync2(this.approvedPath(id)).mtimeMs <= APPROVAL_TTL_MS;
-      unlinkSync(this.approvedPath(id));
+      const path = this.approvedPath(id);
+      const fresh = Date.now() - statSync2(path).mtimeMs <= APPROVAL_TTL_MS;
+      const given = readFileSync3(path, "utf8");
+      if (fresh && given !== binding) {
+        this.retire(id);
+        return { taken: false, void: true };
+      }
+      unlinkSync(path);
       try {
         unlinkSync(this.pendingPath(id));
       } catch {
       }
-      return fresh;
+      return { taken: fresh, void: false };
     } catch {
-      return false;
+      return { taken: false, void: false };
+    }
+  }
+  /** The binding a waiting request was asked under, or null when none waits. */
+  bindingOf(id) {
+    try {
+      const parsed = JSON.parse(readFileSync3(this.pendingPath(id), "utf8"));
+      const binding = parsed?.binding;
+      return typeof binding === "string" ? binding : "";
+    } catch {
+      return null;
+    }
+  }
+  /** A waiting request's context in words, for saying what changed. */
+  contextOf(id) {
+    try {
+      const parsed = JSON.parse(readFileSync3(this.pendingPath(checked(id)), "utf8"));
+      const context = parsed?.context;
+      return typeof context === "object" && context !== null ? context : null;
+    } catch {
+      return null;
+    }
+  }
+  retire(id) {
+    for (const path of [this.pendingPath(id), this.approvedPath(id)]) {
+      try {
+        unlinkSync(path);
+      } catch {
+      }
     }
   }
   /** The requests still waiting, for `cordon approve` with no id. */
@@ -12177,9 +12238,9 @@ var ApprovalStore = class {
       if (Date.now() - statSync2(path).mtimeMs > APPROVAL_TTL_MS) return null;
       const parsed = JSON.parse(readFileSync3(path, "utf8"));
       if (typeof parsed !== "object" || parsed === null) return null;
-      const { tool, reason, at, args } = parsed;
+      const { tool, reason, at, args, binding } = parsed;
       if (typeof tool !== "string" || typeof reason !== "string" || typeof at !== "string") return null;
-      return { tool, reason, at, args: typeof args === "string" ? args : "" };
+      return { tool, reason, at, args: typeof args === "string" ? args : "", binding: typeof binding === "string" ? binding : "" };
     } catch {
       return null;
     }
@@ -13328,7 +13389,25 @@ var Cordon = class {
     if (decision.kind !== "ask") return decision;
     const approvals = new ApprovalStore(this.cordonHome);
     const id = approvalId(this.sessionId, call);
-    if (approvals.consume(id)) {
+    const context = {
+      rule: decision.rule,
+      exposure: this.exposure?.source ?? null,
+      policy: createHash5("sha256").update(canonical(this.policy), "utf8").digest("hex")
+    };
+    const binding = createHash5("sha256").update(canonical([this.sessionId, call.tool, call.args ?? {}, context, this.exposure]), "utf8").digest("hex");
+    const earlier = approvals.contextOf(id);
+    const taken = approvals.take(id, binding);
+    if (taken.void) {
+      this.notifier.notify({
+        at: (/* @__PURE__ */ new Date()).toISOString(),
+        decision: "approval-void",
+        tool: call.tool,
+        reason: `the owner's approval of ${id} was given ${changed(earlier, context)}; it is void, and the call waits for a fresh one`,
+        source: decision.source ?? null,
+        ...labelled(decision.rule)
+      });
+    }
+    if (taken.taken) {
       this.notifier.notify({
         at: (/* @__PURE__ */ new Date()).toISOString(),
         decision: "approved",
@@ -13339,7 +13418,7 @@ var Cordon = class {
       });
       return { kind: "allow" };
     }
-    approvals.request(id, { tool: call.tool, reason: decision.reason, args: call.args });
+    approvals.request(id, { tool: call.tool, reason: decision.reason, args: call.args, binding, context });
     this.notifier.notify({
       at: (/* @__PURE__ */ new Date()).toISOString(),
       decision: "approval-requested",
@@ -13598,6 +13677,14 @@ function describeMemory(entries) {
   const shown2 = targets.length > 3 ? `${targets.slice(0, 3).join(", ")} and ${targets.length - 3} more` : targets.join(", ");
   const sources = [...new Set(entries.map((entry) => entry.source))].slice(0, 3).join(", ");
   return `memory ${shown2} was written after reading ${sources}; review it, then say "cordon: trust memory"`;
+}
+function changed(earlier, now) {
+  if (earlier === null) return "in a context that was not recorded";
+  if (earlier.exposure === null && now.exposure !== null) return `before this session read untrusted content (${now.exposure})`;
+  if (earlier.exposure !== now.exposure) return `while the session carried different untrusted content (${earlier.exposure ?? "none"})`;
+  if (earlier.policy !== now.policy) return "under a policy that has changed since";
+  if (earlier.rule !== now.rule) return `for a question under another rule (${earlier.rule})`;
+  return "in a different context: the untrusted content read since is newer";
 }
 
 // src/output/subject.ts
@@ -14228,19 +14315,19 @@ function observe(cordon, event, env) {
     { kind: sourceKind(event.call.tool), label: sourceLabel(event.call), tool: event.call.tool },
     env.policy
   );
-  let changed = false;
+  let changed2 = false;
   let substitute = true;
   const found2 = [];
   const cleaned = extracted.parts.map((part) => {
     const envelope = cordon.observe(part.text, source, part.content ? "content" : "label");
     found2.push(...envelope.findings);
     if (!envelope.substitute) substitute = false;
-    if (envelope.text !== part.text) changed = true;
+    if (envelope.text !== part.text) changed2 = true;
     return envelope.text;
   });
   cordon.recordLookup(event.call, cleaned.filter((_, index) => extracted.parts[index].content));
   if (!substitute) return report(cordon, event.call.tool, source, found2);
-  if (!changed) return {};
+  if (!changed2) return {};
   const updated = replaceText(event.call.tool, event.response, cleaned);
   if (updated === event.response) {
     cordon.markUnredacted();
@@ -14612,7 +14699,7 @@ function failure2(event, reason) {
 
 // src/adapters/mcp/gateway.ts
 import { spawn } from "node:child_process";
-import { createHash as createHash5 } from "node:crypto";
+import { createHash as createHash6 } from "node:crypto";
 import { accessSync as accessSync3, constants as constants3 } from "node:fs";
 import { join as join11 } from "node:path";
 import { createInterface } from "node:readline";
@@ -14678,7 +14765,7 @@ function runGateway(options) {
       finish(1, `the home directory is not usable: ${error.message}`);
       return;
     }
-    const sessionId = `mcp-${createHash5("sha256").update(options.command.join(" "), "utf8").digest("hex").slice(0, 12)}-${process.pid}`;
+    const sessionId = `mcp-${createHash6("sha256").update(options.command.join(" "), "utf8").digest("hex").slice(0, 12)}-${process.pid}`;
     let cordon;
     try {
       cordon = new Cordon({ policy: options.policy, cordonHome: options.cordonHome, sessionId });

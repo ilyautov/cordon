@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { humanSeesRendered, type Certificate, type ExposureMark, type Decision, type EffectClass, type Source, type ToolCall } from './core/types.js'
 import { gate as decide } from './gate/gate.js'
 import { memoryTarget } from './gate/memory.js'
@@ -14,7 +15,7 @@ import { sanitize } from './sanitize/index.js'
 import type { Finding } from './sanitize/types.js'
 import { issue, narrow, parseDirective, parseTrustMemory } from './scope/certificate.js'
 import { MemoryLedger, type MemoryEntry } from './session/memory.js'
-import { ApprovalStore, approvalId } from './session/approvals.js'
+import { ApprovalStore, approvalId, canonical, type ApprovalContext } from './session/approvals.js'
 import { PinStore } from './session/pins.js'
 import { MAX_LOOKUPS, MAX_USER_ATOMS, SessionStore, type TurnNames } from './session/store.js'
 import { assignments } from './provenance/assignments.js'
@@ -378,7 +379,31 @@ export class Cordon {
 
     const approvals = new ApprovalStore(this.cordonHome)
     const id = approvalId(this.sessionId, call)
-    if (approvals.consume(id)) {
+    // The approval answers the question as it was asked: this call, under
+    // this rule, with this much untrusted content read, under this policy
+    // (FIDES binds a grant to its context the same way). Asked before a page
+    // and retried after it, the same arguments may be the page's idea.
+    const context: ApprovalContext = {
+      rule: decision.rule,
+      exposure: this.exposure?.source ?? null,
+      policy: createHash('sha256').update(canonical(this.policy), 'utf8').digest('hex'),
+    }
+    const binding = createHash('sha256')
+      .update(canonical([this.sessionId, call.tool, call.args ?? {}, context, this.exposure]), 'utf8')
+      .digest('hex')
+    const earlier = approvals.contextOf(id)
+    const taken = approvals.take(id, binding)
+    if (taken.void) {
+      this.notifier.notify({
+        at: new Date().toISOString(),
+        decision: 'approval-void',
+        tool: call.tool,
+        reason: `the owner's approval of ${id} was given ${changed(earlier, context)}; it is void, and the call waits for a fresh one`,
+        source: decision.source ?? null,
+        ...labelled(decision.rule),
+      })
+    }
+    if (taken.taken) {
       this.notifier.notify({
         at: new Date().toISOString(),
         decision: 'approved',
@@ -393,7 +418,7 @@ export class Cordon {
     // A failure to record the request is not allowed to become an allow or
     // silence: it propagates, and the transport refuses the call on its own
     // failure path.
-    approvals.request(id, { tool: call.tool, reason: decision.reason, args: call.args })
+    approvals.request(id, { tool: call.tool, reason: decision.reason, args: call.args, binding, context })
     this.notifier.notify({
       at: new Date().toISOString(),
       decision: 'approval-requested',
@@ -681,4 +706,14 @@ function describeMemory(entries: readonly MemoryEntry[]): string {
   const shown = targets.length > 3 ? `${targets.slice(0, 3).join(', ')} and ${targets.length - 3} more` : targets.join(', ')
   const sources = [...new Set(entries.map((entry) => entry.source))].slice(0, 3).join(', ')
   return `memory ${shown} was written after reading ${sources}; review it, then say "cordon: trust memory"`
+}
+
+/** What changed between the context an approval was given in and this one. */
+function changed(earlier: ApprovalContext | null, now: ApprovalContext): string {
+  if (earlier === null) return 'in a context that was not recorded'
+  if (earlier.exposure === null && now.exposure !== null) return `before this session read untrusted content (${now.exposure})`
+  if (earlier.exposure !== now.exposure) return `while the session carried different untrusted content (${earlier.exposure ?? 'none'})`
+  if (earlier.policy !== now.policy) return 'under a policy that has changed since'
+  if (earlier.rule !== now.rule) return `for a question under another rule (${earlier.rule})`
+  return 'in a different context: the untrusted content read since is newer'
 }

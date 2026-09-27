@@ -28,6 +28,11 @@ export function approvalId(sessionId: string, call: ToolCall): string {
   return createHash('sha256').update(canonical, 'utf8').digest('hex').slice(0, 16)
 }
 
+/** JSON with every object's keys sorted: one spelling per value, for hashing. */
+export function canonical(value: unknown): string {
+  return JSON.stringify(sorted(value)) ?? ''
+}
+
 function sorted(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(sorted)
   if (typeof value !== 'object' || value === null) return value
@@ -44,7 +49,29 @@ export interface ApprovalRequest {
   reason: string
   /** The call's arguments, so the owner approves what they can read. */
   args?: unknown
+  /**
+   * The context the question was asked in, hashed: the call, the rule, the
+   * exposure mark and the policy. An approval holds only under the same one.
+   */
+  binding?: string
+  /** The same context in words, so a voided approval can say what changed. */
+  context?: ApprovalContext
 }
+
+export interface ApprovalContext {
+  rule: string
+  /** The untrusted source the session had read, or null. */
+  exposure: string | null
+  policy: string
+}
+
+/** What a retry found: the approval taken, or voided by a changed context. */
+export interface Taken {
+  taken: boolean
+  void: boolean
+}
+
+const BINDING = /^(?:[0-9a-f]{64})?$/u
 
 /** A request as the owner is shown it: the arguments already serialized. */
 export interface ShownRequest {
@@ -97,12 +124,25 @@ export class ApprovalStore {
     // Whole, never cut. Keys are sorted, so a long body pushes whatever sorts
     // after it (a "to", say) past any cut: the owner would approve a
     // recipient they were never shown.
-    const args = JSON.stringify(sorted(request.args ?? {})) ?? ''
-    const body = JSON.stringify({ tool: request.tool, reason: request.reason, args, at: new Date().toISOString() })
+    const args = canonical(request.args ?? {})
+    const binding = request.binding ?? ''
+    if (!BINDING.test(binding)) throw new Error('an approval binding is a sha256 in hex')
+    const body = JSON.stringify({
+      tool: request.tool,
+      reason: request.reason,
+      args,
+      binding,
+      ...(request.context === undefined ? {} : { context: request.context }),
+      at: new Date().toISOString(),
+    })
     // A request past its hour can no longer be approved, so it is replaced
     // rather than left to block the id forever; an approval left over from it
     // goes too, so the renewal cannot revive it.
-    if (this.stale(this.pendingPath(id))) {
+    // A request asked under another context is replaced too: the owner must
+    // approve the question as it stands now, not as it stood before a page
+    // was read or the policy changed.
+    const asked = this.bindingOf(id)
+    if (this.stale(this.pendingPath(id)) || (asked !== null && asked !== binding)) {
       for (const path of [this.pendingPath(id), this.approvedPath(id)]) {
         try {
           unlinkSync(path)
@@ -127,7 +167,9 @@ export class ApprovalStore {
   approve(id: string): ShownRequest | null {
     const request = this.read(id)
     if (request === null) return null
-    writeFileSync(this.approvedPath(id), '', { mode: 0o600 })
+    // The approval carries the binding it was given under, so a retry in a
+    // different context cannot take it.
+    writeFileSync(this.approvedPath(id), request.binding, { mode: 0o600 })
     return { tool: request.tool, reason: request.reason, args: request.args }
   }
 
@@ -145,20 +187,69 @@ export class ApprovalStore {
    * Every failure answers false, and false is a refusal: an unreadable store
    * or an approval that is not there never lets a call through.
    */
-  consume(id: string): boolean {
-    if (!ID.test(id)) return false
+  consume(id: string, binding = ''): boolean {
+    return this.take(id, binding).taken
+  }
+
+  /**
+   * Takes the approval for this call if it was given under this binding.
+   *
+   * Every failure answers not taken, and not taken is a refusal. An approval
+   * under another binding is voided, with its request, so the next refusal
+   * asks the question afresh and the owner sees the current one.
+   */
+  take(id: string, binding: string): Taken {
+    if (!ID.test(id)) return { taken: false, void: false }
     try {
-      const fresh = Date.now() - statSync(this.approvedPath(id)).mtimeMs <= APPROVAL_TTL_MS
-      unlinkSync(this.approvedPath(id))
+      const path = this.approvedPath(id)
+      const fresh = Date.now() - statSync(path).mtimeMs <= APPROVAL_TTL_MS
+      const given = readFileSync(path, 'utf8')
+      if (fresh && given !== binding) {
+        this.retire(id)
+        return { taken: false, void: true }
+      }
+      unlinkSync(path)
       try {
         unlinkSync(this.pendingPath(id))
       } catch {
         // The request is gone already; the approval was the thing to take.
       }
-      return fresh
+      return { taken: fresh, void: false }
     } catch {
       // No approval, or another retry took it first: the call is refused.
-      return false
+      return { taken: false, void: false }
+    }
+  }
+
+  /** The binding a waiting request was asked under, or null when none waits. */
+  private bindingOf(id: string): string | null {
+    try {
+      const parsed: unknown = JSON.parse(readFileSync(this.pendingPath(id), 'utf8'))
+      const binding = (parsed as Record<string, unknown> | null)?.binding
+      return typeof binding === 'string' ? binding : ''
+    } catch {
+      return null
+    }
+  }
+
+  /** A waiting request's context in words, for saying what changed. */
+  contextOf(id: string): ApprovalContext | null {
+    try {
+      const parsed: unknown = JSON.parse(readFileSync(this.pendingPath(checked(id)), 'utf8'))
+      const context = (parsed as Record<string, unknown> | null)?.context
+      return typeof context === 'object' && context !== null ? context as ApprovalContext : null
+    } catch {
+      return null
+    }
+  }
+
+  private retire(id: string): void {
+    for (const path of [this.pendingPath(id), this.approvedPath(id)]) {
+      try {
+        unlinkSync(path)
+      } catch {
+        // Already gone: nothing to retire.
+      }
     }
   }
 
@@ -181,19 +272,19 @@ export class ApprovalStore {
   }
 
   /** A waiting request that is still fresh, or null. */
-  waiting(id: string): (ShownRequest & { at: string }) | null {
+  waiting(id: string): (ShownRequest & { at: string; binding: string }) | null {
     return this.read(checked(id))
   }
 
-  private read(id: string): (ShownRequest & { at: string }) | null {
+  private read(id: string): (ShownRequest & { at: string; binding: string }) | null {
     const path = this.pendingPath(id)
     try {
       if (Date.now() - statSync(path).mtimeMs > APPROVAL_TTL_MS) return null
       const parsed: unknown = JSON.parse(readFileSync(path, 'utf8'))
       if (typeof parsed !== 'object' || parsed === null) return null
-      const { tool, reason, at, args } = parsed as Record<string, unknown>
+      const { tool, reason, at, args, binding } = parsed as Record<string, unknown>
       if (typeof tool !== 'string' || typeof reason !== 'string' || typeof at !== 'string') return null
-      return { tool, reason, at, args: typeof args === 'string' ? args : '' }
+      return { tool, reason, at, args: typeof args === 'string' ? args : '', binding: typeof binding === 'string' ? binding : '' }
     } catch {
       // Absent or damaged: nothing the owner could be shown, so nothing to approve.
       return null

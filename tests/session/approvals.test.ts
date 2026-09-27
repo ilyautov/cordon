@@ -123,3 +123,34 @@ describe('ApprovalStore: what both reviews found', () => {
     expect(approvals.consume(id)).toBe(false)
   })
 })
+
+describe('ApprovalStore: an approval holds only in the context it was given in', () => {
+  it('a retry under a different binding is refused and voids the approval', () => {
+    const approvals = store()
+    const id = approvalId('s', CALL)
+    approvals.request(id, { tool: CALL.tool, reason: 'r', binding: 'a'.repeat(64) })
+    approvals.approve(id)
+    expect(approvals.take(id, 'b'.repeat(64))).toEqual({ taken: false, void: true })
+    expect(approvals.take(id, 'a'.repeat(64))).toEqual({ taken: false, void: false })
+  })
+
+  it('the same binding takes it once', () => {
+    const approvals = store()
+    const id = approvalId('s', CALL)
+    approvals.request(id, { tool: CALL.tool, reason: 'r', binding: 'a'.repeat(64) })
+    approvals.approve(id)
+    expect(approvals.take(id, 'a'.repeat(64))).toEqual({ taken: true, void: false })
+    expect(approvals.take(id, 'a'.repeat(64))).toEqual({ taken: false, void: false })
+  })
+
+  it('a request waiting under an old binding is replaced, so the owner approves the current one', () => {
+    const approvals = store()
+    const id = approvalId('s', CALL)
+    approvals.request(id, { tool: CALL.tool, reason: 'before the page', binding: 'a'.repeat(64) })
+    approvals.request(id, { tool: CALL.tool, reason: 'after the page', binding: 'b'.repeat(64) })
+    expect(approvals.waiting(id)?.reason).toBe('after the page')
+    approvals.approve(id)
+    expect(approvals.take(id, 'b'.repeat(64)).taken).toBe(true)
+  })
+})
+
