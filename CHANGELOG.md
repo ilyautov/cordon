@@ -4,7 +4,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versions follo
 
 ## [Unreleased]
 
-An agent with a shell could widen its own policy: `cordon init --profile coding --force` rewrites `policy.yaml` without naming its path, and self-protection looked for the path. The gate now refuses `cordon init` and `cordon policy apply` the way it refuses `cordon approve`. Found while building `policy apply`, after Kimi pointed out that the new verb would need the same guard.
+An agent with a shell could widen its own policy: `cordon init --profile coding --force` rewrites `policy.yaml` without naming its path, and self-protection looked for the path. The gate now refuses `cordon init` and `cordon policy apply` the way it refuses `cordon approve`, and `cordon hook` too: it reads the user's message on stdin, so the agent running it forged a user turn naming whatever address it liked. The harness runs the hook itself, never through the agent's shell. Found while building `policy apply`, after Kimi pointed out that the new verb would need the same guard.
 
 Quarantine no longer cuts a call that leaves the machine. An email, an export or a payment memo with a fragment cut out reached a stranger damaged, while the model reported it sent whole; AgentDojo lost tasks exactly so, an address cut out of the body of an email. Such a call now escalates with the draft whole: the human sees it and decides in interactive mode, and autonomous mode refuses rather than send it damaged. Local edits are still quarantined, since a file can be looked at and fixed. Proposed in an outside review as "a silently damaged result is part of the price of protection".
 

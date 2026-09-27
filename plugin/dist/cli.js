@@ -8654,7 +8654,7 @@ function selfProtection(parts, ctx) {
     }
     if (COMMAND_KEYS.has(folded) && typeof value === "string") {
       if (APPROVES.test(value.replace(/["'\\]/gu, ""))) {
-        return { kind: "deny", rule: "self-protection", reason: "self-protection: the command gives an approval or writes a policy, which only the owner may do" };
+        return { kind: "deny", rule: "self-protection", reason: "self-protection: the command approves, writes a policy or speaks as the harness, which only the owner may do" };
       }
       for (const marker of selfMarkers(ctx.cordonHome)) {
         if (value.includes(marker)) {
@@ -8726,7 +8726,7 @@ function asPaths(value) {
   }
   return null;
 }
-var APPROVES = /(?:\bcordon(?:@[\w.^~-]+)?|\bcli\.m?js)\s+(?:(?:mcp\s+)?approve|init|policy\s+apply)\b/iu;
+var APPROVES = /(?:\bcordon(?:@[\w.^~-]+)?|\bcli\.m?js)\s+(?:(?:mcp\s+)?approve|init|policy\s+apply|hook)\b/iu;
 function selfMarkers(cordonHome2) {
   return [cordonHome2, ".cordon", ".claude/settings", ".claude/hooks", ".cursor", ".codex", ".gemini"];
 }

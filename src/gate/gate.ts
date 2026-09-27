@@ -314,7 +314,7 @@ function selfProtection(parts: readonly Field[], ctx: GateContext): Decision | n
       // a pending call approved, a changed MCP server re-pinned. The same
       // substring crudeness as below, and the same answer to its limit.
       if (APPROVES.test(value.replace(/["'\\]/gu, ''))) {
-        return { kind: 'deny', rule: 'self-protection', reason: 'self-protection: the command gives an approval or writes a policy, which only the owner may do' }
+        return { kind: 'deny', rule: 'self-protection', reason: 'self-protection: the command approves, writes a policy or speaks as the harness, which only the owner may do' }
       }
       for (const marker of selfMarkers(ctx.cordonHome)) {
         if (value.includes(marker)) {
@@ -407,11 +407,14 @@ function asPaths(value: unknown): string[] | null {
 
 /** Substrings whose mention in a shell command means an attempt to reach Cordon. */
 /**
- * The owner's verbs: `cordon approve`, `cordon mcp approve`, `cordon init`
- * and `cordon policy apply`, and the same through the bundle's path. `init
- * --force` rewrites policy.yaml without naming it, so no path marker sees it.
+ * The owner's verbs and the harness's: `cordon approve`, `cordon mcp
+ * approve`, `cordon init`, `cordon policy apply` and `cordon hook`, and the
+ * same through the bundle's path. `init --force` rewrites policy.yaml without
+ * naming it, so no path marker sees it. `hook` takes the user's message on
+ * stdin, and run by the agent it is a forged user turn; the harness runs the
+ * hook itself, never through the agent's shell.
  */
-const APPROVES = /(?:\bcordon(?:@[\w.^~-]+)?|\bcli\.m?js)\s+(?:(?:mcp\s+)?approve|init|policy\s+apply)\b/iu
+const APPROVES = /(?:\bcordon(?:@[\w.^~-]+)?|\bcli\.m?js)\s+(?:(?:mcp\s+)?approve|init|policy\s+apply|hook)\b/iu
 
 function selfMarkers(cordonHome: string): string[] {
   return [cordonHome, '.cordon', '.claude/settings', '.claude/hooks', '.cursor', '.codex', '.gemini']
