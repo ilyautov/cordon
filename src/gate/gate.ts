@@ -249,6 +249,21 @@ function decide(call: ToolCall, ctx: GateContext): Decision {
     )
   }
 
+  // The same for a message that leaves the machine. Cut, an email or a
+  // payment memo reaches a stranger with a hole in it while the model reports
+  // it sent whole; AgentDojo lost tasks exactly so, a quote cut out of the
+  // body of an email. A local file can be looked at and fixed; a sent message
+  // cannot. The owner is shown the draft whole instead.
+  if (verdict.effects.some((effect) => OUTWARD.has(effect))) {
+    return escalate(
+      ctx,
+      'provenance',
+      `an untrusted fragment would be cut out of a call that leaves the machine${origin(blamedLabels)}; ` +
+        'it is not sent with a piece cut out — read the whole draft and decide',
+      blamed,
+    )
+  }
+
   const cleaned = quarantine(own, scan.spans)
   if (!cleaned.possible) {
     return escalate(ctx, 'provenance', `quarantine is impossible: ${cleaned.reason}${origin(blamedLabels)}`, blamed)
@@ -682,6 +697,12 @@ const IRREVERSIBLE: ReadonlySet<EffectClass> = new Set([
   'export',
   'exec',
 ])
+
+/**
+ * Effects whose result leaves the machine: a message, an export, a payment.
+ * Quarantine does not cut these; a hole in a sent message cannot be mended.
+ */
+const OUTWARD: ReadonlySet<EffectClass> = new Set(['network-egress', 'export', 'financial'])
 
 /**
  * The classes the exposure mark answers to: everything irreversible, plus

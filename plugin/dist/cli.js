@@ -8617,6 +8617,14 @@ function decide(call, ctx) {
       blamed
     );
   }
+  if (verdict.effects.some((effect) => OUTWARD.has(effect))) {
+    return escalate(
+      ctx,
+      "provenance",
+      `an untrusted fragment would be cut out of a call that leaves the machine${origin(blamedLabels)}; it is not sent with a piece cut out \u2014 read the whole draft and decide`,
+      blamed
+    );
+  }
   const cleaned = quarantine(own2, scan.spans);
   if (!cleaned.possible) {
     return escalate(ctx, "provenance", `quarantine is impossible: ${cleaned.reason}${origin(blamedLabels)}`, blamed);
@@ -8849,6 +8857,7 @@ var IRREVERSIBLE = /* @__PURE__ */ new Set([
   "export",
   "exec"
 ]);
+var OUTWARD = /* @__PURE__ */ new Set(["network-egress", "export", "financial"]);
 var EXPOSURE_SENSITIVE = /* @__PURE__ */ new Set([...IRREVERSIBLE, "create"]);
 function scanTaint(parts, taint, userAtoms, bound = () => false) {
   const named = new Set(userAtoms);

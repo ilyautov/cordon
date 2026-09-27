@@ -329,7 +329,7 @@ The mode is an explicit setting, not a guess from circumstances. A tool that ask
 
 **A pass is silence, not permission.** Cordon never prints `permissionDecision: "allow"`. An explicit allow from a hook overrides the user's own permission settings, which would mean Cordon started handing out rights instead of limiting them.
 
-**Argument quarantine** cuts out the tainted part and lets the call through with the rest. In interactive mode the quarantine is printed together with `ask`, so the modified input is shown to the human. In autonomous mode there is nobody to ask, and the edit goes through silently.
+**Argument quarantine** cuts out the tainted part and lets the call through with the rest. In interactive mode the quarantine is printed together with `ask`, so the modified input is shown to the human. In autonomous mode there is nobody to ask, and the edit goes through silently. A call that leaves the machine (`network-egress`, `export`, `financial`) is never cut: a message or a payment memo with a hole in it reaches a stranger while the model reports it sent whole, and a sent message cannot be mended. Such a call escalates instead, with the draft whole: a question in interactive mode, a refusal in autonomous mode. A write into memory is treated the same way.
 
 ## Narrowing rights for a single turn
 
