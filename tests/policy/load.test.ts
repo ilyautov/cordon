@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { loadPolicy } from '../../src/policy/load.js'
 import { DEFAULT_POLICY } from '../../src/policy/defaults.js'
+import { renderPolicy } from '../../src/policy/templates.js'
 
 function scratch(): string {
   return mkdtempSync(join(tmpdir(), 'cordon-policy-'))
@@ -388,3 +389,43 @@ describe('the policy: argument roles and the task mandate', () => {
       .toThrow(/unknown key/)
   })
 })
+
+describe('loadPolicy: budgets', () => {
+  function load(body: string) {
+    const home = scratch()
+    writeFileSync(join(home, 'policy.yaml'), body)
+    return loadPolicy(home)
+  }
+
+  it('reads a budget per effect and window', () => {
+    expect(load('budgets:\n  - effect: network-egress\n    limit: 20\n    per: hour\n').budgets)
+      .toEqual([{ effect: 'network-egress', limit: 20, per: 'hour' }])
+  })
+
+  it('no budgets by default', () => {
+    expect(DEFAULT_POLICY.budgets).toEqual([])
+  })
+
+  it('refuses a budget it cannot enforce', () => {
+    expect(() => load('budgets:\n  - effect: teleport\n    limit: 1\n    per: hour\n')).toThrow(/effect/)
+    expect(() => load('budgets:\n  - effect: create\n    limit: 0\n    per: hour\n')).toThrow(/limit/)
+    expect(() => load('budgets:\n  - effect: create\n    limit: 2.5\n    per: hour\n')).toThrow(/limit/)
+    expect(() => load('budgets:\n  - effect: create\n    limit: 5\n    per: fortnight\n')).toThrow(/per/)
+    expect(() => load('budgets:\n  - effect: create\n    limit: 5\n    per: hour\n    each: destination\n')).toThrow(/unknown key/)
+  })
+})
+
+describe('the service profile', () => {
+  it('is autonomous, budgeted, journaled, and loads as written', () => {
+    const home = scratch()
+    writeFileSync(join(home, 'policy.yaml'), renderPolicy('service', home))
+    const policy = loadPolicy(home)
+    expect(policy.mode).toBe('autonomous')
+    expect(policy.budgets.length).toBeGreaterThan(0)
+    expect(policy.budgets.map((budget) => budget.effect)).toContain('network-egress')
+    expect(policy.notify.file).toBe(join(home, 'events.jsonl'))
+    // Irreversible effects are the owner's line to write, here as elsewhere.
+    for (const effect of ['delete', 'export', 'financial', 'exec']) expect(policy.profile.effects).not.toContain(effect)
+  })
+})
+

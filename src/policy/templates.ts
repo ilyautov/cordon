@@ -1,10 +1,13 @@
 import { join } from 'node:path'
 import type { EffectClass, PresenceMode } from '../core/types.js'
+import type { Budget } from './defaults.js'
 
 export interface ProfileTemplate {
   summary: string
   mode: PresenceMode
   effects: EffectClass[]
+  /** Rate limits written into the file; only the unattended profile has them. */
+  budgets?: Budget[]
 }
 
 /**
@@ -12,9 +15,12 @@ export interface ProfileTemplate {
  *
  * None grants delete, export or financial: those are irreversible, and
  * granting them is a line the owner writes, not one a template writes for
- * them. Every widened profile is interactive, because in autonomous mode
- * the exposure rule refuses what interactive mode asks about, and a new user
- * meets that as "Cordon broke my agent" before reading why.
+ * them. Every widened profile for a person at a terminal is interactive,
+ * because in autonomous mode the exposure rule refuses what interactive mode
+ * asks about, and a new user meets that as "Cordon broke my agent" before
+ * reading why. `service` is the one for an agent nobody watches: there a
+ * refusal is the right answer to doubt, the mandate is written in advance,
+ * and budgets cap what it can do however it was steered.
  */
 export const PROFILES: Readonly<Record<string, ProfileTemplate>> = {
   locked: {
@@ -31,6 +37,15 @@ export const PROFILES: Readonly<Record<string, ProfileTemplate>> = {
     summary: 'read and write files, no shell, no network',
     mode: 'interactive',
     effects: ['read', 'summarize', 'create', 'update'],
+  },
+  service: {
+    summary: 'an unattended agent (a LangChain service, a cron bot): doubt is a refusal, destinations are declared in advance, and every outward effect is budgeted',
+    mode: 'autonomous',
+    effects: ['read', 'summarize', 'create', 'network-egress'],
+    budgets: [
+      { effect: 'network-egress', limit: 20, per: 'hour' },
+      { effect: 'create', limit: 50, per: 'hour' },
+    ],
   },
   coding: {
     summary: 'a coding agent: files, the shell and the web, with every consequential call after an untrusted read put to you',
@@ -80,7 +95,19 @@ exposure: true
 #   files: [TEAM-RULES.md]
 #   tools: [mem0_add]
 
-# Every refusal, question and rewrite is appended here as JSON Lines.
+${profile.budgets === undefined ? '' : `# How many calls of an effect may go through per window, across every
+# session under this policy: however the agent was steered, no more than
+# this. A call over it is refused and journaled with the rule budget.
+budgets:
+${profile.budgets.map((budget) => `  - { effect: ${budget.effect}, limit: ${budget.limit}, per: ${budget.per} }`).join('\n')}
+
+# Nobody names a destination during an unattended run, so the task and the
+# destinations it sends to are written down here. Check the file with
+# \`cordon policy check\` and read it back with \`cordon policy explain\`.
+# task: answer customer tickets for acme.example
+# destinations: ['*@acme.example']
+
+`}# Every refusal, question and rewrite is appended here as JSON Lines.
 notify:
   file: ${join(cordonHome, 'events.jsonl')}
 `

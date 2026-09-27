@@ -18,6 +18,8 @@ import { issue, narrow, parseDirective, parseTrustMemory } from './scope/certifi
 import { MemoryLedger, type MemoryEntry } from './session/memory.js'
 import { ApprovalStore, approvalId, canonical, type ApprovalContext } from './session/approvals.js'
 import { PinStore } from './session/pins.js'
+import { BudgetStore } from './session/budgets.js'
+import { classify } from './scope/effects.js'
 import { MAX_LOOKUPS, MAX_READ_IDS, MAX_USER_ATOMS, SessionStore, type SessionState, type TurnNames } from './session/store.js'
 import { assignments } from './provenance/assignments.js'
 
@@ -337,7 +339,7 @@ export class Cordon {
   }
 
   gate(call: ToolCall): Decision {
-    const decision = decide(call, {
+    let decision = decide(call, {
       policy: this.policy,
       cert: this.cert,
       taint: this.taint,
@@ -363,6 +365,7 @@ export class Cordon {
     // harness applies the substituted arguments and the model's own account
     // of the turn is wrong about what landed on disk. Without this line the
     // only record of that is the file itself.
+    decision = this.spend(call, decision)
     this.recordMemory(call, decision)
 
     if (decision.kind === 'deny' || decision.kind === 'ask' || decision.kind === 'rewrite') {
@@ -572,6 +575,49 @@ export class Cordon {
       source: this.exposure?.source ?? null,
     })
     return cutOutbound(text, found)
+  }
+
+  /**
+   * The budgets, asked last, of a call that would otherwise go through.
+   *
+   * Only a call that would run spends: a refused one changes nothing in the
+   * world, and counting it would let a page that provokes refusals spend
+   * the owner's budget. Over the limit is a refusal in either mode and never
+   * a question: a budget is the owner's answer given in advance. Several
+   * budgets are reserved one after another; one refusing leaves the others
+   * reserved, which over-counts, the safe direction. A store that cannot be
+   * counted refuses, with the reason in the journal.
+   */
+  private spend(call: ToolCall, decision: Decision): Decision {
+    if (decision.kind !== 'allow' && decision.kind !== 'rewrite') return decision
+    const budgets = this.policy.budgets ?? []
+    if (budgets.length === 0) return decision
+    const verdict = classify(call, this.policy.tools)
+    const effects = verdict.classified ? verdict.effects : []
+    const store = new BudgetStore(this.cordonHome)
+    const policy = policyHash(this.policy)
+    for (const budget of budgets) {
+      if (!effects.includes(budget.effect)) continue
+      let reservation
+      try {
+        reservation = store.reserve(policy, budget)
+      } catch (error) {
+        return {
+          kind: 'deny',
+          rule: 'failure',
+          reason: `Cordon failure: the budget for ${budget.effect} could not be counted (${(error as Error).message}); the call is refused rather than let through uncounted`,
+        }
+      }
+      if (!reservation.ok) {
+        return {
+          kind: 'deny',
+          rule: 'budget',
+          reason: `the budget for ${budget.effect} is spent: ${reservation.used} of ${budget.limit} per ${budget.per}; ` +
+            'the call is refused until the window moves on, whatever else allowed it',
+        }
+      }
+    }
+    return decision
   }
 
   /** The effective policy this instance decides under. */

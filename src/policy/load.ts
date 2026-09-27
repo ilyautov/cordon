@@ -3,7 +3,7 @@ import { homedir } from 'node:os'
 import { isAbsolute, join } from 'node:path'
 import { parse } from 'yaml'
 import type { ArgumentRole, EffectClass, PresenceMode, SourceView } from '../core/types.js'
-import { DEFAULT_POLICY, type Lookup, type Policy } from './defaults.js'
+import { DEFAULT_POLICY, type Budget, type Lookup, type Policy } from './defaults.js'
 
 const EFFECTS: ReadonlySet<string> = new Set<EffectClass>([
   'read', 'summarize', 'create', 'update', 'delete',
@@ -106,6 +106,10 @@ function validate(parsed: unknown, path: string): Policy {
 
   if (Object.hasOwn(input, 'lookups')) {
     policy.lookups = asLookups(input['lookups'], `${path}: lookups`)
+  }
+
+  if (Object.hasOwn(input, 'budgets')) {
+    policy.budgets = asBudgets(input['budgets'], `${path}: budgets`)
   }
 
   if ('destinations' in input) {
@@ -226,7 +230,7 @@ function journalPath(value: unknown, path: string): string | null {
 }
 
 const TOP_LEVEL = [
-  'mode', 'profile', 'tools', 'trustedSources', 'toolsReturn', 'arguments', 'destinations', 'lookups',
+  'mode', 'profile', 'tools', 'trustedSources', 'toolsReturn', 'arguments', 'destinations', 'lookups', 'budgets',
   'notify', 'exposure', 'task', 'memory', 'mcp', 'output',
 ]
 
@@ -365,3 +369,23 @@ function asEffects(value: unknown, where: string): EffectClass[] {
   }
   return list as EffectClass[]
 }
+
+const PERIODS: ReadonlySet<string> = new Set(['minute', 'hour', 'day'])
+
+function asBudgets(value: unknown, where: string): Budget[] {
+  if (!Array.isArray(value)) throw new Error(`${where}: expected a list`)
+  return value.map((item, index) => {
+    const entry = asObject(item, `${where}[${index}]`)
+    onlyKnown(entry, ['effect', 'limit', 'per'], where, `[${index}].`)
+    const { effect, limit, per } = entry
+    if (typeof effect !== 'string' || !EFFECTS.has(effect)) throw new Error(`${where}[${index}]: unknown effect class ${String(effect)}`)
+    // A limit of zero is a grant withdrawn under another name; say it in the
+    // profile instead, where explain and the certificate see it.
+    if (typeof limit !== 'number' || !Number.isSafeInteger(limit) || limit < 1) {
+      throw new Error(`${where}[${index}]: limit must be a whole number of calls, at least 1, not ${String(limit)}`)
+    }
+    if (typeof per !== 'string' || !PERIODS.has(per)) throw new Error(`${where}[${index}]: per must be minute, hour or day, not ${String(per)}`)
+    return { effect: effect as EffectClass, limit, per: per as Budget['per'] }
+  })
+}
+

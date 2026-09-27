@@ -55,6 +55,12 @@ describe('explain', () => {
     expect(out).toMatch(/you assigned in your message/)
   })
 
+  it('states each budget as a cap across sessions', () => {
+    const out = text(policy({ budgets: [{ effect: 'network-egress', limit: 20, per: 'hour' }] }))
+    expect(out).toMatch(/at most 20 network-egress calls per hour/)
+    expect(out).toMatch(/every session/)
+  })
+
   it('says the exposure rule is off, when it is', () => {
     expect(text(policy({ exposure: false }))).toMatch(/exposure rule is OFF/)
   })
@@ -88,6 +94,16 @@ describe('lint', () => {
     const out = found(policy({ mode: 'autonomous', profile: { effects: ['read', 'financial', 'exec'], resources: { paths: [], hosts: [] } } }))
     expect(out).toMatch(/note: .*financial/)
     expect(out).toMatch(/warning: .*exec/)
+  })
+
+  it('notes an unattended agent that acts outward with no budget', () => {
+    expect(found(policy({ mode: 'autonomous', profile: { effects: ['read', 'network-egress'], resources: { paths: [], hosts: [] } } })))
+      .toMatch(/note: .*no budget/)
+    expect(found(policy({
+      mode: 'autonomous',
+      profile: { effects: ['read', 'network-egress'], resources: { paths: [], hosts: [] } },
+      budgets: [{ effect: 'network-egress', limit: 5, per: 'hour' }],
+    }))).not.toMatch(/no budget/)
   })
 
   it('notes a network grant with no hosts named', () => {

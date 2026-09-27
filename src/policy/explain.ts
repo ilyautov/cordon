@@ -23,6 +23,12 @@ const ALL_EFFECTS: readonly EffectClass[] = [
 const IRREVERSIBLE: ReadonlySet<EffectClass> = new Set(['delete', 'export', 'financial'])
 
 /**
+ * Effects an unattended agent can repeat at someone else's cost: what
+ * leaves the machine, and a post or a message it creates.
+ */
+const REPEATABLE: ReadonlySet<EffectClass> = new Set(['network-egress', 'export', 'financial', 'create'])
+
+/**
  * Mailbox providers anyone can register at: `*@gmail.com` names every stranger
  * with an account there, which is the attacker's address too.
  */
@@ -99,6 +105,9 @@ export function explain(policy: Policy): string[] {
     lines.push(`${tool} is a lookup: asked with a name you said (${lookup.query}), its ${lookup.key} record vouches that ${fills}.`)
   }
 
+  for (const budget of policy.budgets ?? []) {
+    lines.push(`Budget: at most ${budget.limit} ${budget.effect} calls per ${budget.per}, across every session under this policy; past it a call is refused, and no approval lifts that.`)
+  }
   if (policy.trustedSources.length > 0) {
     lines.push(`Trusted without scanning: ${policy.trustedSources.join(', ')}. Content from these never marks the session.`)
   }
@@ -140,6 +149,11 @@ export function lint(policy: Policy): LintFinding[] {
   }
   if ((granted.includes('network-egress') || granted.includes('exec')) && policy.profile.resources.hosts.length === 0) {
     found.push({ level: 'note', text: 'the network is granted with no hosts listed: any host is reachable' })
+  }
+  const budgeted = new Set((policy.budgets ?? []).map((budget) => budget.effect))
+  const unbudgeted = granted.filter((effect) => REPEATABLE.has(effect) && !budgeted.has(effect))
+  if (policy.mode === 'autonomous' && unbudgeted.length > 0) {
+    found.push({ level: 'note', text: `no budget caps ${unbudgeted.join(', ')}: an unattended agent can repeat it as often as it is steered to` })
   }
   if (policy.mode === 'autonomous' && policy.task === null && policy.destinations.length === 0 && policy.exposure) {
     found.push({ level: 'note', text: 'no task and no destinations: after an untrusted read, every call that acts is refused' })

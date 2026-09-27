@@ -14,6 +14,17 @@ export interface Lookup {
   values: Record<string, string[]>
 }
 
+/**
+ * How many calls of one effect may go through in a sliding window, across
+ * every session under this policy. A budget only narrows: a call over it is
+ * refused whatever else allowed it.
+ */
+export interface Budget {
+  effect: EffectClass
+  limit: number
+  per: 'minute' | 'hour' | 'day'
+}
+
 export interface Policy {
   mode: PresenceMode
   profile: {
@@ -136,6 +147,11 @@ export interface Policy {
      */
     pin: boolean
   }
+  /**
+   * Rate limits on effects, for an agent that runs unattended: however it was
+   * steered, it cannot send more than this. Empty by default.
+   */
+  budgets: Budget[]
   output: {
     /**
      * Whether to append a source-influence footer under the model's answer.
@@ -175,5 +191,6 @@ export const DEFAULT_POLICY: Policy = {
   task: null,
   memory: { files: [], tools: [] },
   mcp: { pin: true },
+  budgets: [],
   output: { footer: true },
 }
