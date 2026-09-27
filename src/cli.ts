@@ -14,7 +14,7 @@ import { makeDirectory } from './core/mkdir.js'
 import { loadPolicy } from './policy/load.js'
 import { PROFILES, renderPolicy } from './policy/templates.js'
 import { sanitize } from './sanitize/index.js'
-import { ApprovalStore, MAX_SHOWN_ARGS } from './session/approvals.js'
+import { ApprovalStore, MAX_SHOWN_ARGS, type ShownRequest } from './session/approvals.js'
 import { MemoryLedger } from './session/memory.js'
 
 const USAGE =
@@ -838,7 +838,7 @@ function approveCall(args: string[]): number {
       return 0
     }
     for (const item of waiting) {
-      process.stdout.write(`${item.id}  ${visible(item.at)}  ${visible(item.tool)}\n    arguments: ${visible(shortened(item.args, store.pendingPath(item.id)))}\n    ${visible(item.reason)}\n`)
+      process.stdout.write(`${item.id}  ${visible(item.at)}  ${visible(item.tool)}\n    arguments: ${visible(shortened(item.args, store.pendingPath(item.id)))}\n    ${asked(item)}${visible(item.reason)}\n`)
     }
     process.stdout.write('approve one call with: cordon approve <id>\n')
     return 0
@@ -860,8 +860,17 @@ function approveCall(args: string[]): number {
     process.stderr.write(`nothing waits under ${id}: it was never asked for, was already used, or is older than an hour\n`)
     return 1
   }
-  process.stdout.write(`approved once: ${visible(approved.tool)}\n    arguments: ${visible(approved.args)}\n    ${visible(approved.reason)}\nthe agent's next identical call goes through, and only that one\n`)
+  process.stdout.write(`approved once: ${visible(approved.tool)}\n    arguments: ${visible(approved.args)}\n    ${asked(approved)}${visible(approved.reason)}\n` +
+    'the agent\'s next identical call goes through, and only that one, while nothing more is read or said; a changed context is a new question\n')
   return 0
+}
+
+/** What a question was asked under, in words, ahead of its reason. */
+function asked(request: ShownRequest): string {
+  const context = request.context
+  if (context === undefined) return ''
+  const read = context.exposure === null ? 'asked with nothing untrusted read since the last message' : `asked after reading ${visible(context.exposure)}`
+  return `[${visible(context.rule)}] ${read}\n    `
 }
 
 /** Arguments for a listing: cut when long, with where the whole of them is. */

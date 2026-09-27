@@ -49,8 +49,8 @@ describe('gate: every decision names its rule', () => {
     expect(ruleOf({ tool: 'Write', args: { file_path: '/home/u/.cordon/policy.yaml', content: 'mode: off' } }, setup())).toBe('self-protection')
   })
 
-  it('hidden-layer: a layer that could not be stripped', () => {
-    expect(ruleOf({ tool: 'wb_reply', args: { text: 'hi' } }, { ...setup(), unredacted: true })).toBe('hidden-layer')
+  it('unscanned: a result that could not be scanned', () => {
+    expect(ruleOf({ tool: 'wb_reply', args: { text: 'hi' } }, { ...setup(), unredacted: true })).toBe('unscanned')
   })
 
   it('saturation: provenance that stopped remembering', () => {
@@ -147,8 +147,16 @@ describe('the rule table', () => {
     expect(RULES.certificate.tier).toBe('precaution')
   })
 
-  it('only a rule that saw something from outside is evidence', () => {
+  it('a rule that fires without any untrusted read is a precaution', () => {
+    // Self-protection refuses an honest edit of the policy just the same
+    // (Kimi); content that could not be scanned was not found to be anything
+    // (Codex).
+    expect(RULES['self-protection'].tier).toBe('precaution')
+    expect(RULES.unscanned.tier).toBe('suspicion')
+  })
+
+  it('only a rule that found something from outside is evidence', () => {
     const evidence = Object.entries(RULES).filter(([, entry]) => entry.tier === 'evidence').map(([rule]) => rule).sort()
-    expect(evidence).toEqual(['hidden-layer', 'memory-write', 'pin', 'provenance'])
+    expect(evidence).toEqual(['memory-write', 'pin', 'provenance'])
   })
 })

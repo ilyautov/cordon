@@ -6,23 +6,28 @@
  * on the decision and never an input to one: nothing here is consulted by
  * the gate.
  *
- * The tier says how much the decision knows about an attacker:
- * - evidence: something from outside was seen in the call or the tool list,
- *   a matched fragment, a hidden layer, a changed tool;
- * - suspicion: the session read untrusted content and the call is not
- *   vouched for, but nothing read was found in it. An honest task after
- *   reading a page lands here too;
- * - precaution: no untrusted content is involved at all. The call is outside
- *   what the policy grants, or carries a key. Not an attack, and a SIEM that
- *   counts it as one teaches its readers to ignore the stream (Kimi).
+ * The tier says what the rule answers to, and so how much its firing says
+ * about an attacker:
+ * - evidence: something from outside was found in the call or the tool
+ *   list, a matched fragment or a changed tool;
+ * - suspicion: the rule fires only because the session read untrusted
+ *   content, and nothing read was found in the call. An honest task after
+ *   reading a page lands here too. Content that could not be scanned (an
+ *   image, a result of unfamiliar shape) is here and not under evidence:
+ *   nothing was found in it, it was not looked into (Codex);
+ * - precaution: the rule fires the same whether or not anything untrusted
+ *   was read. The call is outside what the policy grants, reaches Cordon's
+ *   own files, or carries a key. It does not say no untrusted content was
+ *   involved, only that the decision did not turn on it; and a SIEM that
+ *   counts it as an attack teaches its readers to ignore the stream (Kimi).
  */
 export const RULES = {
   malformed: { class: 'guard-failure', tier: 'precaution' },
   failure: { class: 'guard-failure', tier: 'precaution' },
   pin: { class: 'tool-rug-pull', tier: 'evidence' },
-  'self-protection': { class: 'guard-tampering', tier: 'suspicion' },
+  'self-protection': { class: 'guard-tampering', tier: 'precaution' },
   'agent-config': { class: 'guard-tampering', tier: 'suspicion' },
-  'hidden-layer': { class: 'hidden-instruction', tier: 'evidence' },
+  unscanned: { class: 'unscanned-content', tier: 'suspicion' },
   saturation: { class: 'flooding', tier: 'suspicion' },
   unclassified: { class: 'out-of-scope', tier: 'precaution' },
   certificate: { class: 'out-of-scope', tier: 'precaution' },

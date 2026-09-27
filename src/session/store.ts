@@ -15,6 +15,13 @@ export interface SessionState {
    */
   unredacted?: boolean
   /**
+   * How many untrusted results the session has read, readable or not. Only
+   * grows; an approval is bound to it, so one given before a further read
+   * does not cover the call after it. Merged by the maximum. An absent field
+   * means none were counted.
+   */
+  reads?: number
+  /**
    * The narrowing requested by the user with a `cordon: scope` directive.
    *
    * What lies on disk is the requested set, NOT an issued certificate. The
@@ -262,6 +269,7 @@ export class SessionStore {
     const turn = Object.hasOwn(data, 'turn') ? data['turn'] : undefined
     const taint = Object.hasOwn(data, 'taint') ? data['taint'] : undefined
     const unredacted = Object.hasOwn(data, 'unredacted') ? data['unredacted'] : undefined
+    const reads = Object.hasOwn(data, 'reads') ? data['reads'] : undefined
     const directive = Object.hasOwn(data, 'directive') ? data['directive'] : undefined
     const exposure = Object.hasOwn(data, 'exposure') ? data['exposure'] : undefined
     const userAtoms = Object.hasOwn(data, 'userAtoms') ? data['userAtoms'] : undefined
@@ -280,6 +288,10 @@ export class SessionStore {
     // false means lifting an escalation by corrupting one field, that is,
     // handing the attacker the most permissive state.
     if (unredacted !== undefined && typeof unredacted !== 'boolean') {
+      throw new Error(`the session state ${shown(sessionId)} is incompatible`)
+    }
+    // Lowered, the count would revive an approval given before a read.
+    if (reads !== undefined && (typeof reads !== 'number' || !Number.isSafeInteger(reads) || reads < 0)) {
       throw new Error(`the session state ${shown(sessionId)} is incompatible`)
     }
     // The directive's shape is validated rather than filtered. Filtering
@@ -340,6 +352,7 @@ export class SessionStore {
       turn,
       taint: TaintStore.fromJSON(taint),
       unredacted: unredacted === true,
+      reads: typeof reads === 'number' ? reads : 0,
       directive: Array.isArray(directive) ? (directive as EffectClass[]) : null,
       exposure: isExposure(exposure) ? exposure : null,
       userAtoms: Array.isArray(userAtoms) ? (userAtoms as string[]).slice(-MAX_USER_ATOMS) : [],
@@ -359,6 +372,7 @@ export class SessionStore {
       turn: state.turn,
       taint: state.taint.toJSON(),
       unredacted: state.unredacted === true,
+      reads: state.reads ?? 0,
       directive: state.directive ?? null,
       exposure: state.exposure ?? null,
       userAtoms: (state.userAtoms ?? []).slice(-MAX_USER_ATOMS),
@@ -562,6 +576,7 @@ function mergeStates(into: SessionState, other: SessionState): SessionState {
     turn: Math.max(into.turn, other.turn),
     taint: into.taint,
     unredacted: into.unredacted === true || other.unredacted === true,
+    reads: Math.max(into.reads ?? 0, other.reads ?? 0),
     directive: mergeDirectives(into.directive ?? null, other.directive ?? null),
     exposure: into.exposure ?? other.exposure ?? null,
     userAtoms: mergeUserAtoms(into.userAtoms ?? [], other.userAtoms ?? []),

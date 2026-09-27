@@ -8100,8 +8100,8 @@ function exact(value) {
   return value.trim();
 }
 function readLookup(tool, lookup, args, text, turn) {
-  const asked = Object.hasOwn(args, lookup.query) ? args[lookup.query] : void 0;
-  const query = typeof asked === "string" ? fold3(asked) : "";
+  const asked2 = Object.hasOwn(args, lookup.query) ? args[lookup.query] : void 0;
+  const query = typeof asked2 === "string" ? fold3(asked2) : "";
   if (text.length > MAX_LOOKUP_TEXT) return "unreadable";
   const parsed = parseRecords(text);
   if (parsed === "unreadable") return parsed;
@@ -8558,7 +8558,7 @@ function decide(call, ctx) {
     if (!harmless) {
       return escalate(
         ctx,
-        ctx.unredacted === true ? "hidden-layer" : "saturation",
+        ctx.unredacted === true ? "unscanned" : "saturation",
         ctx.unredacted === true ? "a hidden layer in a tool result could not be stripped" : "provenance is full: this session read more than the store holds, and stopped remembering"
       );
     }
@@ -9160,9 +9160,9 @@ var RULES = {
   malformed: { class: "guard-failure", tier: "precaution" },
   failure: { class: "guard-failure", tier: "precaution" },
   pin: { class: "tool-rug-pull", tier: "evidence" },
-  "self-protection": { class: "guard-tampering", tier: "suspicion" },
+  "self-protection": { class: "guard-tampering", tier: "precaution" },
   "agent-config": { class: "guard-tampering", tier: "suspicion" },
-  "hidden-layer": { class: "hidden-instruction", tier: "evidence" },
+  unscanned: { class: "unscanned-content", tier: "suspicion" },
   saturation: { class: "flooding", tier: "suspicion" },
   unclassified: { class: "out-of-scope", tier: "precaution" },
   certificate: { class: "out-of-scope", tier: "precaution" },
@@ -12122,10 +12122,10 @@ var ApprovalStore = class {
       args,
       binding,
       ...request.context === void 0 ? {} : { context: request.context },
+      ...request.call === void 0 ? {} : { call: request.call },
       at: (/* @__PURE__ */ new Date()).toISOString()
     });
-    const asked = this.bindingOf(id);
-    if (this.stale(this.pendingPath(id)) || asked !== null && asked !== binding) {
+    if (this.stale(this.pendingPath(id))) {
       for (const path of [this.pendingPath(id), this.approvedPath(id)]) {
         try {
           unlinkSync(path);
@@ -12147,7 +12147,7 @@ var ApprovalStore = class {
     const request = this.read(id);
     if (request === null) return null;
     writeFileSync2(this.approvedPath(id), request.binding, { mode: 384 });
-    return { tool: request.tool, reason: request.reason, args: request.args };
+    return { tool: request.tool, reason: request.reason, args: request.args, ...request.context === void 0 ? {} : { context: request.context } };
   }
   stale(path) {
     try {
@@ -12162,9 +12162,6 @@ var ApprovalStore = class {
    * Every failure answers false, and false is a refusal: an unreadable store
    * or an approval that is not there never lets a call through.
    */
-  consume(id, binding = "") {
-    return this.take(id, binding).taken;
-  }
   /**
    * Takes the approval for this call if it was given under this binding.
    *
@@ -12192,22 +12189,41 @@ var ApprovalStore = class {
       return { taken: false, void: false };
     }
   }
-  /** The binding a waiting request was asked under, or null when none waits. */
-  bindingOf(id) {
+  /**
+   * Retires every other question about the same call: asked under an earlier
+   * context, with any approval given to it. Returns what was retired, so the
+   * journal can say what changed. A request that cannot be read is left: it
+   * can be neither approved nor taken, and it expires within the hour.
+   */
+  retireOthers(call, keep) {
+    let names2;
     try {
-      const parsed = JSON.parse(readFileSync3(this.pendingPath(id), "utf8"));
-      const binding = parsed?.binding;
-      return typeof binding === "string" ? binding : "";
+      names2 = readdirSync2(this.dir);
     } catch {
-      return null;
+      return [];
     }
+    const retired = [];
+    for (const name of names2) {
+      const id = name.replace(/\.request\.json$/u, "");
+      if (id === name || id === keep || !ID.test(id)) continue;
+      let parsed;
+      try {
+        parsed = JSON.parse(readFileSync3(this.pendingPath(id), "utf8"));
+      } catch {
+        continue;
+      }
+      if (parsed?.call !== call) continue;
+      retired.push({ id, context: this.contextOf(id) });
+      this.retire(id);
+    }
+    return retired;
   }
   /** A waiting request's context in words, for saying what changed. */
   contextOf(id) {
     try {
       const parsed = JSON.parse(readFileSync3(this.pendingPath(checked(id)), "utf8"));
       const context = parsed?.context;
-      return typeof context === "object" && context !== null ? context : null;
+      return isContext(context) ? context : null;
     } catch {
       return null;
     }
@@ -12247,14 +12263,26 @@ var ApprovalStore = class {
       if (Date.now() - statSync2(path).mtimeMs > APPROVAL_TTL_MS) return null;
       const parsed = JSON.parse(readFileSync3(path, "utf8"));
       if (typeof parsed !== "object" || parsed === null) return null;
-      const { tool, reason, at, args, binding } = parsed;
+      const { tool, reason, at, args, binding, context } = parsed;
       if (typeof tool !== "string" || typeof reason !== "string" || typeof at !== "string") return null;
-      return { tool, reason, at, args: typeof args === "string" ? args : "", binding: typeof binding === "string" ? binding : "" };
+      return {
+        tool,
+        reason,
+        at,
+        args: typeof args === "string" ? args : "",
+        binding: typeof binding === "string" ? binding : "",
+        ...isContext(context) ? { context } : {}
+      };
     } catch {
       return null;
     }
   }
 };
+function isContext(value) {
+  if (typeof value !== "object" || value === null) return false;
+  const { rule, exposure, policy, turn, reads } = value;
+  return typeof rule === "string" && (exposure === null || typeof exposure === "string") && typeof policy === "string" && typeof turn === "number" && typeof reads === "number";
+}
 function checked(id) {
   if (!ID.test(id)) throw new Error(`not an approval id: ${JSON.stringify(id).slice(0, 40)}`);
   return id;
@@ -12904,6 +12932,7 @@ var SessionStore = class {
     const turn = Object.hasOwn(data, "turn") ? data["turn"] : void 0;
     const taint = Object.hasOwn(data, "taint") ? data["taint"] : void 0;
     const unredacted = Object.hasOwn(data, "unredacted") ? data["unredacted"] : void 0;
+    const reads = Object.hasOwn(data, "reads") ? data["reads"] : void 0;
     const directive = Object.hasOwn(data, "directive") ? data["directive"] : void 0;
     const exposure = Object.hasOwn(data, "exposure") ? data["exposure"] : void 0;
     const userAtoms = Object.hasOwn(data, "userAtoms") ? data["userAtoms"] : void 0;
@@ -12916,6 +12945,9 @@ var SessionStore = class {
       throw new Error(`the session state ${shown(sessionId)} is incompatible`);
     }
     if (unredacted !== void 0 && typeof unredacted !== "boolean") {
+      throw new Error(`the session state ${shown(sessionId)} is incompatible`);
+    }
+    if (reads !== void 0 && (typeof reads !== "number" || !Number.isSafeInteger(reads) || reads < 0)) {
       throw new Error(`the session state ${shown(sessionId)} is incompatible`);
     }
     if (directive !== void 0 && directive !== null && (!Array.isArray(directive) || directive.some((item) => typeof item !== "string" || !EFFECTS2.has(item)))) {
@@ -12946,6 +12978,7 @@ var SessionStore = class {
       turn,
       taint: TaintStore.fromJSON(taint),
       unredacted: unredacted === true,
+      reads: typeof reads === "number" ? reads : 0,
       directive: Array.isArray(directive) ? directive : null,
       exposure: isExposure(exposure) ? exposure : null,
       userAtoms: Array.isArray(userAtoms) ? userAtoms.slice(-MAX_USER_ATOMS) : [],
@@ -12964,6 +12997,7 @@ var SessionStore = class {
       turn: state.turn,
       taint: state.taint.toJSON(),
       unredacted: state.unredacted === true,
+      reads: state.reads ?? 0,
       directive: state.directive ?? null,
       exposure: state.exposure ?? null,
       userAtoms: (state.userAtoms ?? []).slice(-MAX_USER_ATOMS),
@@ -13058,8 +13092,8 @@ function shown(sessionId) {
 }
 function safeName(sessionId) {
   const cleaned = sessionId.replace(/[^a-zA-Z0-9_-]/gu, "_").slice(0, 64);
-  const digest = createHash4("sha256").update(sessionId, "utf8").digest("hex").slice(0, 16);
-  return cleaned === "" ? digest : `${cleaned}-${digest}`;
+  const digest2 = createHash4("sha256").update(sessionId, "utf8").digest("hex").slice(0, 16);
+  return cleaned === "" ? digest2 : `${cleaned}-${digest2}`;
 }
 function isExposure(value) {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
@@ -13075,6 +13109,7 @@ function mergeStates(into, other) {
     turn: Math.max(into.turn, other.turn),
     taint: into.taint,
     unredacted: into.unredacted === true || other.unredacted === true,
+    reads: Math.max(into.reads ?? 0, other.reads ?? 0),
     directive: mergeDirectives(into.directive ?? null, other.directive ?? null),
     exposure: into.exposure ?? other.exposure ?? null,
     userAtoms: mergeUserAtoms(into.userAtoms ?? [], other.userAtoms ?? []),
@@ -13196,6 +13231,8 @@ var Cordon = class {
   cert;
   turn = 0;
   unredacted = false;
+  /** Untrusted results read in this session; see SessionState.reads. */
+  reads = 0;
   directive = null;
   lastSource = null;
   /**
@@ -13237,6 +13274,7 @@ var Cordon = class {
     this.turn = restored.turn;
     this.taint = restored.taint;
     this.unredacted = restored.unredacted === true;
+    this.reads = restored.reads ?? 0;
     this.exposure = restored.exposure ?? null;
     this.userAtoms = restored.userAtoms ?? [];
     this.userNames = restored.userNames ?? [];
@@ -13307,6 +13345,7 @@ var Cordon = class {
       if (source.trust === "untrusted" && !inert) this.exposure = { at: this.turn, source: source.label };
     }
     if (source.trust === "untrusted" && source.kind !== "mcp-description") this.lastSource = source;
+    if (source.trust === "untrusted") this.reads++;
     this.persist();
     return { text: clean, source, findings, substitute };
   }
@@ -13397,25 +13436,36 @@ var Cordon = class {
     const decision = this.gate(call);
     if (decision.kind !== "ask") return decision;
     const approvals = new ApprovalStore(this.cordonHome);
-    const id = approvalId(this.sessionId, call);
     const context = {
       rule: decision.rule,
       exposure: this.exposure?.source ?? null,
-      policy: createHash5("sha256").update(canonical(this.policy), "utf8").digest("hex")
+      policy: digest(canonical(this.policy)),
+      turn: this.turn,
+      reads: this.reads
     };
-    const binding = createHash5("sha256").update(canonical([this.sessionId, call.tool, call.args ?? {}, context, this.exposure]), "utf8").digest("hex");
-    const earlier = approvals.contextOf(id);
-    const taken = approvals.take(id, binding);
-    if (taken.void) {
+    const binding = digest(canonical([
+      this.sessionId,
+      call.tool,
+      call.args ?? {},
+      context,
+      this.exposure,
+      this.unredacted,
+      this.cert,
+      digest(canonical(this.taint.toJSON()))
+    ]));
+    const id = binding.slice(0, 16);
+    const callKey = approvalId(this.sessionId, call);
+    for (const earlier of approvals.retireOthers(callKey, id)) {
       this.notifier.notify({
         at: (/* @__PURE__ */ new Date()).toISOString(),
         decision: "approval-void",
         tool: call.tool,
-        reason: `the owner's approval of ${id} was given ${changed(earlier, context)}; it is void, and the call waits for a fresh one`,
+        reason: `the question ${earlier.id} about this call was asked ${changed(earlier.context, context)}; it is void, with any approval given to it, and the call now waits under ${id}`,
         source: decision.source ?? null,
         ...labelled(decision.rule)
       });
     }
+    const taken = approvals.take(id, binding);
     if (taken.taken) {
       this.notifier.notify({
         at: (/* @__PURE__ */ new Date()).toISOString(),
@@ -13427,7 +13477,7 @@ var Cordon = class {
       });
       return { kind: "allow" };
     }
-    approvals.request(id, { tool: call.tool, reason: decision.reason, args: call.args, binding, context });
+    approvals.request(id, { tool: call.tool, reason: decision.reason, args: call.args, binding, context, call: callKey });
     this.notifier.notify({
       at: (/* @__PURE__ */ new Date()).toISOString(),
       decision: "approval-requested",
@@ -13476,6 +13526,7 @@ var Cordon = class {
    */
   markUnredacted() {
     this.unredacted = true;
+    this.reads++;
     this.persist();
   }
   /**
@@ -13601,6 +13652,7 @@ var Cordon = class {
       turn: this.turn,
       taint: this.taint,
       unredacted: this.unredacted,
+      reads: this.reads,
       directive: this.directive,
       exposure: this.exposure,
       userAtoms: this.userAtoms,
@@ -13692,8 +13744,13 @@ function changed(earlier, now) {
   if (earlier.exposure === null && now.exposure !== null) return `before this session read untrusted content (${now.exposure})`;
   if (earlier.exposure !== now.exposure) return `while the session carried different untrusted content (${earlier.exposure ?? "none"})`;
   if (earlier.policy !== now.policy) return "under a policy that has changed since";
-  if (earlier.rule !== now.rule) return `for a question under another rule (${earlier.rule})`;
-  return "in a different context: the untrusted content read since is newer";
+  if (earlier.rule !== now.rule) return `under another rule (${earlier.rule}, now ${now.rule})`;
+  if (earlier.turn !== now.turn) return "before your latest message";
+  if (earlier.reads !== now.reads) return "before the session read more untrusted content";
+  return "in a different context: the certificate or what was read has changed";
+}
+function digest(text) {
+  return createHash5("sha256").update(text, "utf8").digest("hex");
 }
 
 // src/output/subject.ts
@@ -16018,7 +16075,7 @@ function approveCall(args) {
     for (const item of waiting) {
       process.stdout.write(`${item.id}  ${visible(item.at)}  ${visible(item.tool)}
     arguments: ${visible(shortened(item.args, store.pendingPath(item.id)))}
-    ${visible(item.reason)}
+    ${asked(item)}${visible(item.reason)}
 `);
     }
     process.stdout.write("approve one call with: cordon approve <id>\n");
@@ -16047,10 +16104,17 @@ read all of them in ${store.pendingPath(id)}, then approve with: cordon approve 
   }
   process.stdout.write(`approved once: ${visible(approved.tool)}
     arguments: ${visible(approved.args)}
-    ${visible(approved.reason)}
-the agent's next identical call goes through, and only that one
+    ${asked(approved)}${visible(approved.reason)}
+the agent's next identical call goes through, and only that one, while nothing more is read or said; a changed context is a new question
 `);
   return 0;
+}
+function asked(request) {
+  const context = request.context;
+  if (context === void 0) return "";
+  const read = context.exposure === null ? "asked with nothing untrusted read since the last message" : `asked after reading ${visible(context.exposure)}`;
+  return `[${visible(context.rule)}] ${read}
+    `;
 }
 function shortened(args, path) {
   if (args.length <= MAX_SHOWN_ARGS) return args;

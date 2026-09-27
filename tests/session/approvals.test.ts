@@ -33,7 +33,7 @@ describe('ApprovalStore: one approval, one call', () => {
     const approvals = store()
     const id = approvalId('s', CALL)
     approvals.request(id, { tool: CALL.tool, reason: 'r' })
-    expect(approvals.consume(id)).toBe(false)
+    expect(approvals.take(id, '').taken).toBe(false)
   })
 
   it('an approved request passes once, and only once', () => {
@@ -41,8 +41,8 @@ describe('ApprovalStore: one approval, one call', () => {
     const id = approvalId('s', CALL)
     approvals.request(id, { tool: CALL.tool, reason: 'r' })
     expect(approvals.approve(id)).toMatchObject({ tool: 'send_email', reason: 'r' })
-    expect(approvals.consume(id)).toBe(true)
-    expect(approvals.consume(id)).toBe(false)
+    expect(approvals.take(id, '').taken).toBe(true)
+    expect(approvals.take(id, '').taken).toBe(false)
   })
 
   it('nothing to approve without a pending request', () => {
@@ -52,7 +52,7 @@ describe('ApprovalStore: one approval, one call', () => {
   it('an id that is not one is refused before it touches the disk', () => {
     const approvals = store()
     expect(() => approvals.approve('../../policy')).toThrow(/not an approval id/)
-    expect(approvals.consume('../x')).toBe(false)
+    expect(approvals.take('../x', '').taken).toBe(false)
   })
 
   it('an approval older than its lifetime is not honoured', () => {
@@ -62,7 +62,7 @@ describe('ApprovalStore: one approval, one call', () => {
     approvals.approve(id)
     const old = new Date(Date.now() - APPROVAL_TTL_MS - 1000)
     utimesSync(approvals.approvedPath(id), old, old)
-    expect(approvals.consume(id)).toBe(false)
+    expect(approvals.take(id, '').taken).toBe(false)
   })
 
   it('a request older than its lifetime cannot be approved', () => {
@@ -120,7 +120,7 @@ describe('ApprovalStore: what both reviews found', () => {
     utimesSync(approvals.pendingPath(id), old, old)
     utimesSync(approvals.approvedPath(id), old, old)
     approvals.request(id, { tool: CALL.tool, reason: 'r' })
-    expect(approvals.consume(id)).toBe(false)
+    expect(approvals.take(id, '').taken).toBe(false)
   })
 })
 
@@ -143,14 +143,31 @@ describe('ApprovalStore: an approval holds only in the context it was given in',
     expect(approvals.take(id, 'a'.repeat(64))).toEqual({ taken: false, void: false })
   })
 
-  it('a request waiting under an old binding is replaced, so the owner approves the current one', () => {
+  it('a question asked again under another context retires the earlier one and its approval', () => {
+    // Each context is its own question with its own id, so the owner approves
+    // exactly the one they were shown; the call ties them together, so the
+    // earlier question is retired and the journal can say what changed.
     const approvals = store()
-    const id = approvalId('s', CALL)
-    approvals.request(id, { tool: CALL.tool, reason: 'before the page', binding: 'a'.repeat(64) })
-    approvals.request(id, { tool: CALL.tool, reason: 'after the page', binding: 'b'.repeat(64) })
-    expect(approvals.waiting(id)?.reason).toBe('after the page')
-    approvals.approve(id)
-    expect(approvals.take(id, 'b'.repeat(64)).taken).toBe(true)
+    const call = approvalId('s', CALL)
+    const before = 'a'.repeat(64)
+    const after = 'b'.repeat(64)
+    const context = { rule: 'certificate', exposure: null, policy: 'p', turn: 1, reads: 0 }
+    approvals.request(before.slice(0, 16), { tool: CALL.tool, reason: 'before the page', binding: before, call, context })
+    approvals.approve(before.slice(0, 16))
+    approvals.request(after.slice(0, 16), { tool: CALL.tool, reason: 'after the page', binding: after, call })
+    expect(approvals.retireOthers(call, after.slice(0, 16))).toEqual([{ id: before.slice(0, 16), context }])
+    expect(approvals.waiting(before.slice(0, 16))).toBeNull()
+    expect(approvals.take(before.slice(0, 16), before).taken).toBe(false)
+    expect(approvals.waiting(after.slice(0, 16))?.reason).toBe('after the page')
+  })
+
+  it('an approval under one id is never taken for another', () => {
+    const approvals = store()
+    const a = 'a'.repeat(64)
+    approvals.request(a.slice(0, 16), { tool: CALL.tool, reason: 'r', binding: a })
+    approvals.approve(a.slice(0, 16))
+    expect(approvals.take('b'.repeat(16), 'b'.repeat(64)).taken).toBe(false)
+    expect(approvals.take(a.slice(0, 16), a).taken).toBe(true)
   })
 })
 

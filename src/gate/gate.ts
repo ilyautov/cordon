@@ -133,7 +133,7 @@ function decide(call: ToolCall, ctx: GateContext): Decision {
     if (!harmless) {
       return escalate(
         ctx,
-        ctx.unredacted === true ? 'hidden-layer' : 'saturation',
+        ctx.unredacted === true ? 'unscanned' : 'saturation',
         ctx.unredacted === true
           ? 'a hidden layer in a tool result could not be stripped'
           : 'provenance is full: this session read more than the store holds, and stopped remembering',

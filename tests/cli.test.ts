@@ -367,6 +367,21 @@ describe('cordon approve', () => {
     expect(stdout).toContain('a@example.com')
   })
 
+  it('shows what the session had read when it asked', () => {
+    // The owner approves a question, and what the agent had read is half of
+    // it: the same call after a page is a different request (Kimi).
+    const home = mkdtempSync(join(tmpdir(), 'cordon-approve-'))
+    const id = 'ab'.repeat(8)
+    new ApprovalStore(home).request(id, {
+      tool: 'send_email', reason: 'r', args: { to: 'a@example.com' }, binding: 'ab'.repeat(32),
+      context: { rule: 'exposure', exposure: 'https://evil.example/page', policy: 'p', turn: 2, reads: 1 },
+    })
+    expect(run(['approve'], '', { CORDON_HOME: home }).stdout).toContain('asked after reading https://evil.example/page')
+    const { stdout } = run(['approve', id], '', { CORDON_HOME: home })
+    expect(stdout).toContain('asked after reading https://evil.example/page')
+    expect(stdout).toContain('[exposure]')
+  })
+
   it('says so when nothing waits', () => {
     const { stdout, status } = run(['approve'], '', { CORDON_HOME: mkdtempSync(join(tmpdir(), 'cordon-approve-')) })
     expect(status).toBe(0)
@@ -378,7 +393,7 @@ describe('cordon approve', () => {
     const { stdout, status } = run(['approve', id], '', { CORDON_HOME: home })
     expect(status).toBe(0)
     expect(stdout).toContain('send_email')
-    expect(new ApprovalStore(home).consume(id)).toBe(true)
+    expect(new ApprovalStore(home).take(id, '').taken).toBe(true)
   })
 
   it('an id nothing waits under is an error, not a silent success', () => {
@@ -403,7 +418,7 @@ describe('cordon approve', () => {
     expect(status).toBe(1)
     expect(stderr).toContain(new ApprovalStore(home).pendingPath(id))
     expect(stderr).toContain('--read')
-    expect(new ApprovalStore(home).consume(id)).toBe(false)
+    expect(new ApprovalStore(home).take(id, '').taken).toBe(false)
   })
 
   it('the listing points to the whole request when it cuts the arguments', () => {
@@ -422,7 +437,7 @@ describe('cordon approve', () => {
     const { stdout, status } = run(['approve', id, '--read'], '', { CORDON_HOME: home })
     expect(status).toBe(0)
     expect(stdout).toContain('attacker@evil.example')
-    expect(new ApprovalStore(home).consume(id)).toBe(true)
+    expect(new ApprovalStore(home).take(id, '').taken).toBe(true)
   })
 
   it('a malformed id is a usage error', () => {

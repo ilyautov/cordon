@@ -102,13 +102,13 @@ Every refusal, question, argument rewrite, memory write under exposure and MCP t
 | Field | Meaning |
 |---|---|
 | `at` | ISO 8601 time |
-| `decision` | `deny`, `ask`, `rewrite`, `memory`, `mcp-drift`, `notice`, `approval-requested`, `approved` |
+| `decision` | `deny`, `ask`, `rewrite`, `memory`, `mcp-drift`, `notice`, `approval-requested`, `approved`, `approval-void` (an owner's question or approval voided because the context changed; worth an alert) |
 | `tool` | the tool the decision is about |
 | `reason` | the reason, in the same words the model and the human saw |
 | `source` | the untrusted source the decision turned on, or `null` |
-| `rule` | the check that made the decision, a closed list: `certificate`, `bounds`, `unclassified`, `exposure`, `memory-carry`, `provenance`, `resource`, `controlled`, `credential`, `hidden-layer`, `saturation`, `self-protection`, `agent-config`, `pin`, `memory-write`, `malformed`, `failure`. Absent on events no rule made (`memory`, `notice`) |
-| `class` | what the refused call would have done: `untrusted-payload`, `unvouched-destination`, `resource-hop`, `parameter-tampering`, `hidden-instruction`, `memory-poisoning`, `tool-rug-pull`, `guard-tampering`, `flooding`, `credential-egress`, `out-of-scope`, `guard-failure` |
-| `tier` | how much the decision knew about an attacker. `evidence`: something from outside was found in the call or the tool list. `suspicion`: the session read untrusted content and the call is not vouched for, though nothing read was found in it; an honest task after reading a page lands here too. `precaution`: no untrusted content is involved |
+| `rule` | the check that made the decision, a closed list: `certificate`, `bounds`, `unclassified`, `exposure`, `memory-carry`, `provenance`, `resource`, `controlled`, `credential`, `unscanned`, `saturation`, `self-protection`, `agent-config`, `pin`, `memory-write`, `malformed`, `failure`. Present on `deny`, `ask`, `rewrite`, `mcp-drift`, `approval-requested`, `approved` and `approval-void`; absent on events no rule made (`memory`, `notice`) |
+| `class` | what the refused call would have done: `untrusted-payload`, `unvouched-destination`, `resource-hop`, `parameter-tampering`, `unscanned-content`, `memory-poisoning`, `tool-rug-pull`, `guard-tampering`, `flooding`, `credential-egress`, `out-of-scope`, `guard-failure` |
+| `tier` | what the rule answers to, and so how much its firing says about an attacker. `evidence`: something from outside was found in the call or the tool list, a matched fragment or a changed tool. `suspicion`: the rule fires only because the session read untrusted content, and nothing read was found in the call; an honest task after reading a page lands here too, and so does content that could not be scanned, such as an image. `precaution`: the rule fires the same whether or not anything untrusted was read; it does not say that nothing untrusted was involved, only that the decision did not turn on it |
 
 Filter on `rule`, `class` and `tier` rather than on `reason`: the reason is prose and changes when it is reworded, the codes do not. The mapping from rule to class and tier is fixed, in `src/gate/rules.ts`, and never an input to a decision. Alert on `evidence`; count `suspicion`; `precaution` is a policy that is tighter than the work, not an attack.
 

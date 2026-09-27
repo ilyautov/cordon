@@ -74,6 +74,8 @@ export class Cordon {
   private cert: Certificate
   private turn = 0
   private unredacted = false
+  /** Untrusted results read in this session; see SessionState.reads. */
+  private reads = 0
   private directive: EffectClass[] | null = null
   private lastSource: Source | null = null
   /**
@@ -123,6 +125,7 @@ export class Cordon {
     this.turn = restored.turn
     this.taint = restored.taint
     this.unredacted = restored.unredacted === true
+    this.reads = restored.reads ?? 0
     this.exposure = restored.exposure ?? null
     this.userAtoms = restored.userAtoms ?? []
     this.userNames = restored.userNames ?? []
@@ -260,6 +263,7 @@ export class Cordon {
     // mark the session and enter provenance above — they are only kept out of
     // the journal's guess.
     if (source.trust === 'untrusted' && source.kind !== 'mcp-description') this.lastSource = source
+    if (source.trust === 'untrusted') this.reads++
     this.persist()
     return { text: clean, source, findings, substitute }
   }
@@ -378,31 +382,39 @@ export class Cordon {
     if (decision.kind !== 'ask') return decision
 
     const approvals = new ApprovalStore(this.cordonHome)
-    const id = approvalId(this.sessionId, call)
-    // The approval answers the question as it was asked: this call, under
-    // this rule, with this much untrusted content read, under this policy
-    // (FIDES binds a grant to its context the same way). Asked before a page
-    // and retried after it, the same arguments may be the page's idea.
+    // The question is bound to everything it was asked under: this call,
+    // under this rule, with this much untrusted content read, in this user
+    // turn, under this certificate and this policy (FIDES binds a grant to
+    // its context the same way). Asked before a page and retried after it,
+    // the same arguments may be the page's idea. The id is the binding's own
+    // prefix, so the owner approves exactly the question they were shown:
+    // a changed context is a new question under a new id, never the old id
+    // quietly pointing at a new question.
     const context: ApprovalContext = {
       rule: decision.rule,
       exposure: this.exposure?.source ?? null,
-      policy: createHash('sha256').update(canonical(this.policy), 'utf8').digest('hex'),
+      policy: digest(canonical(this.policy)),
+      turn: this.turn,
+      reads: this.reads,
     }
-    const binding = createHash('sha256')
-      .update(canonical([this.sessionId, call.tool, call.args ?? {}, context, this.exposure]), 'utf8')
-      .digest('hex')
-    const earlier = approvals.contextOf(id)
-    const taken = approvals.take(id, binding)
-    if (taken.void) {
+    const binding = digest(canonical([
+      this.sessionId, call.tool, call.args ?? {}, context, this.exposure, this.unredacted, this.cert,
+      digest(canonical(this.taint.toJSON())),
+    ]))
+    const id = binding.slice(0, 16)
+    const callKey = approvalId(this.sessionId, call)
+    for (const earlier of approvals.retireOthers(callKey, id)) {
       this.notifier.notify({
         at: new Date().toISOString(),
         decision: 'approval-void',
         tool: call.tool,
-        reason: `the owner's approval of ${id} was given ${changed(earlier, context)}; it is void, and the call waits for a fresh one`,
+        reason: `the question ${earlier.id} about this call was asked ${changed(earlier.context, context)}; ` +
+          `it is void, with any approval given to it, and the call now waits under ${id}`,
         source: decision.source ?? null,
         ...labelled(decision.rule),
       })
     }
+    const taken = approvals.take(id, binding)
     if (taken.taken) {
       this.notifier.notify({
         at: new Date().toISOString(),
@@ -418,7 +430,7 @@ export class Cordon {
     // A failure to record the request is not allowed to become an allow or
     // silence: it propagates, and the transport refuses the call on its own
     // failure path.
-    approvals.request(id, { tool: call.tool, reason: decision.reason, args: call.args, binding, context })
+    approvals.request(id, { tool: call.tool, reason: decision.reason, args: call.args, binding, context, call: callKey })
     this.notifier.notify({
       at: new Date().toISOString(),
       decision: 'approval-requested',
@@ -470,6 +482,7 @@ export class Cordon {
    */
   markUnredacted(): void {
     this.unredacted = true
+    this.reads++
     this.persist()
   }
 
@@ -606,6 +619,7 @@ export class Cordon {
       turn: this.turn,
       taint: this.taint,
       unredacted: this.unredacted,
+      reads: this.reads,
       directive: this.directive,
       exposure: this.exposure,
       userAtoms: this.userAtoms,
@@ -708,12 +722,18 @@ function describeMemory(entries: readonly MemoryEntry[]): string {
   return `memory ${shown} was written after reading ${sources}; review it, then say "cordon: trust memory"`
 }
 
-/** What changed between the context an approval was given in and this one. */
-function changed(earlier: ApprovalContext | null, now: ApprovalContext): string {
+/** What changed between the context a question was asked in and this one. */
+export function changed(earlier: ApprovalContext | null, now: ApprovalContext): string {
   if (earlier === null) return 'in a context that was not recorded'
   if (earlier.exposure === null && now.exposure !== null) return `before this session read untrusted content (${now.exposure})`
   if (earlier.exposure !== now.exposure) return `while the session carried different untrusted content (${earlier.exposure ?? 'none'})`
   if (earlier.policy !== now.policy) return 'under a policy that has changed since'
-  if (earlier.rule !== now.rule) return `for a question under another rule (${earlier.rule})`
-  return 'in a different context: the untrusted content read since is newer'
+  if (earlier.rule !== now.rule) return `under another rule (${earlier.rule}, now ${now.rule})`
+  if (earlier.turn !== now.turn) return 'before your latest message'
+  if (earlier.reads !== now.reads) return 'before the session read more untrusted content'
+  return 'in a different context: the certificate or what was read has changed'
+}
+
+function digest(text: string): string {
+  return createHash('sha256').update(text, 'utf8').digest('hex')
 }

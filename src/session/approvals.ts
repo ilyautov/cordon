@@ -56,6 +56,8 @@ export interface ApprovalRequest {
   binding?: string
   /** The same context in words, so a voided approval can say what changed. */
   context?: ApprovalContext
+  /** The call alone, `approvalId`: what ties the questions about one call together. */
+  call?: string
 }
 
 export interface ApprovalContext {
@@ -63,6 +65,10 @@ export interface ApprovalContext {
   /** The untrusted source the session had read, or null. */
   exposure: string | null
   policy: string
+  /** The user turn the question was asked in. */
+  turn: number
+  /** How many untrusted results the session had read. */
+  reads: number
 }
 
 /** What a retry found: the approval taken, or voided by a changed context. */
@@ -78,6 +84,8 @@ export interface ShownRequest {
   tool: string
   reason: string
   args: string
+  /** What the question was asked under, when the request recorded it. */
+  context?: ApprovalContext
 }
 
 export interface PendingApproval extends ShownRequest {
@@ -133,16 +141,13 @@ export class ApprovalStore {
       args,
       binding,
       ...(request.context === undefined ? {} : { context: request.context }),
+      ...(request.call === undefined ? {} : { call: request.call }),
       at: new Date().toISOString(),
     })
     // A request past its hour can no longer be approved, so it is replaced
     // rather than left to block the id forever; an approval left over from it
     // goes too, so the renewal cannot revive it.
-    // A request asked under another context is replaced too: the owner must
-    // approve the question as it stands now, not as it stood before a page
-    // was read or the policy changed.
-    const asked = this.bindingOf(id)
-    if (this.stale(this.pendingPath(id)) || (asked !== null && asked !== binding)) {
+    if (this.stale(this.pendingPath(id))) {
       for (const path of [this.pendingPath(id), this.approvedPath(id)]) {
         try {
           unlinkSync(path)
@@ -170,7 +175,7 @@ export class ApprovalStore {
     // The approval carries the binding it was given under, so a retry in a
     // different context cannot take it.
     writeFileSync(this.approvedPath(id), request.binding, { mode: 0o600 })
-    return { tool: request.tool, reason: request.reason, args: request.args }
+    return { tool: request.tool, reason: request.reason, args: request.args, ...(request.context === undefined ? {} : { context: request.context }) }
   }
 
   private stale(path: string): boolean {
@@ -187,10 +192,6 @@ export class ApprovalStore {
    * Every failure answers false, and false is a refusal: an unreadable store
    * or an approval that is not there never lets a call through.
    */
-  consume(id: string, binding = ''): boolean {
-    return this.take(id, binding).taken
-  }
-
   /**
    * Takes the approval for this call if it was given under this binding.
    *
@@ -221,15 +222,34 @@ export class ApprovalStore {
     }
   }
 
-  /** The binding a waiting request was asked under, or null when none waits. */
-  private bindingOf(id: string): string | null {
+  /**
+   * Retires every other question about the same call: asked under an earlier
+   * context, with any approval given to it. Returns what was retired, so the
+   * journal can say what changed. A request that cannot be read is left: it
+   * can be neither approved nor taken, and it expires within the hour.
+   */
+  retireOthers(call: string, keep: string): Array<{ id: string; context: ApprovalContext | null }> {
+    let names: string[]
     try {
-      const parsed: unknown = JSON.parse(readFileSync(this.pendingPath(id), 'utf8'))
-      const binding = (parsed as Record<string, unknown> | null)?.binding
-      return typeof binding === 'string' ? binding : ''
+      names = readdirSync(this.dir)
     } catch {
-      return null
+      return []
     }
+    const retired: Array<{ id: string; context: ApprovalContext | null }> = []
+    for (const name of names) {
+      const id = name.replace(/\.request\.json$/u, '')
+      if (id === name || id === keep || !ID.test(id)) continue
+      let parsed: Record<string, unknown>
+      try {
+        parsed = JSON.parse(readFileSync(this.pendingPath(id), 'utf8')) as Record<string, unknown>
+      } catch {
+        continue
+      }
+      if (parsed?.call !== call) continue
+      retired.push({ id, context: this.contextOf(id) })
+      this.retire(id)
+    }
+    return retired
   }
 
   /** A waiting request's context in words, for saying what changed. */
@@ -237,11 +257,12 @@ export class ApprovalStore {
     try {
       const parsed: unknown = JSON.parse(readFileSync(this.pendingPath(checked(id)), 'utf8'))
       const context = (parsed as Record<string, unknown> | null)?.context
-      return typeof context === 'object' && context !== null ? context as ApprovalContext : null
+      return isContext(context) ? context : null
     } catch {
       return null
     }
   }
+
 
   private retire(id: string): void {
     for (const path of [this.pendingPath(id), this.approvedPath(id)]) {
@@ -282,14 +303,28 @@ export class ApprovalStore {
       if (Date.now() - statSync(path).mtimeMs > APPROVAL_TTL_MS) return null
       const parsed: unknown = JSON.parse(readFileSync(path, 'utf8'))
       if (typeof parsed !== 'object' || parsed === null) return null
-      const { tool, reason, at, args, binding } = parsed as Record<string, unknown>
+      const { tool, reason, at, args, binding, context } = parsed as Record<string, unknown>
       if (typeof tool !== 'string' || typeof reason !== 'string' || typeof at !== 'string') return null
-      return { tool, reason, at, args: typeof args === 'string' ? args : '', binding: typeof binding === 'string' ? binding : '' }
+      return {
+        tool,
+        reason,
+        at,
+        args: typeof args === 'string' ? args : '',
+        binding: typeof binding === 'string' ? binding : '',
+        ...(isContext(context) ? { context } : {}),
+      }
     } catch {
       // Absent or damaged: nothing the owner could be shown, so nothing to approve.
       return null
     }
   }
+}
+
+function isContext(value: unknown): value is ApprovalContext {
+  if (typeof value !== 'object' || value === null) return false
+  const { rule, exposure, policy, turn, reads } = value as Record<string, unknown>
+  return typeof rule === 'string' && (exposure === null || typeof exposure === 'string') && typeof policy === 'string' &&
+    typeof turn === 'number' && typeof reads === 'number'
 }
 
 function checked(id: string): string {
