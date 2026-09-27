@@ -4,6 +4,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versions follo
 
 ## [Unreleased]
 
+`docs/comparison.md` places Cordon against the projects whose source we read in September 2026: IntentCap, Progent, Cupcake, Microsoft's Agent Governance Toolkit, the shipped FIDES, Docker's MCP gateway, Invariant and mcpguard-dynamic. It also corrects two stale claims: Cordon does refuse a call that carries a credential off the machine, and interactive utility is 96 of 97, not 100%.
+
 ## [0.10.0] - 2026-09-27
 
 A second live model in the AgentDojo write-up: Poolside's Laguna S 2.1, free through OpenRouter, on banking with five of the nine injection tasks. Without a defence, 30 of 80 attacks succeeded and 14 of 16 tasks were done. With the directory policy, 0 of 80 succeeded and 10 of 16 tasks were done. The oracle had predicted five of the six lost tasks. See `docs/agentdojo.md`.
