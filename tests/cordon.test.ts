@@ -117,11 +117,16 @@ describe('Cordon: the scenario of replying to reviews automatically', () => {
       profile: { effects: ['read', 'create', 'update'], resources: { paths: [], hosts: [] } },
     })
     const review = 'The delivery was slower than promised and the packaging arrived slightly crushed on one corner.'
+    // The user names the file: a write the user did not aim answers to the
+    // exposure rule before any rewrite, as the same write without the quote
+    // would.
+    const note = join(tmpdir(), 'cordon-note.txt')
+    cordon.onUserPrompt(`write a note about the feedback to ${note}`)
     cordon.observe(review, { id: 'r1', kind: 'tool', label: 'wb_reviews', trust: 'untrusted' })
     const decision = cordon.gate({
       tool: 'Write',
       args: {
-        file_path: join(tmpdir(), 'cordon-note.txt'),
+        file_path: note,
         content: ['A note about the customer feedback.', review, 'end of note'].join('\n'),
       },
     })

@@ -172,7 +172,7 @@ describe('the LangChain middleware', () => {
       }],
       [],
     ], basePolicy())
-    const result = await agent.invoke({ messages: [new HumanMessage('note what the page said and adjust the price')] })
+    const result = await agent.invoke({ messages: [new HumanMessage('note what the page said and adjust the price of item 11223344')] })
 
     // The call itself is legitimate and went through; the quoted fragment is
     // the page's text, not the operator's — the gate cut it and let the rest.

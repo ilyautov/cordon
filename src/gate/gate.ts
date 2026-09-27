@@ -226,6 +226,18 @@ function decide(call: ToolCall, ctx: GateContext): Decision {
   // files.
   if (returnsToOrigin(scan.sources, parts, verdict.effects)) return { kind: 'allow' }
 
+  // Taint in one field must never lower what the whole call answers to. A
+  // clean call after an untrusted read answers to the exposure rule; the same
+  // call with a recorded paragraph pasted into a side field (a shell
+  // command's description) was quarantined instead, and the rewrite ran the
+  // command untouched (Codex). So the exposure rule is asked here too,
+  // before a rewrite can let the call through. The write back to the file
+  // read, above, stays exempt: nothing leaves, by definition.
+  const exposedToo = exposedCall(call.tool, verdict.effects, parts, ctx, bound)
+  if (exposedToo) {
+    return escalate(ctx, ctx.exposure?.memory === true ? 'memory-carry' : 'exposure', exposedToo, ctx.exposure?.source)
+  }
+
   // There is nothing to cut taint out of a nested structure with: quarantine
   // works on a whole string argument, and we cannot parse somebody else's
   // argument schema. Hence escalation.
@@ -803,7 +815,9 @@ function scanTaint(
  * proves nothing for them: there is a path in the arguments, but the text
  * goes somewhere else. The exemption does not extend to them.
  */
-const BEYOND_PATH: ReadonlySet<EffectClass> = new Set(['network-egress', 'financial', 'exec'])
+// Every outward effect, export included: a tool that writes the file back
+// and exports it too took this exemption past the outward check (Codex).
+const BEYOND_PATH: ReadonlySet<EffectClass> = new Set(['network-egress', 'financial', 'exec', 'export'])
 
 /**
  * Effect classes that put content back. The exemption is specifically about

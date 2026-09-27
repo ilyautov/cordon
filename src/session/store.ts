@@ -6,6 +6,11 @@ import { makeDirectory } from '../core/mkdir.js'
 import type { EffectClass, ExposureMark } from '../core/types.js'
 import { TaintStore } from '../provenance/store.js'
 
+/** How many read ids a session keeps: the newest, by the time they start with. */
+export const MAX_READ_IDS = 256
+
+const READ_ID = /^[0-9a-z]{1,12}-[0-9a-f]{12}$/u
+
 export interface SessionState {
   turn: number
   taint: TaintStore
@@ -15,12 +20,13 @@ export interface SessionState {
    */
   unredacted?: boolean
   /**
-   * How many untrusted results the session has read, readable or not. Only
-   * grows; an approval is bound to it, so one given before a further read
-   * does not cover the call after it. Merged by the maximum. An absent field
-   * means none were counted.
+   * One id per untrusted result the session has read, readable or not. An
+   * approval is bound to the list, so one given before a further read does
+   * not cover the call after it. Merged as a union, never by a maximum: two
+   * processes reading at once each add their own id. The newest
+   * MAX_READ_IDS are kept. An absent field means none were recorded.
    */
-  reads?: number
+  readIds?: string[]
   /**
    * The narrowing requested by the user with a `cordon: scope` directive.
    *
@@ -269,7 +275,7 @@ export class SessionStore {
     const turn = Object.hasOwn(data, 'turn') ? data['turn'] : undefined
     const taint = Object.hasOwn(data, 'taint') ? data['taint'] : undefined
     const unredacted = Object.hasOwn(data, 'unredacted') ? data['unredacted'] : undefined
-    const reads = Object.hasOwn(data, 'reads') ? data['reads'] : undefined
+    const readIds = Object.hasOwn(data, 'readIds') ? data['readIds'] : undefined
     const directive = Object.hasOwn(data, 'directive') ? data['directive'] : undefined
     const exposure = Object.hasOwn(data, 'exposure') ? data['exposure'] : undefined
     const userAtoms = Object.hasOwn(data, 'userAtoms') ? data['userAtoms'] : undefined
@@ -290,8 +296,8 @@ export class SessionStore {
     if (unredacted !== undefined && typeof unredacted !== 'boolean') {
       throw new Error(`the session state ${shown(sessionId)} is incompatible`)
     }
-    // Lowered, the count would revive an approval given before a read.
-    if (reads !== undefined && (typeof reads !== 'number' || !Number.isSafeInteger(reads) || reads < 0)) {
+    // Filtered, the list would revive an approval given before a read.
+    if (readIds !== undefined && (!Array.isArray(readIds) || readIds.some((id) => typeof id !== 'string' || !READ_ID.test(id)))) {
       throw new Error(`the session state ${shown(sessionId)} is incompatible`)
     }
     // The directive's shape is validated rather than filtered. Filtering
@@ -352,7 +358,7 @@ export class SessionStore {
       turn,
       taint: TaintStore.fromJSON(taint),
       unredacted: unredacted === true,
-      reads: typeof reads === 'number' ? reads : 0,
+      readIds: Array.isArray(readIds) ? (readIds as string[]).slice(-MAX_READ_IDS) : [],
       directive: Array.isArray(directive) ? (directive as EffectClass[]) : null,
       exposure: isExposure(exposure) ? exposure : null,
       userAtoms: Array.isArray(userAtoms) ? (userAtoms as string[]).slice(-MAX_USER_ATOMS) : [],
@@ -372,7 +378,7 @@ export class SessionStore {
       turn: state.turn,
       taint: state.taint.toJSON(),
       unredacted: state.unredacted === true,
-      reads: state.reads ?? 0,
+      readIds: (state.readIds ?? []).slice(-MAX_READ_IDS),
       directive: state.directive ?? null,
       exposure: state.exposure ?? null,
       userAtoms: (state.userAtoms ?? []).slice(-MAX_USER_ATOMS),
@@ -576,7 +582,7 @@ function mergeStates(into: SessionState, other: SessionState): SessionState {
     turn: Math.max(into.turn, other.turn),
     taint: into.taint,
     unredacted: into.unredacted === true || other.unredacted === true,
-    reads: Math.max(into.reads ?? 0, other.reads ?? 0),
+    readIds: [...new Set([...(into.readIds ?? []), ...(other.readIds ?? [])])].sort().slice(-MAX_READ_IDS),
     directive: mergeDirectives(into.directive ?? null, other.directive ?? null),
     exposure: into.exposure ?? other.exposure ?? null,
     userAtoms: mergeUserAtoms(into.userAtoms ?? [], other.userAtoms ?? []),

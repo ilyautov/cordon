@@ -132,6 +132,17 @@ describe('reading a file does not escalate the actions that follow', () => {
   })
 })
 
+/**
+ * The provenance axis alone. A note with no destination answers to the
+ * exposure rule after any read, before quarantine could show what provenance
+ * found; these tests are about what provenance finds.
+ */
+function provenanceOnly(): ReturnType<typeof env> {
+  const shared = env()
+  shared.policy.exposure = false
+  return shared
+}
+
 describe('provenance of a file that was read works on the source text', () => {
   const DOC = [
     '# The section about supplies',
@@ -140,7 +151,7 @@ describe('provenance of a file that was read works on the source text', () => {
   ].join('\n')
 
   it('an argument from the hidden part of the file is found', () => {
-    const shared = env()
+    const shared = provenanceOnly()
     handle(parseEvent(afterTool(DOC, 'read_file', { absolute_path: '/proj/doc.md' })), shared)
     const out = handle(
       parseEvent(JSON.stringify({

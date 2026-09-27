@@ -7367,7 +7367,7 @@ var require_dist = __commonJS({
 });
 
 // src/cli.ts
-import { accessSync as accessSync4, appendFileSync as appendFileSync2, constants as constants4, existsSync, mkdtempSync, readdirSync as readdirSync7, readFileSync as readFileSync7, realpathSync as realpathSync3, renameSync as renameSync5, rmSync as rmSync5, writeFileSync as writeFileSync6 } from "node:fs";
+import { accessSync as accessSync4, appendFileSync as appendFileSync2, constants as constants4, existsSync as existsSync2, mkdtempSync, readdirSync as readdirSync7, readFileSync as readFileSync7, realpathSync as realpathSync3, renameSync as renameSync5, rmSync as rmSync5, writeFileSync as writeFileSync6 } from "node:fs";
 import { homedir as homedir6, tmpdir, userInfo } from "node:os";
 import { dirname as dirname4, join as join14 } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -7713,7 +7713,7 @@ function asEffects(value, where) {
 }
 
 // src/cordon.ts
-import { createHash as createHash6 } from "node:crypto";
+import { createHash as createHash6, randomBytes as randomBytes3 } from "node:crypto";
 
 // src/core/types.ts
 function humanSeesRendered(source) {
@@ -8607,6 +8607,10 @@ function decide(call, ctx) {
     return escalate(ctx, "provenance", `an argument carries a target from an untrusted source: ${targets.map(safeLabel).join(", ")}`, blamed);
   }
   if (returnsToOrigin(scan.sources, parts, verdict.effects)) return { kind: "allow" };
+  const exposedToo = exposedCall(call.tool, verdict.effects, parts, ctx, bound);
+  if (exposedToo) {
+    return escalate(ctx, ctx.exposure?.memory === true ? "memory-carry" : "exposure", exposedToo, ctx.exposure?.source);
+  }
   if (scan.nested) {
     return escalate(ctx, "provenance", `quarantine is impossible: the untrusted fragment sits inside a nested argument${origin(blamedLabels)}`, blamed);
   }
@@ -8891,7 +8895,7 @@ function scanTaint(parts, taint, userAtoms, bound = () => false) {
   }
   return { tainted, spans, nested, targets: [...targets], sources: [...sources.values()] };
 }
-var BEYOND_PATH = /* @__PURE__ */ new Set(["network-egress", "financial", "exec"]);
+var BEYOND_PATH = /* @__PURE__ */ new Set(["network-egress", "financial", "exec", "export"]);
 var PUTS_BACK = /* @__PURE__ */ new Set(["create", "update"]);
 function returnsToOrigin(sources, parts, effects) {
   if (sources.length === 0) return false;
@@ -12104,7 +12108,7 @@ function isEntry(value) {
 
 // src/session/approvals.ts
 import { createHash as createHash3 } from "node:crypto";
-import { readdirSync as readdirSync2, readFileSync as readFileSync3, statSync as statSync2, unlinkSync, writeFileSync as writeFileSync2 } from "node:fs";
+import { existsSync, readdirSync as readdirSync2, readFileSync as readFileSync3, statSync as statSync2, unlinkSync, writeFileSync as writeFileSync2 } from "node:fs";
 import { join as join4 } from "node:path";
 var APPROVAL_TTL_MS = 60 * 60 * 1e3;
 var ID = /^[0-9a-f]{16}$/u;
@@ -12162,6 +12166,10 @@ var ApprovalStore = class {
     const request = this.read(id);
     if (request === null) return null;
     writeFileSync2(this.approvedPath(id), request.binding, { mode: 384 });
+    if (this.read(id) === null) {
+      this.retire(id);
+      return null;
+    }
     return { tool: request.tool, reason: request.reason, args: request.args, ...request.context === void 0 ? {} : { context: request.context } };
   }
   stale(path) {
@@ -12190,6 +12198,10 @@ var ApprovalStore = class {
       const path = this.approvedPath(id);
       const fresh = Date.now() - statSync2(path).mtimeMs <= APPROVAL_TTL_MS;
       const given = readFileSync3(path, "utf8");
+      if (!existsSync(this.pendingPath(id))) {
+        this.retire(id);
+        return { taken: false, void: false };
+      }
       if (fresh && given !== binding) {
         this.retire(id);
         return { taken: false, void: true };
@@ -12839,6 +12851,8 @@ function merge(spans) {
 }
 
 // src/session/store.ts
+var MAX_READ_IDS = 256;
+var READ_ID = /^[0-9a-z]{1,12}-[0-9a-f]{12}$/u;
 var MAX_LOOKUPS = 500;
 var MAX_USER_ATOMS = 500;
 var EFFECTS2 = /* @__PURE__ */ new Set([
@@ -12947,7 +12961,7 @@ var SessionStore = class {
     const turn = Object.hasOwn(data, "turn") ? data["turn"] : void 0;
     const taint = Object.hasOwn(data, "taint") ? data["taint"] : void 0;
     const unredacted = Object.hasOwn(data, "unredacted") ? data["unredacted"] : void 0;
-    const reads = Object.hasOwn(data, "reads") ? data["reads"] : void 0;
+    const readIds = Object.hasOwn(data, "readIds") ? data["readIds"] : void 0;
     const directive = Object.hasOwn(data, "directive") ? data["directive"] : void 0;
     const exposure = Object.hasOwn(data, "exposure") ? data["exposure"] : void 0;
     const userAtoms = Object.hasOwn(data, "userAtoms") ? data["userAtoms"] : void 0;
@@ -12962,7 +12976,7 @@ var SessionStore = class {
     if (unredacted !== void 0 && typeof unredacted !== "boolean") {
       throw new Error(`the session state ${shown(sessionId)} is incompatible`);
     }
-    if (reads !== void 0 && (typeof reads !== "number" || !Number.isSafeInteger(reads) || reads < 0)) {
+    if (readIds !== void 0 && (!Array.isArray(readIds) || readIds.some((id) => typeof id !== "string" || !READ_ID.test(id)))) {
       throw new Error(`the session state ${shown(sessionId)} is incompatible`);
     }
     if (directive !== void 0 && directive !== null && (!Array.isArray(directive) || directive.some((item) => typeof item !== "string" || !EFFECTS2.has(item)))) {
@@ -12993,7 +13007,7 @@ var SessionStore = class {
       turn,
       taint: TaintStore.fromJSON(taint),
       unredacted: unredacted === true,
-      reads: typeof reads === "number" ? reads : 0,
+      readIds: Array.isArray(readIds) ? readIds.slice(-MAX_READ_IDS) : [],
       directive: Array.isArray(directive) ? directive : null,
       exposure: isExposure(exposure) ? exposure : null,
       userAtoms: Array.isArray(userAtoms) ? userAtoms.slice(-MAX_USER_ATOMS) : [],
@@ -13012,7 +13026,7 @@ var SessionStore = class {
       turn: state.turn,
       taint: state.taint.toJSON(),
       unredacted: state.unredacted === true,
-      reads: state.reads ?? 0,
+      readIds: (state.readIds ?? []).slice(-MAX_READ_IDS),
       directive: state.directive ?? null,
       exposure: state.exposure ?? null,
       userAtoms: (state.userAtoms ?? []).slice(-MAX_USER_ATOMS),
@@ -13124,7 +13138,7 @@ function mergeStates(into, other) {
     turn: Math.max(into.turn, other.turn),
     taint: into.taint,
     unredacted: into.unredacted === true || other.unredacted === true,
-    reads: Math.max(into.reads ?? 0, other.reads ?? 0),
+    readIds: [.../* @__PURE__ */ new Set([...into.readIds ?? [], ...other.readIds ?? []])].sort().slice(-MAX_READ_IDS),
     directive: mergeDirectives(into.directive ?? null, other.directive ?? null),
     exposure: into.exposure ?? other.exposure ?? null,
     userAtoms: mergeUserAtoms(into.userAtoms ?? [], other.userAtoms ?? []),
@@ -13246,8 +13260,8 @@ var Cordon = class {
   cert;
   turn = 0;
   unredacted = false;
-  /** Untrusted results read in this session; see SessionState.reads. */
-  reads = 0;
+  /** One id per untrusted result read in this session; see SessionState.readIds. */
+  readIds = [];
   directive = null;
   lastSource = null;
   /**
@@ -13285,11 +13299,16 @@ var Cordon = class {
     this.notifier = stamped(options.notifier ?? (options.policy.notify.file ? new FileNotifier(options.policy.notify.file) : SILENT), policyHash(options.policy));
     this.sessionId = options.sessionId ?? "default";
     this.sessions = new SessionStore(this.cordonHome);
-    const restored = this.sessions.load(this.sessionId);
+    this.adopt(this.sessions.load(this.sessionId));
+    this.ledger = new MemoryLedger(this.cordonHome);
+    this.carryMemory();
+  }
+  /** Takes a session state from disk as this instance's own. */
+  adopt(restored) {
     this.turn = restored.turn;
     this.taint = restored.taint;
     this.unredacted = restored.unredacted === true;
-    this.reads = restored.reads ?? 0;
+    this.readIds = restored.readIds ?? [];
     this.exposure = restored.exposure ?? null;
     this.userAtoms = restored.userAtoms ?? [];
     this.userNames = restored.userNames ?? [];
@@ -13300,7 +13319,18 @@ var Cordon = class {
     this.cert = issue(this.policy, this.turn);
     this.directive = restored.directive ?? null;
     if (this.directive) this.cert = narrow(this.cert, this.directive);
-    this.ledger = new MemoryLedger(this.cordonHome);
+  }
+  /**
+   * Re-reads the session from disk before an unattended decision.
+   *
+   * A LangChain agent can hold one instance for a whole run while another
+   * worker shares its session: what the other read, or the scope the user
+   * narrowed there, is on disk and not in this instance's memory, and an
+   * approval checked against memory alone passed after it (Codex). The hook
+   * adapters start a process per event and are fresh already.
+   */
+  refresh() {
+    this.adopt(this.sessions.load(this.sessionId));
     this.carryMemory();
   }
   /** Trusted input. The only place where the certificate can change. */
@@ -13360,7 +13390,7 @@ var Cordon = class {
       if (source.trust === "untrusted" && !inert) this.exposure = { at: this.turn, source: source.label };
     }
     if (source.trust === "untrusted" && source.kind !== "mcp-description") this.lastSource = source;
-    if (source.trust === "untrusted") this.reads++;
+    if (source.trust === "untrusted") this.readIds = noteRead(this.readIds);
     this.persist();
     return { text: clean, source, findings, substitute };
   }
@@ -13448,6 +13478,7 @@ var Cordon = class {
    * there the policy is what should change, in the open.
    */
   gateUnattended(call) {
+    this.refresh();
     const decision = this.gate(call);
     if (decision.kind !== "ask") return decision;
     const approvals = new ApprovalStore(this.cordonHome);
@@ -13456,7 +13487,7 @@ var Cordon = class {
       exposure: this.exposure?.source ?? null,
       policy: policyHash(this.policy),
       turn: this.turn,
-      reads: this.reads
+      reads: this.readIds.length
     };
     const binding = digest(canonical([
       this.sessionId,
@@ -13466,6 +13497,7 @@ var Cordon = class {
       this.exposure,
       this.unredacted,
       this.cert,
+      this.readIds,
       digest(canonical(this.taint.toJSON()))
     ]));
     const id = binding.slice(0, 16);
@@ -13541,7 +13573,7 @@ var Cordon = class {
    */
   markUnredacted() {
     this.unredacted = true;
-    this.reads++;
+    this.readIds = noteRead(this.readIds);
     this.persist();
   }
   /**
@@ -13671,7 +13703,7 @@ var Cordon = class {
       turn: this.turn,
       taint: this.taint,
       unredacted: this.unredacted,
-      reads: this.reads,
+      readIds: this.readIds,
       directive: this.directive,
       exposure: this.exposure,
       userAtoms: this.userAtoms,
@@ -13770,6 +13802,10 @@ function changed(earlier, now) {
 }
 function digest(text) {
   return createHash6("sha256").update(text, "utf8").digest("hex");
+}
+function noteRead(ids) {
+  const id = `${Date.now().toString(36)}-${randomBytes3(6).toString("hex")}`;
+  return [...ids, id].sort().slice(-MAX_READ_IDS);
 }
 
 // src/output/subject.ts
@@ -15956,7 +15992,7 @@ function doctor(home = cordonHome()) {
     );
   }
   return {
-    policySource: existsSync(path) ? path : "default",
+    policySource: existsSync2(path) ? path : "default",
     mode: policy.mode,
     effects: [...policy.profile.effects],
     warnings,
@@ -16068,7 +16104,7 @@ ${USAGE}
   }
   const home = cordonHome();
   const path = join14(home, "policy.yaml");
-  if (existsSync(path) && !args.includes("--force")) {
+  if (existsSync2(path) && !args.includes("--force")) {
     process.stdout.write(`${path} already exists; nothing was written. Pass --force to replace it
 `);
     return 1;

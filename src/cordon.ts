@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto'
+import { createHash, randomBytes } from 'node:crypto'
 import { humanSeesRendered, type Certificate, type ExposureMark, type Decision, type EffectClass, type Source, type ToolCall } from './core/types.js'
 import { gate as decide } from './gate/gate.js'
 import { memoryTarget } from './gate/memory.js'
@@ -18,7 +18,7 @@ import { issue, narrow, parseDirective, parseTrustMemory } from './scope/certifi
 import { MemoryLedger, type MemoryEntry } from './session/memory.js'
 import { ApprovalStore, approvalId, canonical, type ApprovalContext } from './session/approvals.js'
 import { PinStore } from './session/pins.js'
-import { MAX_LOOKUPS, MAX_USER_ATOMS, SessionStore, type TurnNames } from './session/store.js'
+import { MAX_LOOKUPS, MAX_READ_IDS, MAX_USER_ATOMS, SessionStore, type SessionState, type TurnNames } from './session/store.js'
 import { assignments } from './provenance/assignments.js'
 
 export interface Envelope {
@@ -70,13 +70,13 @@ export class Cordon {
   private readonly cordonHome: string
   private readonly notifier: Notifier
   private readonly sessions: SessionStore
-  private readonly taint: TaintStore
+  private taint!: TaintStore
   private readonly ledger: MemoryLedger
-  private cert: Certificate
+  private cert!: Certificate
   private turn = 0
   private unredacted = false
-  /** Untrusted results read in this session; see SessionState.reads. */
-  private reads = 0
+  /** One id per untrusted result read in this session; see SessionState.readIds. */
+  private readIds: string[] = []
   private directive: EffectClass[] | null = null
   private lastSource: Source | null = null
   /**
@@ -122,11 +122,21 @@ export class Cordon {
     // A broken state arrives here as an exception and leaves as one: catching
     // it here would mean starting the session with clean provenance, that is,
     // with the most permissive state, right after the file was corrupted.
-    const restored = this.sessions.load(this.sessionId)
+    this.adopt(this.sessions.load(this.sessionId))
+
+    // Read on construction, not lazily: a session with no user turns at all
+    // (the MCP gateway) must start marked too, and a damaged ledger must
+    // throw here, where the adapter turns it into a refusal.
+    this.ledger = new MemoryLedger(this.cordonHome)
+    this.carryMemory()
+  }
+
+  /** Takes a session state from disk as this instance's own. */
+  private adopt(restored: SessionState): void {
     this.turn = restored.turn
     this.taint = restored.taint
     this.unredacted = restored.unredacted === true
-    this.reads = restored.reads ?? 0
+    this.readIds = restored.readIds ?? []
     this.exposure = restored.exposure ?? null
     this.userAtoms = restored.userAtoms ?? []
     this.userNames = restored.userNames ?? []
@@ -152,11 +162,19 @@ export class Cordon {
     this.cert = issue(this.policy, this.turn)
     this.directive = restored.directive ?? null
     if (this.directive) this.cert = narrow(this.cert, this.directive)
+  }
 
-    // Read on construction, not lazily: a session with no user turns at all
-    // (the MCP gateway) must start marked too, and a damaged ledger must
-    // throw here, where the adapter turns it into a refusal.
-    this.ledger = new MemoryLedger(this.cordonHome)
+  /**
+   * Re-reads the session from disk before an unattended decision.
+   *
+   * A LangChain agent can hold one instance for a whole run while another
+   * worker shares its session: what the other read, or the scope the user
+   * narrowed there, is on disk and not in this instance's memory, and an
+   * approval checked against memory alone passed after it (Codex). The hook
+   * adapters start a process per event and are fresh already.
+   */
+  private refresh(): void {
+    this.adopt(this.sessions.load(this.sessionId))
     this.carryMemory()
   }
 
@@ -264,7 +282,7 @@ export class Cordon {
     // mark the session and enter provenance above — they are only kept out of
     // the journal's guess.
     if (source.trust === 'untrusted' && source.kind !== 'mcp-description') this.lastSource = source
-    if (source.trust === 'untrusted') this.reads++
+    if (source.trust === 'untrusted') this.readIds = noteRead(this.readIds)
     this.persist()
     return { text: clean, source, findings, substitute }
   }
@@ -379,6 +397,7 @@ export class Cordon {
    * there the policy is what should change, in the open.
    */
   gateUnattended(call: ToolCall): Decision {
+    this.refresh()
     const decision = this.gate(call)
     if (decision.kind !== 'ask') return decision
 
@@ -396,11 +415,11 @@ export class Cordon {
       exposure: this.exposure?.source ?? null,
       policy: policyHash(this.policy),
       turn: this.turn,
-      reads: this.reads,
+      reads: this.readIds.length,
     }
     const binding = digest(canonical([
       this.sessionId, call.tool, call.args ?? {}, context, this.exposure, this.unredacted, this.cert,
-      digest(canonical(this.taint.toJSON())),
+      this.readIds, digest(canonical(this.taint.toJSON())),
     ]))
     const id = binding.slice(0, 16)
     const callKey = approvalId(this.sessionId, call)
@@ -483,7 +502,7 @@ export class Cordon {
    */
   markUnredacted(): void {
     this.unredacted = true
-    this.reads++
+    this.readIds = noteRead(this.readIds)
     this.persist()
   }
 
@@ -625,7 +644,7 @@ export class Cordon {
       turn: this.turn,
       taint: this.taint,
       unredacted: this.unredacted,
-      reads: this.reads,
+      readIds: this.readIds,
       directive: this.directive,
       exposure: this.exposure,
       userAtoms: this.userAtoms,
@@ -742,4 +761,16 @@ export function changed(earlier: ApprovalContext | null, now: ApprovalContext): 
 
 function digest(text: string): string {
   return createHash('sha256').update(text, 'utf8').digest('hex')
+}
+
+/**
+ * A new read, as an id no other process can repeat: time first, so the kept
+ * tail is the newest, then randomness, so two processes reading at once add
+ * two ids and a merge keeps both. A counter merged by its maximum lost one
+ * of two concurrent reads, and an approval given between them survived the
+ * second (Codex).
+ */
+function noteRead(ids: readonly string[]): string[] {
+  const id = `${Date.now().toString(36)}-${randomBytes(6).toString('hex')}`
+  return [...ids, id].sort().slice(-MAX_READ_IDS)
 }

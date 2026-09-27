@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { readdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { ToolCall } from '../core/types.js'
 import { makeDirectory } from '../core/mkdir.js'
@@ -162,6 +162,12 @@ export class ApprovalStore {
     // The approval carries the binding it was given under, so a retry in a
     // different context cannot take it.
     writeFileSync(this.approvedPath(id), request.binding, { mode: 0o600 })
+    // Retired while this ran: the approval would be void anyway, and the
+    // owner must not read "approved once" about a question that is gone.
+    if (this.read(id) === null) {
+      this.retire(id)
+      return null
+    }
     return { tool: request.tool, reason: request.reason, args: request.args, ...(request.context === undefined ? {} : { context: request.context }) }
   }
 
@@ -192,6 +198,13 @@ export class ApprovalStore {
       const path = this.approvedPath(id)
       const fresh = Date.now() - statSync(path).mtimeMs <= APPROVAL_TTL_MS
       const given = readFileSync(path, 'utf8')
+      // An approval is only as good as its question. One whose question was
+      // retired, by a retry under a newer context racing the owner's
+      // `approve`, is void however it got written (Codex).
+      if (!existsSync(this.pendingPath(id))) {
+        this.retire(id)
+        return { taken: false, void: false }
+      }
       if (fresh && given !== binding) {
         this.retire(id)
         return { taken: false, void: true }

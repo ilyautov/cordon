@@ -201,6 +201,17 @@ describe('reading a file does not escalate the actions that follow', () => {
   })
 })
 
+/**
+ * The provenance axis alone. A note with no destination answers to the
+ * exposure rule after any read, before quarantine could show what provenance
+ * found; these tests are about what provenance finds.
+ */
+function provenanceOnly(): ReturnType<typeof env> {
+  const shared = env()
+  shared.policy.exposure = false
+  return shared
+}
+
 describe('provenance works on the source text of the file', () => {
   // The model now reads the file whole, including the layer that would have
   // been cut out of a web page. So what must be remembered is the source text:
@@ -215,7 +226,7 @@ describe('provenance works on the source text of the file', () => {
   const VISIBLE = 'The section about supplies, written entirely by the supply team'
 
   it('an argument from the visible part of the file is found', () => {
-    const shared = env()
+    const shared = provenanceOnly()
     handle(
       { kind: 'PostToolUse', sessionId: 'p1', call: { tool: 'Read', args: { file_path: '/proj/doc.md' } },
         response: `# ${VISIBLE}\nThe text.` },
@@ -232,7 +243,7 @@ describe('provenance works on the source text of the file', () => {
   })
 
   it('an argument from the hidden part of the file is found too', () => {
-    const shared = env()
+    const shared = provenanceOnly()
     handle(
       { kind: 'PostToolUse', sessionId: 'p2', call: { tool: 'Read', args: { file_path: '/proj/doc.md' } },
         response: DOC },
@@ -254,7 +265,7 @@ describe('provenance works on the source text of the file', () => {
     // The operator names the destination: without it the exposure rule would
     // escalate the call on the fact of the read, and the test would measure
     // the mark rather than what was remembered.
-    const shared = env()
+    const shared = provenanceOnly()
     handle({ kind: 'UserPromptSubmit', sessionId: 'p3', prompt: 'record the plan under entry 44556677' }, shared)
     handle(
       { kind: 'PostToolUse', sessionId: 'p3', call: { tool: 'WebFetch', args: { url: 'https://shop.example' } },

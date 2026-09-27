@@ -228,7 +228,11 @@ describe('the MCP gateway', () => {
 
   it('rewrites a tainted argument before the call reaches the upstream', async () => {
     const env = withCallLog()
-    const gateway = start(basePolicy(), env)
+    // The operator's task names the item: a call the task does not aim
+    // answers to the exposure rule before any rewrite.
+    const policy = basePolicy()
+    policy.task = 'keep the price of item 11223344 in line with the page'
+    const gateway = start(policy, env)
     gateway.send({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'poisoned_page', arguments: {} } })
     await gateway.next()
 

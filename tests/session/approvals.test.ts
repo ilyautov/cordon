@@ -1,4 +1,4 @@
-import { mkdtempSync, utimesSync } from 'node:fs'
+import { mkdtempSync, unlinkSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -168,6 +168,20 @@ describe('ApprovalStore: an approval holds only in the context it was given in',
     approvals.approve(a.slice(0, 16))
     expect(approvals.take('b'.repeat(16), 'b'.repeat(64)).taken).toBe(false)
     expect(approvals.take(a.slice(0, 16), a).taken).toBe(true)
+  })
+})
+
+describe('ApprovalStore: a retired question stays retired', () => {
+  it('an approval written after its question was retired is not taken', () => {
+    // Codex: approve() read the question, another process retired it, and
+    // approve() then wrote the approval anyway; the next retry took it.
+    const approvals = store()
+    const a = 'a'.repeat(64)
+    const id = a.slice(0, 16)
+    approvals.request(id, { tool: CALL.tool, reason: 'r', binding: a })
+    writeFileSync(approvals.approvedPath(id), a, { mode: 0o600 })
+    unlinkSync(approvals.pendingPath(id))
+    expect(approvals.take(id, a).taken).toBe(false)
   })
 })
 
