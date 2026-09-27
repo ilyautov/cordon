@@ -4,6 +4,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versions follo
 
 ## [Unreleased]
 
+A second live model in the AgentDojo write-up: Poolside's Laguna S 2.1, free through OpenRouter, on banking with five of the nine injection tasks. Without a defence, 30 of 80 attacks succeeded and 14 of 16 tasks were done. With the directory policy, 0 of 80 succeeded and 10 of 16 tasks were done. The oracle had predicted five of the six lost tasks. See `docs/agentdojo.md`.
+
 An argument can be declared `controlled`: an amount, a date, a status. Under the exposure mark, such a field must hold a value the user assigned to it by name in their current message, such as `amount to 1200` or `status to 'Approved'`. That holds even when the target was named or vouched for by a lookup. The battery's `lookup/right-id-wrong-amount` got through because the lookup vouched for the right payment and nothing answered for the amount a notice talked the agent into. With the amount declared controlled, the new row `lookup/right-id-wrong-amount-controlled` is stopped. Codex and Kimi shaped the rule in two reviews:
 
 - A number anywhere in the message is not an assignment, and neither is a value with no connector.
