@@ -8,9 +8,9 @@
 
 **Ready:** a core with adapters for **Claude Code** and **Gemini CLI**, a gateway for **MCP hosts**, and middleware for **LangChain** agents.
 
-**Measured:** 1489 tests · 25 pinned attack vectors · 9 legitimate documents · 2 runtime dependencies.
+**Measured:** 1494 tests · 25 pinned attack vectors · 9 legitimate documents · 2 runtime dependencies.
 
-**AgentDojo:** with Cordon, an agent that obeys every injection got 0 attacks through on all four suites; without it, 39–100% succeeded. Utility depends on the policy: 100% in interactive mode at 0.3–1.6 questions per task, 14–70% on a strict autonomous policy. The methodology and where Cordon loses are in [docs/agentdojo.md](docs/agentdojo.md).
+**AgentDojo:** with Cordon, an agent that obeys every injection got 0 attacks through on all four suites; without it, 39–100% succeeded. Utility depends on the policy: 96 of 97 tasks in interactive mode at 0.25–1.6 questions per task, 14–75% per suite on a strict autonomous policy. On a live model that follows injections, Laguna S 2.1, 0 of 80 attacks got through against 30 of 80 undefended. The methodology and where Cordon loses are in [docs/agentdojo.md](docs/agentdojo.md).
 
 **Install:** [Claude Code](docs/install.md) · [Gemini CLI](docs/install-gemini.md) · [MCP hosts](docs/install-mcp.md) · [LangChain](docs/install-langchain.md)
 

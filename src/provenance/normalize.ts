@@ -30,6 +30,10 @@ export function shingles(normalized: string, step: number = SHINGLE_STEP): Set<s
   return result
 }
 
+/** One group: up to six letters and digits, a digit among them. */
+const GROUP = String.raw`(?=[a-z]{0,5}\d)[a-z0-9]{1,6}(?![a-z0-9])`
+const GROUPED = new RegExp(String.raw`(?<![\p{L}\p{N}])${GROUP}(?: ${GROUP})+(?![\p{L}\p{N}])`, 'giu')
+
 /**
  * Tokens that carry identity and are therefore dangerous on their own, even
  * when short: links, paths, e-mail addresses, long alphanumeric identifiers.
@@ -80,6 +84,17 @@ export function atoms(text: string): string[] {
     // yields `/../etc/x`), and folding that would invent an absolute one.
     const relativeTail = match.index > 0 && shell[match.index - 1] === '.'
     if (!relativeTail) for (const other of otherSpellings(path)) found.add(other)
+  }
+  // An identifier printed in groups: an IBAN, a card or a phone number. The
+  // agent copies it with the spaces or without them, and each group alone is
+  // too short to be an atom, so the joined spelling is the atom on every
+  // side: the page, the call, the user's own message. Every group holds a
+  // digit, which keeps words out ("IBAN DE89 …" starts at DE89), and groups
+  // are joined by one space only: a hyphenated date already is one token
+  // below, and a line break ends a number.
+  for (const match of source.matchAll(GROUPED)) {
+    const joined = match[0].replace(/ /gu, '').toLowerCase()
+    if (joined.length >= 8) found.add(joined)
   }
   for (const match of source.matchAll(/\b[a-z0-9][a-z0-9_-]{7,}\b/giu)) {
     const token = match[0].toLowerCase()

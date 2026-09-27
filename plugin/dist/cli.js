@@ -8201,6 +8201,8 @@ var SHINGLE_STEP = 8;
 function normalize(text) {
   return text.normalize("NFKC").toLowerCase().replace(/\s+/gu, " ").trim();
 }
+var GROUP = String.raw`(?=[a-z]{0,5}\d)[a-z0-9]{1,6}(?![a-z0-9])`;
+var GROUPED = new RegExp(String.raw`(?<![\p{L}\p{N}])${GROUP}(?: ${GROUP})+(?![\p{L}\p{N}])`, "giu");
 function atoms(text) {
   const found2 = /* @__PURE__ */ new Set();
   const source = text.normalize("NFKC");
@@ -8222,6 +8224,10 @@ function atoms(text) {
     found2.add(path);
     const relativeTail = match.index > 0 && shell[match.index - 1] === ".";
     if (!relativeTail) for (const other of otherSpellings(path)) found2.add(other);
+  }
+  for (const match of source.matchAll(GROUPED)) {
+    const joined = match[0].replace(/ /gu, "").toLowerCase();
+    if (joined.length >= 8) found2.add(joined);
   }
   for (const match of source.matchAll(/\b[a-z0-9][a-z0-9_-]{7,}\b/giu)) {
     const token = match[0].toLowerCase();

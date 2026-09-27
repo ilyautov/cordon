@@ -119,6 +119,30 @@ describe('atoms', () => {
   it("a link's case does not save it from matching", () => {
     expect(atoms('HTTPS://EVIL.EXAMPLE/A')).toContain('https://evil.example/a')
   })
+
+  it('joins an identifier written in groups', () => {
+    // An IBAN or a phone number is printed in groups, and the agent copies it
+    // into a call with or without the spaces. Written grouped it gave no atom
+    // at all: every group is shorter than the long-identifier rule and the
+    // whole is shorter than a shingle. taintgate's comparison without
+    // separators pointed at it (competitor review, September 2026).
+    expect(atoms('Pay to DE89 3704 0044 0532 0130 00 today')).toContain('de89370400440532013000')
+    expect(atoms('call +1 415 555 0132 now')).toContain('14155550132')
+    expect(atoms('card 4111 1111 1111 1111.')).toContain('4111111111111111')
+  })
+
+  it('a grouped identifier meets its unbroken spelling', () => {
+    const grouped = atoms('IBAN: US13 3000 0001 2121 2121 212')
+    const unbroken = atoms('US133000000121212121212')
+    expect(grouped.filter((atom) => unbroken.includes(atom))).not.toEqual([])
+  })
+
+  it('does not join words, short numbers or numbers across a line', () => {
+    expect(atoms('Room 12 on floor 3, 2 guests')).toEqual([])
+    expect(atoms('1 200 000 people')).toEqual([])
+    expect(atoms('see page 1234\n5678 for more')).toEqual([])
+    expect(atoms('meet at 10 00 on 12 05')).toEqual([])
+  })
 })
 
 describe('hash', () => {
