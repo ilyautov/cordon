@@ -13,7 +13,7 @@
     "provenance",
     "sanitizer"
   ],
-  "homepage": "https://github.com/ilyautov/cordon#readme",
+  "homepage": "https://cordon.aifrontier.tech",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/ilyautov/cordon.git"
