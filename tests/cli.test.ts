@@ -567,6 +567,37 @@ describe('records of who allowed what', () => {
     expect(lines(elsewhere).some((line) => line.decision === 'policy-applied')).toBe(true)
   })
 
+  it('policy apply with a new journal nobody can write is not applied, and the old journal says so', () => {
+    // Codex, third review: the new journal was written first, its failure
+    // stopped the loop, and the SIEM on the old one never saw the change —
+    // with the new policy in force and every later event dropped. Kimi: a
+    // policy whose journal cannot be written is not left in force.
+    const { home, journal } = homeWithJournal()
+    const before = readFileSync(join(home, 'policy.yaml'), 'utf8')
+    const blocker = join(home, 'not-a-dir')
+    writeFileSync(blocker, '')
+    const drafted = join(mkdtempSync(join(tmpdir(), 'cordon-draft-')), 'p.yaml')
+    writeFileSync(drafted, `mode: interactive\nnotify:\n  file: ${join(blocker, 'events.jsonl')}\n`)
+    const { status, stderr } = run(['policy', 'apply', drafted], '', { CORDON_HOME: home })
+    expect(status).toBe(1)
+    expect(stderr).toContain('nothing was applied')
+    expect(readFileSync(join(home, 'policy.yaml'), 'utf8')).toBe(before)
+    const decisions = lines(journal).map((line) => line.decision)
+    expect(decisions).toContain('policy-apply-failed')
+  })
+
+  it('policy apply names where the journal goes next', () => {
+    // Kimi, third review: a SIEM tailing the old file otherwise sees the
+    // change and then silence.
+    const { home, journal } = homeWithJournal()
+    const elsewhere = join(mkdtempSync(join(tmpdir(), 'cordon-elsewhere-')), 'next.jsonl')
+    const drafted = join(mkdtempSync(join(tmpdir(), 'cordon-draft-')), 'p.yaml')
+    writeFileSync(drafted, `mode: interactive\nnotify:\n  file: ${elsewhere}\n`)
+    expect(run(['policy', 'apply', drafted], '', { CORDON_HOME: home }).status).toBe(0)
+    const event = lines(journal).find((line) => line.decision === 'policy-applied')
+    expect(event?.reason).toContain(elsewhere)
+  })
+
   it('policy apply refuses a file with warnings unless they are accepted by name', () => {
     const { home } = homeWithJournal()
     const before = readFileSync(join(home, 'policy.yaml'), 'utf8')

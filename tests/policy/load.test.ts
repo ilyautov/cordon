@@ -2,7 +2,7 @@ import { mkdtempSync, writeFileSync, mkdirSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { loadPolicy } from '../../src/policy/load.js'
+import { loadPolicy, parsePolicy } from '../../src/policy/load.js'
 import { DEFAULT_POLICY } from '../../src/policy/defaults.js'
 import { renderPolicy } from '../../src/policy/templates.js'
 
@@ -360,6 +360,20 @@ describe('the policy: argument roles and the task mandate', () => {
     // A bare * would be the exposure rule switched off under another name.
     expect(() => load('destinations:\n  - "*"\n')).toThrow(/matches everything/)
     expect(() => load('destinations:\n  - "**"\n')).toThrow(/matches everything/)
+    // Codex, third review: the gate reads a pattern through NFKC, which
+    // makes a fullwidth asterisk the bare one.
+    expect(() => load('destinations:\n  - "\\uFF0A"\n')).toThrow(/matches everything/)
+  })
+
+  it('a destination is stored the way the gate reads it', () => {
+    expect(load('destinations:\n  - " *@ACME.example "\n').destinations).toEqual(['*@acme.example'])
+  })
+
+  it('a policy text parses the same as its file', () => {
+    // `policy apply` reads the file once and installs what it checked.
+    const body = 'mode: autonomous\nprofile:\n  effects: [read, create]\n'
+    expect(parsePolicy(body, 'drafted.yaml')).toEqual(load(body))
+    expect(() => parsePolicy('mode: [', 'drafted.yaml')).toThrow(/drafted\.yaml/)
   })
 
   it('a tool name inherited from the prototype is not a declaration', () => {

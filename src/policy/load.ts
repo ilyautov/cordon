@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { isAbsolute, join } from 'node:path'
 import { parse } from 'yaml'
+import { destinationPattern } from './destinations.js'
 import type { ArgumentRole, EffectClass, PresenceMode, SourceView } from '../core/types.js'
 import { DEFAULT_POLICY, type Budget, type Lookup, type Policy } from './defaults.js'
 
@@ -41,6 +42,16 @@ export function loadPolicyFile(path: string): Policy {
     throw new Error(`could not read ${path}: ${(error as Error).message}`)
   }
 
+  return parsePolicy(raw, path)
+}
+
+/**
+ * Parses and validates a policy's text; `path` only names it in errors.
+ * `policy apply` reads a drafted file once and installs the very bytes it
+ * checked: read twice, the drafting agent could swap the file in between
+ * (Codex, Kimi).
+ */
+export function parsePolicy(raw: string, path: string): Policy {
   let parsed: unknown
   try {
     parsed = parse(raw)
@@ -113,11 +124,14 @@ function validate(parsed: unknown, path: string): Policy {
   }
 
   if ('destinations' in input) {
-    policy.destinations = asStrings(input.destinations, `${path}: destinations`)
+    // Stored the way the gate reads it, so the checks below and lint see
+    // the pattern the gate will match: a fullwidth asterisk is a bare one
+    // after NFKC (Codex).
+    policy.destinations = asStrings(input.destinations, `${path}: destinations`).map(destinationPattern)
     // A bare * would name every destination there is: the mandate would be
     // the exposure rule switched off under another name.
     for (const entry of policy.destinations) {
-      if (entry.trim().replace(/^\*+/u, '') === '') throw new Error(`${path}: destinations: ${entry} matches everything`)
+      if (entry.replace(/^\*+/u, '') === '') throw new Error(`${path}: destinations: ${entry} matches everything`)
     }
   }
 
@@ -388,4 +402,3 @@ function asBudgets(value: unknown, where: string): Budget[] {
     return { effect: effect as EffectClass, limit, per: per as Budget['per'] }
   })
 }
-

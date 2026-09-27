@@ -61,6 +61,26 @@ describe('explain', () => {
     expect(out).toMatch(/every session/)
   })
 
+  it('says bounds do not reach inside a shell command', () => {
+    // Codex, third review: "Hosts: only X" next to a granted shell is false;
+    // bounds read recognized path and URL fields, never a command's text.
+    const out = text(policy({ profile: { effects: ['read', 'exec'], resources: { paths: ['/safe/'], hosts: ['safe.example'] } } }))
+    expect(out).toMatch(/shell command/)
+    expect(out).toMatch(/not bounded/)
+  })
+
+  it('names what tools return and whether the footer is shown', () => {
+    // Kimi, third review: two fields the read-back never mentioned.
+    const out = text(policy({ toolsReturn: { Read: 'rendered' }, output: { footer: false } }))
+    expect(out).toMatch(/Read returns rendered/)
+    expect(out).toMatch(/footer.*off/i)
+  })
+
+  it('says a read of something you never named is gated too, after an untrusted read', () => {
+    // Kimi, third review: the paragraph said only calls beyond reading were.
+    expect(text(policy())).toMatch(/a read of a resource you never named/)
+  })
+
   it('says the exposure rule is off, when it is', () => {
     expect(text(policy({ exposure: false }))).toMatch(/exposure rule is OFF/)
   })
@@ -79,6 +99,40 @@ describe('lint', () => {
     expect(found(policy({ destinations: ['*.com'] }))).toMatch(/warning: .*\*\.com/)
     expect(found(policy({ destinations: ['*@gmail.com'] }))).toMatch(/warning: .*\*@gmail\.com/)
     expect(found(policy({ destinations: ['*@acme.example'] }))).not.toMatch(/warning/)
+  })
+
+  it('warns on a public provider however the pattern is spelled', () => {
+    // Codex, third review: the gate normalizes a pattern before matching, so
+    // the warning has to read the same normalized pattern.
+    expect(found(policy({ destinations: [' *@GMAIL.com '] }))).toMatch(/warning: .*public provider/)
+    expect(found(policy({ destinations: ['*gmail.com'] }))).toMatch(/warning: .*public provider/)
+    expect(found(policy({ destinations: ['*@mail.gmail.com'] }))).toMatch(/warning: .*public provider/)
+  })
+
+  it('warns on a declaration that takes effects away from a built-in tool', () => {
+    // Codex, third review: `Bash: [read]` makes every shell command a read,
+    // and the default read-only profile then lets `rm -rf` through.
+    expect(found(policy({ tools: { Bash: ['read'] } }))).toMatch(/warning: .*Bash.*exec/)
+    expect(found(policy({ tools: { Write: ['create', 'update'] } }))).not.toMatch(/warning/)
+    expect(found(policy({ tools: { WebFetch: ['read', 'network-egress', 'export'] } }))).not.toMatch(/warning/)
+  })
+
+  it('does not claim every shell command is refused after a read', () => {
+    const out = found(policy({ mode: 'autonomous', profile: { effects: ['read', 'exec'], resources: { paths: [], hosts: [] } } }))
+    expect(out).toMatch(/warning: .*exec/)
+    expect(out).not.toMatch(/every one is refused/)
+  })
+
+  it('warns on a file tool declared as returning a rendered view', () => {
+    // The file then comes back rendered, and a write-back destroys it.
+    expect(found(policy({ toolsReturn: { Read: 'rendered' } }))).toMatch(/warning: .*Read/)
+  })
+
+  it('notes a shell granted in interactive mode, and writes with no path bound', () => {
+    // Kimi, third review.
+    const out = found(policy({ mode: 'interactive', profile: { effects: ['read', 'update', 'exec'], resources: { paths: [], hosts: ['api.example.com'] } } }))
+    expect(out).toMatch(/note: .*exec/)
+    expect(out).toMatch(/note: .*no paths/)
   })
 
   it('warns on an autonomous policy with no journal', () => {

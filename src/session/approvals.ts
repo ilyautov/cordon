@@ -1,5 +1,5 @@
-import { createHash } from 'node:crypto'
-import { existsSync, readdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
+import { createHash, randomBytes } from 'node:crypto'
+import { existsSync, readdirSync, readFileSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { ToolCall } from '../core/types.js'
 import { makeDirectory } from '../core/mkdir.js'
@@ -172,17 +172,6 @@ export class ApprovalStore {
     return { tool: request.tool, reason: request.reason, args: request.args, ...(request.context === undefined ? {} : { context: request.context }) }
   }
 
-  /** Takes back an approval given a moment ago; the question keeps waiting. */
-  withdraw(id: string): void {
-    try {
-      unlinkSync(this.approvedPath(id))
-    } catch (error) {
-      // Gone already is withdrawn. Anything else must not leave an approval
-      // standing that the owner was told was not given.
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
-    }
-  }
-
   private stale(path: string): boolean {
     try {
       return Date.now() - statSync(path).mtimeMs > APPROVAL_TTL_MS
@@ -206,33 +195,44 @@ export class ApprovalStore {
    */
   take(id: string, binding: string): Taken {
     if (!ID.test(id)) return { taken: false, void: false }
+    // The approval is claimed first, by a rename only one process can win,
+    // and its question is looked for only after. Looked for before, a
+    // retirement and a late approval could both land in between, and the
+    // late approval was taken with no question behind it (Codex). Claimed
+    // first, a retirement either happened before the look, and nothing is
+    // taken, or after it, and the take came first.
+    const claimed = join(this.dir, `${id}.taking.${process.pid}.${randomBytes(4).toString('hex')}`)
     try {
-      const path = this.approvedPath(id)
-      const fresh = Date.now() - statSync(path).mtimeMs <= APPROVAL_TTL_MS
-      const given = readFileSync(path, 'utf8')
-      // An approval is only as good as its question. One whose question was
-      // retired, by a retry under a newer context racing the owner's
-      // `approve`, is void however it got written (Codex).
-      if (!existsSync(this.pendingPath(id))) {
-        this.retire(id)
-        return { taken: false, void: false }
-      }
-      if (fresh && given !== binding) {
-        this.retire(id)
-        return { taken: false, void: true }
-      }
-      unlinkSync(path)
-      try {
-        unlinkSync(this.pendingPath(id))
-      } catch {
-        // The request is gone already; the approval was the thing to take.
-      }
-      return { taken: fresh, void: false }
+      renameSync(this.approvedPath(id), claimed)
     } catch {
       // No approval, or another retry took it first: the call is refused.
       return { taken: false, void: false }
     }
+    try {
+      const fresh = Date.now() - statSync(claimed).mtimeMs <= APPROVAL_TTL_MS
+      const given = readFileSync(claimed, 'utf8')
+      // An approval is only as good as its question. One whose question was
+      // retired, by a retry under a newer context racing the owner's
+      // `approve`, is void however it got written (Codex).
+      if (!existsSync(this.pendingPath(id))) return { taken: false, void: false }
+      if (fresh && given !== binding) {
+        this.retire(id)
+        return { taken: false, void: true }
+      }
+      try {
+        unlinkSync(this.pendingPath(id))
+      } catch {
+        // Retired a moment after the look: the take came first.
+      }
+      return { taken: fresh, void: false }
+    } catch {
+      // The claimed file could not be read: nothing is taken.
+      return { taken: false, void: false }
+    } finally {
+      rmSync(claimed, { force: true })
+    }
   }
+
 
   /**
    * Retires every other question about the same call: asked under an earlier
@@ -290,7 +290,8 @@ export class ApprovalStore {
       return
     }
     for (const name of names) {
-      const id = name.replace(/\.(?:request\.json|approved)$/u, '')
+      // A claimed approval left by a process that died mid-take is swept too.
+      const id = name.replace(/\.(?:request\.json|approved|taking\.\d+\.[0-9a-f]{8})$/u, '')
       if (id === name || !ID.test(id)) continue
       if (this.stale(join(this.dir, name))) {
         try {

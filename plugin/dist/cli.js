@@ -7367,7 +7367,7 @@ var require_dist = __commonJS({
 });
 
 // src/cli.ts
-import { accessSync as accessSync4, appendFileSync as appendFileSync2, constants as constants4, existsSync as existsSync2, mkdtempSync, readdirSync as readdirSync8, readFileSync as readFileSync7, realpathSync as realpathSync3, renameSync as renameSync5, rmSync as rmSync5, writeFileSync as writeFileSync7 } from "node:fs";
+import { accessSync as accessSync4, appendFileSync as appendFileSync2, constants as constants4, existsSync as existsSync2, mkdtempSync, readdirSync as readdirSync8, readFileSync as readFileSync7, realpathSync as realpathSync3, renameSync as renameSync6, rmSync as rmSync6, writeFileSync as writeFileSync7 } from "node:fs";
 import { homedir as homedir6, tmpdir, userInfo } from "node:os";
 import { dirname as dirname4, join as join15 } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -7430,6 +7430,11 @@ import { readFileSync } from "node:fs";
 import { homedir as homedir2 } from "node:os";
 import { isAbsolute as isAbsolute2, join } from "node:path";
 
+// src/policy/destinations.ts
+function destinationPattern(entry) {
+  return entry.trim().normalize("NFKC").toLowerCase();
+}
+
 // src/policy/defaults.ts
 var DEFAULT_POLICY = {
   mode: "autonomous",
@@ -7477,6 +7482,9 @@ function loadPolicyFile(path) {
     if (error.code === "ENOENT") return structuredClone(DEFAULT_POLICY);
     throw new Error(`could not read ${path}: ${error.message}`);
   }
+  return parsePolicy(raw, path);
+}
+function parsePolicy(raw, path) {
   let parsed;
   try {
     parsed = (0, import_yaml.parse)(raw);
@@ -7537,9 +7545,9 @@ function validate(parsed, path) {
     policy.budgets = asBudgets(input["budgets"], `${path}: budgets`);
   }
   if ("destinations" in input) {
-    policy.destinations = asStrings(input.destinations, `${path}: destinations`);
+    policy.destinations = asStrings(input.destinations, `${path}: destinations`).map(destinationPattern);
     for (const entry of policy.destinations) {
-      if (entry.trim().replace(/^\*+/u, "") === "") throw new Error(`${path}: destinations: ${entry} matches everything`);
+      if (entry.replace(/^\*+/u, "") === "") throw new Error(`${path}: destinations: ${entry} matches everything`);
     }
   }
   if ("notify" in input) {
@@ -7733,7 +7741,7 @@ function asBudgets(value, where) {
 }
 
 // src/cordon.ts
-import { createHash as createHash7, randomBytes as randomBytes4 } from "node:crypto";
+import { createHash as createHash7, randomBytes as randomBytes5 } from "node:crypto";
 
 // src/core/types.ts
 function humanSeesRendered(source) {
@@ -8004,6 +8012,9 @@ function classify(call, fromPolicy) {
     };
   }
   return { effects: [...declared], classified: true, reason: "" };
+}
+function builtinEffects(tool) {
+  return declaredFor(BUILTIN, tool) ?? null;
 }
 
 // src/gate/memory.ts
@@ -8655,6 +8666,14 @@ function decide(call, ctx) {
   if (exposedToo) {
     return escalate(ctx, ctx.exposure?.memory === true ? "memory-carry" : "exposure", exposedToo, ctx.exposure?.source);
   }
+  if (verdict.effects.includes("exec")) {
+    return escalate(
+      ctx,
+      "provenance",
+      `an untrusted fragment would be cut out of a shell command${origin(blamedLabels)}; it is not run with a piece cut out`,
+      blamed
+    );
+  }
   return {
     kind: "rewrite",
     rule: "provenance",
@@ -8842,7 +8861,7 @@ function boundBy(tool, own2, ctx) {
 function inMandate(value, mandate) {
   const whole = value.trim().normalize("NFKC").toLowerCase();
   return mandate.some((entry) => {
-    const pattern = entry.trim().normalize("NFKC").toLowerCase();
+    const pattern = destinationPattern(entry);
     return pattern.startsWith("*") ? whole.endsWith(pattern.replace(/^\*+/u, "")) : whole === pattern;
   });
 }
@@ -12128,8 +12147,8 @@ function isEntry(value) {
 }
 
 // src/session/approvals.ts
-import { createHash as createHash3 } from "node:crypto";
-import { existsSync, readdirSync as readdirSync2, readFileSync as readFileSync3, statSync as statSync2, unlinkSync, writeFileSync as writeFileSync2 } from "node:fs";
+import { createHash as createHash3, randomBytes as randomBytes2 } from "node:crypto";
+import { existsSync, readdirSync as readdirSync2, readFileSync as readFileSync3, renameSync as renameSync3, rmSync as rmSync2, statSync as statSync2, unlinkSync, writeFileSync as writeFileSync2 } from "node:fs";
 import { join as join4 } from "node:path";
 var APPROVAL_TTL_MS = 60 * 60 * 1e3;
 var ID = /^[0-9a-f]{16}$/u;
@@ -12194,14 +12213,6 @@ var ApprovalStore = class {
     }
     return { tool: request.tool, reason: request.reason, args: request.args, ...request.context === void 0 ? {} : { context: request.context } };
   }
-  /** Takes back an approval given a moment ago; the question keeps waiting. */
-  withdraw(id) {
-    try {
-      unlinkSync(this.approvedPath(id));
-    } catch (error) {
-      if (error.code !== "ENOENT") throw error;
-    }
-  }
   stale(path) {
     try {
       return Date.now() - statSync2(path).mtimeMs > APPROVAL_TTL_MS;
@@ -12224,19 +12235,20 @@ var ApprovalStore = class {
    */
   take(id, binding) {
     if (!ID.test(id)) return { taken: false, void: false };
+    const claimed = join4(this.dir, `${id}.taking.${process.pid}.${randomBytes2(4).toString("hex")}`);
     try {
-      const path = this.approvedPath(id);
-      const fresh = Date.now() - statSync2(path).mtimeMs <= APPROVAL_TTL_MS;
-      const given = readFileSync3(path, "utf8");
-      if (!existsSync(this.pendingPath(id))) {
-        this.retire(id);
-        return { taken: false, void: false };
-      }
+      renameSync3(this.approvedPath(id), claimed);
+    } catch {
+      return { taken: false, void: false };
+    }
+    try {
+      const fresh = Date.now() - statSync2(claimed).mtimeMs <= APPROVAL_TTL_MS;
+      const given = readFileSync3(claimed, "utf8");
+      if (!existsSync(this.pendingPath(id))) return { taken: false, void: false };
       if (fresh && given !== binding) {
         this.retire(id);
         return { taken: false, void: true };
       }
-      unlinkSync(path);
       try {
         unlinkSync(this.pendingPath(id));
       } catch {
@@ -12244,6 +12256,8 @@ var ApprovalStore = class {
       return { taken: fresh, void: false };
     } catch {
       return { taken: false, void: false };
+    } finally {
+      rmSync2(claimed, { force: true });
     }
   }
   /**
@@ -12299,7 +12313,7 @@ var ApprovalStore = class {
       return;
     }
     for (const name of names2) {
-      const id = name.replace(/\.(?:request\.json|approved)$/u, "");
+      const id = name.replace(/\.(?:request\.json|approved|taking\.\d+\.[0-9a-f]{8})$/u, "");
       if (id === name || !ID.test(id)) continue;
       if (this.stale(join4(this.dir, name))) {
         try {
@@ -12371,7 +12385,7 @@ function checked(id) {
 
 // src/session/pins.ts
 import { createHash as createHash4 } from "node:crypto";
-import { readdirSync as readdirSync3, readFileSync as readFileSync4, renameSync as renameSync3, rmSync as rmSync2, writeFileSync as writeFileSync3 } from "node:fs";
+import { readdirSync as readdirSync3, readFileSync as readFileSync4, renameSync as renameSync4, rmSync as rmSync3, writeFileSync as writeFileSync3 } from "node:fs";
 import { join as join5 } from "node:path";
 function serverId(command) {
   return createHash4("sha256").update(JSON.stringify(command), "utf8").digest("hex").slice(0, 24);
@@ -12416,7 +12430,7 @@ var PinStore = class {
     const path = this.path(command);
     const temp = `${path}.${process.pid}.tmp`;
     writeFileSync3(temp, JSON.stringify({ version: 1, command, tools: pins }), { encoding: "utf8", mode: 384 });
-    renameSync3(temp, path);
+    renameSync4(temp, path);
   }
   /** Drops a server's pins. Returns whether there were any. */
   forget(command) {
@@ -12426,7 +12440,7 @@ var PinStore = class {
     } catch {
       return false;
     }
-    rmSync2(path, { force: true });
+    rmSync3(path, { force: true });
     return true;
   }
   /**
@@ -12471,7 +12485,7 @@ var PinStore = class {
 };
 
 // src/session/budgets.ts
-import { createHash as createHash5, randomBytes as randomBytes2 } from "node:crypto";
+import { createHash as createHash5, randomBytes as randomBytes3 } from "node:crypto";
 import { readdirSync as readdirSync4, unlinkSync as unlinkSync2, writeFileSync as writeFileSync4 } from "node:fs";
 import { join as join6 } from "node:path";
 var WINDOW_MS = {
@@ -12491,7 +12505,7 @@ var BudgetStore = class {
   reserve(policy, budget, now = Date.now()) {
     const dir = join6(this.dir, this.keyFor(policy, budget));
     makeDirectory(dir, 448);
-    const own2 = `${now.toString(36).padStart(10, "0")}-${randomBytes2(6).toString("hex")}`;
+    const own2 = `${now.toString(36).padStart(10, "0")}-${randomBytes3(6).toString("hex")}`;
     writeFileSync4(join6(dir, own2), "", { mode: 384, flag: "wx" });
     const since = now - WINDOW_MS[budget.per];
     let counted = 0;
@@ -12516,8 +12530,8 @@ var BudgetStore = class {
 };
 
 // src/session/store.ts
-import { createHash as createHash6, randomBytes as randomBytes3 } from "node:crypto";
-import { readFileSync as readFileSync5, readdirSync as readdirSync5, renameSync as renameSync4, rmSync as rmSync3, writeFileSync as writeFileSync5 } from "node:fs";
+import { createHash as createHash6, randomBytes as randomBytes4 } from "node:crypto";
+import { readFileSync as readFileSync5, readdirSync as readdirSync5, renameSync as renameSync5, rmSync as rmSync4, writeFileSync as writeFileSync5 } from "node:fs";
 import { join as join7 } from "node:path";
 
 // src/provenance/decode.ts
@@ -12985,7 +12999,7 @@ var SessionStore = class {
    * without starting processes: two stores in one test behave exactly like
    * two hooks on a harness.
    */
-  piece = randomBytes3(8).toString("hex");
+  piece = randomBytes4(8).toString("hex");
   /**
    * The session's state, assembled from every piece of it on disk.
    *
@@ -13139,7 +13153,7 @@ var SessionStore = class {
     for (const piece of this.read.get(sessionId) ?? []) {
       if (piece === path) continue;
       try {
-        rmSync3(piece, { force: true });
+        rmSync4(piece, { force: true });
       } catch {
       }
     }
@@ -13180,7 +13194,7 @@ var SessionStore = class {
    */
   clearDraft(sessionId) {
     try {
-      rmSync3(this.draftPathFor(sessionId), { force: true });
+      rmSync4(this.draftPathFor(sessionId), { force: true });
     } catch {
     }
   }
@@ -13204,7 +13218,7 @@ function atomicWrite(dir, path, body) {
   makeDirectory(dir);
   const temp = `${path}.${process.pid}.tmp`;
   writeFileSync5(temp, body, { encoding: "utf8", mode: 384 });
-  renameSync4(temp, path);
+  renameSync5(temp, path);
 }
 function readDraft(raw) {
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return void 0;
@@ -13392,8 +13406,10 @@ var Cordon = class {
   heldTools = /* @__PURE__ */ new Map();
   /** The state key on disk. It comes from the harness, that is, from outside. */
   sessionId;
+  policyFile;
   constructor(options) {
     this.policy = options.policy;
+    this.policyFile = options.policyFile ?? null;
     this.cordonHome = options.cordonHome;
     this.notifier = stamped(options.notifier ?? (options.policy.notify.file ? new FileNotifier(options.policy.notify.file) : SILENT), policyHash(options.policy));
     this.sessionId = options.sessionId ?? "default";
@@ -13428,6 +13444,23 @@ var Cordon = class {
    * approval checked against memory alone passed after it (Codex). The hook
    * adapters start a process per event and are fresh already.
    */
+  /**
+   * Why the policy in hand is no longer the one on disk, or null. Not
+   * reloaded in place: the certificate, the pins and the questions already
+   * asked were all made under the old one, and a restart is the one
+   * boundary where all of them start over together.
+   */
+  policyMoved() {
+    if (this.policyFile === null) return null;
+    let current;
+    try {
+      current = policyHash(loadPolicyFile(this.policyFile));
+    } catch (error) {
+      return `the policy at ${this.policyFile} can no longer be read (${error.message}); nothing is done until it is fixed and Cordon restarted`;
+    }
+    if (current === policyHash(this.policy)) return null;
+    return `the policy at ${this.policyFile} changed after this Cordon started; restart it to act under the policy now in force`;
+  }
   refresh() {
     this.adopt(this.sessions.load(this.sessionId));
     this.carryMemory();
@@ -13578,6 +13611,11 @@ var Cordon = class {
    * there the policy is what should change, in the open.
    */
   gateUnattended(call) {
+    const moved = this.policyMoved();
+    if (moved !== null) {
+      this.notifier.notify({ at: (/* @__PURE__ */ new Date()).toISOString(), decision: "deny", tool: call.tool, reason: moved, source: null, ...labelled("failure") });
+      return { kind: "deny", rule: "failure", reason: moved };
+    }
     this.refresh();
     const decision = this.gate(call);
     if (decision.kind !== "ask") return decision;
@@ -13955,7 +13993,7 @@ function digest(text) {
   return createHash7("sha256").update(text, "utf8").digest("hex");
 }
 function noteRead(ids) {
-  const id = `${Date.now().toString(36)}-${randomBytes4(6).toString("hex")}`;
+  const id = `${Date.now().toString(36)}-${randomBytes5(6).toString("hex")}`;
   return [...ids, id].sort().slice(-MAX_READ_IDS);
 }
 
@@ -14128,7 +14166,7 @@ function join8(groups, left, right, excerpt) {
 }
 
 // src/session/sweep.ts
-import { lstatSync, readdirSync as readdirSync6, rmSync as rmSync4, writeFileSync as writeFileSync6 } from "node:fs";
+import { lstatSync, readdirSync as readdirSync6, rmSync as rmSync5, writeFileSync as writeFileSync6 } from "node:fs";
 import { join as join9 } from "node:path";
 var SESSION_TTL_MS = 24 * 60 * 60 * 1e3;
 var DRAFT_TTL_MS = 60 * 60 * 1e3;
@@ -14182,7 +14220,7 @@ function sweepDir(dir, ttl, keep, now, ours = OURS) {
       const stat = lstatSync(path);
       if (!stat.isFile()) continue;
       if (now - stat.mtimeMs < ttl) continue;
-      rmSync4(path, { force: true });
+      rmSync5(path, { force: true });
     } catch {
     }
   }
@@ -15040,7 +15078,12 @@ function runGateway(options) {
     const sessionId = `mcp-${createHash8("sha256").update(options.command.join(" "), "utf8").digest("hex").slice(0, 12)}-${process.pid}`;
     let cordon;
     try {
-      cordon = new Cordon({ policy: options.policy, cordonHome: options.cordonHome, sessionId });
+      cordon = new Cordon({
+        policy: options.policy,
+        cordonHome: options.cordonHome,
+        sessionId,
+        ...options.policyFile === void 0 ? {} : { policyFile: options.policyFile }
+      });
     } catch (error) {
       finish(1, `the session state is broken: ${error.message}`);
       return;
@@ -15705,6 +15748,19 @@ var PUBLIC_MAIL = /* @__PURE__ */ new Set([
   "yandex.ru",
   "ya.ru"
 ]);
+var SOURCE_TOOLS = /* @__PURE__ */ new Set([
+  "Read",
+  "Glob",
+  "Grep",
+  "NotebookRead",
+  "Bash",
+  "read_file",
+  "read_many_files",
+  "list_directory",
+  "glob",
+  "search_file_content",
+  "run_shell_command"
+]);
 function explain(policy) {
   const lines = [];
   lines.push(
@@ -15717,9 +15773,15 @@ function explain(policy) {
   const { paths, hosts } = policy.profile.resources;
   lines.push(paths.length === 0 ? "Files: anywhere the effects above reach; no path bound is set." : `Files: only under ${paths.join(", ")}.`);
   lines.push(hosts.length === 0 ? "Hosts: any; no host bound is set." : `Hosts: only ${hosts.join(", ")}.`);
+  if (granted.includes("exec") && (paths.length > 0 || hosts.length > 0)) {
+    lines.push("A shell command is not bounded by these: its text is not parsed, so it reaches any file and any host.");
+  }
   if (policy.exposure) {
     lines.push(
       "After the agent reads untrusted content (a page, a tool result), a call that acts beyond reading goes through only when every destination in it was named by you in your message" + (policy.destinations.length > 0 ? " or is on the destinations list below" : "") + (policy.mode === "interactive" ? "; otherwise you are asked." : "; otherwise it is refused until your next message.")
+    );
+    lines.push(
+      "The same holds for a read of a resource you never named (a repository, a document the page pointed at), and for any write to the agent's own configuration."
     );
   } else {
     lines.push(
@@ -15752,6 +15814,12 @@ function explain(policy) {
     const fills = Object.entries(lookup.values).map(([field3, consumers]) => `${field3} may fill ${consumers.join(", ")}`).join("; ");
     lines.push(`${tool} is a lookup: asked with a name you said (${lookup.query}), its ${lookup.key} record vouches that ${fills}.`);
   }
+  for (const [tool, view] of Object.entries(policy.toolsReturn)) {
+    lines.push(
+      view === "rendered" ? `${tool} returns rendered output: the hidden layer (invisible characters, hidden markup) is stripped from its result.` : `${tool} returns source: its result is passed as it is, with nothing stripped.`
+    );
+  }
+  if (!policy.output.footer) lines.push("The source footer under the agent's answer is off: an answer shaped by what the agent read says nothing about it.");
   for (const budget of policy.budgets ?? []) {
     lines.push(`Budget: at most ${budget.limit} ${budget.effect} calls per ${budget.per}, across every session under this policy; past it a call is refused, and no approval lifts that.`);
   }
@@ -15786,7 +15854,24 @@ function lint(policy) {
     found2.push({ level: "warning", text: "mcp.pin is off: a server can change a tool's description after you approved it" });
   }
   if (policy.mode === "autonomous" && granted.includes("exec")) {
-    found2.push({ level: "warning", text: "exec in autonomous mode: a shell command is never aimed by a name, so after an untrusted read every one is refused, and before it any one runs" });
+    found2.push({ level: "warning", text: "exec in autonomous mode: before an untrusted read any shell command runs unasked, and after one a command runs whenever what it names was named by you" });
+  }
+  if (granted.includes("exec")) {
+    found2.push({ level: "note", text: "exec is granted: a shell command's text is not parsed, so no path or host bound reaches it" });
+  }
+  for (const [tool, effects] of Object.entries(policy.tools)) {
+    const dropped = (builtinEffects(tool) ?? []).filter((effect) => !effects.includes(effect));
+    if (dropped.length > 0) {
+      found2.push({ level: "warning", text: `${tool} is declared without ${dropped.join(", ")}, which it has built in: its calls are judged as the smaller class` });
+    }
+  }
+  for (const [tool, view] of Object.entries(policy.toolsReturn)) {
+    if (view === "rendered" && SOURCE_TOOLS.has(tool)) {
+      found2.push({ level: "warning", text: `${tool} is declared as returning rendered output: the file comes back rendered, and written back it is destroyed` });
+    }
+  }
+  if (granted.some((effect) => effect === "create" || effect === "update" || effect === "delete") && policy.profile.resources.paths.length === 0) {
+    found2.push({ level: "note", text: "files are written with no paths listed: any path is writable" });
   }
   for (const effect of granted) {
     if (IRREVERSIBLE2.has(effect)) found2.push({ level: "note", text: `${effect} is granted, and it cannot be undone` });
@@ -15805,11 +15890,14 @@ function lint(policy) {
   return found2;
 }
 function broadDestination(entry) {
-  if (!entry.startsWith("*")) return null;
-  const suffix = entry.replace(/^\*+/u, "").toLowerCase();
+  const pattern = destinationPattern(entry);
+  if (!pattern.startsWith("*")) return null;
+  const suffix = pattern.replace(/^\*+/u, "");
   const at = suffix.lastIndexOf("@");
   const domain = (at >= 0 ? suffix.slice(at + 1) : suffix).replace(/^\.+/u, "");
-  if (at >= 0 && PUBLIC_MAIL.has(domain)) return "matches every mailbox at a public provider, the attacker's included";
+  for (const provider of PUBLIC_MAIL) {
+    if (domain === provider || domain.endsWith(`.${provider}`)) return "matches every mailbox at a public provider, the attacker's included";
+  }
   if (!domain.includes(".")) return "matches a whole domain zone";
   return null;
 }
@@ -15976,19 +16064,6 @@ var HARNESS_LIMITS = [
     ]
   }
 ];
-var SOURCE_TOOLS = /* @__PURE__ */ new Set([
-  "Read",
-  "Glob",
-  "Grep",
-  "NotebookRead",
-  "Bash",
-  "read_file",
-  "read_many_files",
-  "list_directory",
-  "glob",
-  "search_file_content",
-  "run_shell_command"
-]);
 var MCP_VIEW = humanSeesRendered({ kind: "tool" }) ? "rendered" : "source";
 function declaredViews(table) {
   return Object.entries(table).map(([tool, view]) => `${tool}: ${view}`).sort((a, b) => a.localeCompare(b, "en"));
@@ -16052,7 +16127,7 @@ function selfCheck() {
   } catch {
     return "broken";
   } finally {
-    rmSync5(home, { recursive: true, force: true });
+    rmSync6(home, { recursive: true, force: true });
   }
 }
 function geminiSelfCheck(home) {
@@ -16272,7 +16347,7 @@ ${USAGE}
 `);
     return 1;
   }
-  return runGateway({ command, policy, cordonHome: home });
+  return runGateway({ command, policy, cordonHome: home, policyFile: join15(home, "policy.yaml") });
 }
 function init(args) {
   const at = args.indexOf("--profile");
@@ -16477,13 +16552,7 @@ ${USAGE}
 `);
     return 2;
   }
-  const approved = store.approve(id);
-  if (approved === null) {
-    process.stderr.write(`nothing waits under ${id}: it expired or was retired while you approved it
-`);
-    return 1;
-  }
-  const recorded = ownerRecord({
+  const event = {
     at: (/* @__PURE__ */ new Date()).toISOString(),
     decision: "approval-given",
     tool: request.tool,
@@ -16494,10 +16563,17 @@ ${USAGE}
     // The rule is read back from a file: only a known one is labelled.
     ...request.context !== void 0 && Object.hasOwn(RULES, request.context.rule) ? labelled(request.context.rule) : {},
     ...declared === void 0 ? {} : { declared }
-  });
+  };
+  const recorded = ownerRecord(event);
   if (recorded !== null) {
-    store.withdraw(id);
     process.stderr.write(`cordon approve: the journal could not record the approval, so it is not given: ${visible(recorded)}
+`);
+    return 1;
+  }
+  const approved = store.approve(id);
+  if (approved === null) {
+    const corrected = ownerRecord({ ...event, at: (/* @__PURE__ */ new Date()).toISOString(), decision: "approval-lapsed", reason: "the question expired or was retired while it was being approved; nothing was approved" });
+    process.stderr.write(`nothing waits under ${id}: it expired or was retired while you approved it; nothing was approved${corrected === null ? "" : `, and the journal could not say so: ${visible(corrected)}`}
 `);
     return 1;
   }
@@ -16560,7 +16636,7 @@ ${USAGE}
   let policy;
   try {
     body = readFileSync7(file, "utf8");
-    policy = loadPolicyFile(file);
+    policy = parsePolicy(body, file);
   } catch (error) {
     process.stderr.write(`cordon policy apply: ${visible(error.message)}; nothing was applied
 `);
@@ -16583,47 +16659,66 @@ ${USAGE}
   } catch {
     previous = null;
   }
+  const journal = policy.notify.file;
+  const event = {
+    at: (/* @__PURE__ */ new Date()).toISOString(),
+    decision: "policy-applied",
+    tool: "(policy)",
+    reason: `${file} applied${warnings.length > 0 ? `, with ${warnings.length} warning${warnings.length === 1 ? "" : "s"} accepted` : ""}; the journal from now on: ${journal ?? "none"}`,
+    source: null,
+    previous,
+    ...declared === void 0 ? {} : { declared }
+  };
+  const stamp = policyHash(policy);
+  const written = [];
+  const undo = (why) => {
+    for (const target2 of written) {
+      appendRecord(target2, { ...event, at: (/* @__PURE__ */ new Date()).toISOString(), decision: "policy-apply-failed", reason: `${file} was not applied: ${why}` }, stamp);
+    }
+  };
+  for (const target2 of [.../* @__PURE__ */ new Set([oldJournal, journal])]) {
+    if (target2 === null) continue;
+    const failed = appendRecord(target2, event, stamp);
+    if (failed !== null) {
+      undo(`the journal ${target2} could not record it`);
+      process.stderr.write(`cordon policy apply: the journal ${visible(target2)} could not record the change: ${visible(failed)}; nothing was applied
+`);
+      return 1;
+    }
+    written.push(target2);
+  }
   makeDirectory(home, 448);
   const target = join15(home, "policy.yaml");
   const staged = join15(home, `.policy.yaml.${process.pid}`);
   try {
     writeFileSync7(staged, body, { mode: 384, flag: "wx" });
-    renameSync5(staged, target);
+    renameSync6(staged, target);
   } catch (error) {
-    rmSync5(staged, { force: true });
+    rmSync6(staged, { force: true });
+    undo(error.message);
     process.stderr.write(`cordon policy apply: ${visible(error.message)}; nothing was applied
 `);
     return 1;
   }
   for (const line of explain(policy)) process.stdout.write(`${visible(line)}
 `);
-  const recorded = ownerRecord({
-    at: (/* @__PURE__ */ new Date()).toISOString(),
-    decision: "policy-applied",
-    tool: "(policy)",
-    reason: `${file} applied${warnings.length > 0 ? `, with ${warnings.length} warning${warnings.length === 1 ? "" : "s"} accepted` : ""}`,
-    source: null,
-    previous,
-    ...declared === void 0 ? {} : { declared }
-  }, oldJournal);
-  if (recorded !== null) {
-    process.stderr.write(`cordon policy apply: the policy is in force, but the journal could not record it: ${visible(recorded)}
-`);
-    return 1;
-  }
   process.stdout.write(`applied: ${target}
 `);
   return 0;
 }
-function ownerRecord(event, alsoTo = null) {
+function ownerRecord(event) {
+  let policy;
   try {
-    const policy = loadPolicy(cordonHome());
-    const line = JSON.stringify({ ...event, approver: userInfo().username, policy: policyHash(policy) }) + "\n";
-    for (const file of /* @__PURE__ */ new Set([policy.notify.file, alsoTo])) {
-      if (file === null) continue;
-      makeDirectory(dirname4(file), 493);
-      appendFileSync2(file, line, "utf8");
-    }
+    policy = loadPolicy(cordonHome());
+  } catch (error) {
+    return error.message;
+  }
+  return policy.notify.file === null ? null : appendRecord(policy.notify.file, event, policyHash(policy));
+}
+function appendRecord(file, event, policy) {
+  try {
+    makeDirectory(dirname4(file), 493);
+    appendFileSync2(file, JSON.stringify({ ...event, approver: userInfo().username, policy }) + "\n", "utf8");
     return null;
   } catch (error) {
     return error.message;

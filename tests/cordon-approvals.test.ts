@@ -1,9 +1,10 @@
-import { mkdtempSync, readFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { Cordon, changed } from '../src/cordon.js'
 import { DEFAULT_POLICY, type Policy } from '../src/policy/defaults.js'
+import { loadPolicyFile } from '../src/policy/load.js'
 import { ApprovalStore } from '../src/session/approvals.js'
 
 function make(mode: Policy['mode']) {
@@ -179,6 +180,27 @@ describe('changed: what a voided question says about why', () => {
     expect(changed(base, { ...base, turn: 2 })).toMatch(/before your latest message/)
     expect(changed(base, { ...base, reads: 3 })).toMatch(/read more untrusted content/)
     expect(changed(null, base)).toMatch(/not recorded/)
+  })
+
+})
+
+describe('a long-lived instance and the policy file under it', () => {
+  it('a long-lived instance stops acting when the policy file under it changes', () => {
+    // Codex, third review: refresh reloaded the session and kept the
+    // constructor's policy, so a stricter policy applied while a gateway ran
+    // left the old rights in force, approvals included.
+    const home = mkdtempSync(join(tmpdir(), 'cordon-home-'))
+    const file = join(home, 'policy.yaml')
+    writeFileSync(file, 'mode: interactive\nprofile:\n  effects: [read]\ntools:\n  send_email: [network-egress]\n')
+    const cordon = new Cordon({ policy: loadPolicyFile(file), policyFile: file, cordonHome: home, sessionId: 's1' })
+    const first = cordon.gateUnattended(SEND)
+    new ApprovalStore(home).approve(idIn(first.kind === 'deny' ? first.reason : ''))
+    writeFileSync(file, 'mode: autonomous\nprofile:\n  effects: []\n')
+    const after = cordon.gateUnattended(SEND)
+    expect(after.kind).toBe('deny')
+    expect(after.kind === 'deny' && after.rule).toBe('failure')
+    expect(after.kind === 'deny' && after.reason).toMatch(/policy .*changed.*restart/)
+    expect(cordon.gateUnattended({ tool: 'Read', args: { file_path: '/tmp/x' } }).kind).toBe('deny')
   })
 })
 

@@ -11,8 +11,8 @@ import { humanSeesRendered, type SourceView } from './core/types.js'
 import { audit, CODES, type AuditFinding, type Severity } from './audit/audit.js'
 import { Cordon } from './cordon.js'
 import { makeDirectory } from './core/mkdir.js'
-import { loadPolicy, loadPolicyFile } from './policy/load.js'
-import { explain, lint } from './policy/explain.js'
+import { loadPolicy, loadPolicyFile, parsePolicy } from './policy/load.js'
+import { SOURCE_TOOLS, explain, lint } from './policy/explain.js'
 import type { Policy } from './policy/defaults.js'
 import { policyHash } from './policy/hash.js'
 import { labelled, type NotifyEvent } from './notify/notifier.js'
@@ -194,19 +194,6 @@ export interface DoctorReport {
   selfCheck: 'ok' | 'broken'
 }
 
-/**
- * Tools whose result the human already sees as source.
- *
- * doctor needs them in order to name a dangerous declaration: `rendered` on
- * any of these brings back the bug where writing a file that had been read
- * destroyed its markup and scripts. The declaration cannot be forbidden — it
- * is a deliberate human decision — but staying silent about it is worse.
- */
-const SOURCE_TOOLS: ReadonlySet<string> = new Set([
-  'Read', 'Glob', 'Grep', 'NotebookRead', 'Bash',
-  'read_file', 'read_many_files', 'list_directory', 'glob', 'search_file_content',
-  'run_shell_command',
-])
 
 /**
  * The effective default for an MCP tool result.
@@ -606,7 +593,7 @@ function mcp(args: string[]): Promise<number> | number {
     return 1
   }
 
-  return runGateway({ command, policy, cordonHome: home })
+  return runGateway({ command, policy, cordonHome: home, policyFile: join(home, 'policy.yaml') })
 }
 
 /**
@@ -872,16 +859,12 @@ function approveCall(args: string[]): number {
     process.stderr.write(`--as takes a name\n${USAGE}\n`)
     return 2
   }
-  const approved = store.approve(id)
-  if (approved === null) {
-    process.stderr.write(`nothing waits under ${id}: it expired or was retired while you approved it\n`)
-    return 1
-  }
   // No record, no approval: an owner's act nobody can audit afterwards is
-  // the gap this record exists to close. The approval is written first and
-  // withdrawn if the line cannot be, so the journal never shows an approval
-  // that was not given.
-  const recorded = ownerRecord({
+  // the gap this record exists to close. The line is written first, so no
+  // call can run on an approval the journal does not hold; a retry can take
+  // the approval the instant it is written, so it cannot be withdrawn after
+  // (Kimi). If the approval then fails, a second line says so.
+  const event: NotifyEvent = {
     at: new Date().toISOString(),
     decision: 'approval-given',
     tool: request.tool,
@@ -892,10 +875,16 @@ function approveCall(args: string[]): number {
     // The rule is read back from a file: only a known one is labelled.
     ...(request.context !== undefined && Object.hasOwn(RULES, request.context.rule) ? labelled(request.context.rule as Rule) : {}),
     ...(declared === undefined ? {} : { declared }),
-  })
+  }
+  const recorded = ownerRecord(event)
   if (recorded !== null) {
-    store.withdraw(id)
     process.stderr.write(`cordon approve: the journal could not record the approval, so it is not given: ${visible(recorded)}\n`)
+    return 1
+  }
+  const approved = store.approve(id)
+  if (approved === null) {
+    const corrected = ownerRecord({ ...event, at: new Date().toISOString(), decision: 'approval-lapsed', reason: 'the question expired or was retired while it was being approved; nothing was approved' })
+    process.stderr.write(`nothing waits under ${id}: it expired or was retired while you approved it; nothing was approved${corrected === null ? '' : `, and the journal could not say so: ${visible(corrected)}`}\n`)
     return 1
   }
   process.stdout.write(`approved once: ${visible(approved.tool)}\n    arguments: ${visible(approved.args)}\n    ${asked(approved)}${visible(approved.reason)}\n` +
@@ -964,8 +953,9 @@ function applyPolicy(args: string[]): number {
   let body: string
   let policy: Policy
   try {
+    // One read: what was checked and explained is what gets installed.
     body = readFileSync(file, 'utf8')
-    policy = loadPolicyFile(file)
+    policy = parsePolicy(body, file)
   } catch (error) {
     process.stderr.write(`cordon policy apply: ${visible((error as Error).message)}; nothing was applied\n`)
     return 1
@@ -992,6 +982,42 @@ function applyPolicy(args: string[]): number {
     // inventing a hash for it.
     previous = null
   }
+  // The record goes down before the policy does, to the old journal first
+  // (where the SIEM already reads) and then to the new one. A journal that
+  // cannot take the line stops the change: a policy left in force with a
+  // journal nobody can write drops every later event (Codex, Kimi).
+  const journal = policy.notify.file
+  const event: NotifyEvent = {
+    at: new Date().toISOString(),
+    decision: 'policy-applied',
+    tool: '(policy)',
+    reason:
+      `${file} applied${warnings.length > 0 ? `, with ${warnings.length} warning${warnings.length === 1 ? '' : 's'} accepted` : ''}; ` +
+      `the journal from now on: ${journal ?? 'none'}`,
+    source: null,
+    previous,
+    ...(declared === undefined ? {} : { declared }),
+  }
+  const stamp = policyHash(policy)
+  const written: string[] = []
+  const undo = (why: string): void => {
+    // Best effort, and said so: the line that could not be written is the
+    // reason this runs at all.
+    for (const target of written) {
+      appendRecord(target, { ...event, at: new Date().toISOString(), decision: 'policy-apply-failed', reason: `${file} was not applied: ${why}` }, stamp)
+    }
+  }
+  for (const target of [...new Set([oldJournal, journal])]) {
+    if (target === null) continue
+    const failed = appendRecord(target, event, stamp)
+    if (failed !== null) {
+      undo(`the journal ${target} could not record it`)
+      process.stderr.write(`cordon policy apply: the journal ${visible(target)} could not record the change: ${visible(failed)}; nothing was applied\n`)
+      return 1
+    }
+    written.push(target)
+  }
+
   makeDirectory(home, 0o700)
   const target = join(home, 'policy.yaml')
   const staged = join(home, `.policy.yaml.${process.pid}`)
@@ -1001,24 +1027,12 @@ function applyPolicy(args: string[]): number {
   } catch (error) {
     // Nothing half-applied stays behind: the policy in force is the old one.
     rmSync(staged, { force: true })
+    undo((error as Error).message)
     process.stderr.write(`cordon policy apply: ${visible((error as Error).message)}; nothing was applied\n`)
     return 1
   }
 
   for (const line of explain(policy)) process.stdout.write(`${visible(line)}\n`)
-  const recorded = ownerRecord({
-    at: new Date().toISOString(),
-    decision: 'policy-applied',
-    tool: '(policy)',
-    reason: `${file} applied${warnings.length > 0 ? `, with ${warnings.length} warning${warnings.length === 1 ? '' : 's'} accepted` : ''}`,
-    source: null,
-    previous,
-    ...(declared === undefined ? {} : { declared }),
-  }, oldJournal)
-  if (recorded !== null) {
-    process.stderr.write(`cordon policy apply: the policy is in force, but the journal could not record it: ${visible(recorded)}\n`)
-    return 1
-  }
   process.stdout.write(`applied: ${target}\n`)
   return 0
 }
@@ -1030,15 +1044,21 @@ function applyPolicy(args: string[]): number {
  * reported, because an owner's act is the one line an audit cannot do
  * without. No journal configured is not a failure: there is nowhere to write.
  */
-function ownerRecord(event: NotifyEvent, alsoTo: string | null = null): string | null {
+function ownerRecord(event: NotifyEvent): string | null {
+  let policy: Policy
   try {
-    const policy = loadPolicy(cordonHome())
-    const line = JSON.stringify({ ...event, approver: userInfo().username, policy: policyHash(policy) }) + '\n'
-    for (const file of new Set([policy.notify.file, alsoTo])) {
-      if (file === null) continue
-      makeDirectory(dirname(file), 0o755)
-      appendFileSync(file, line, 'utf8')
-    }
+    policy = loadPolicy(cordonHome())
+  } catch (error) {
+    return (error as Error).message
+  }
+  return policy.notify.file === null ? null : appendRecord(policy.notify.file, event, policyHash(policy))
+}
+
+/** One owner's line into one journal, stamped; null when written, or why not. */
+function appendRecord(file: string, event: NotifyEvent, policy: string): string | null {
+  try {
+    makeDirectory(dirname(file), 0o755)
+    appendFileSync(file, JSON.stringify({ ...event, approver: userInfo().username, policy }) + '\n', 'utf8')
     return null
   } catch (error) {
     return (error as Error).message

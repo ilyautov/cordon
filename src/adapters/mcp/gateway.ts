@@ -19,6 +19,8 @@ export interface GatewayOptions {
   command: string[]
   policy: Policy
   cordonHome: string
+  /** Where the policy came from: a change there stops the gateway acting (see CordonOptions). */
+  policyFile?: string
   /** Injectable for tests; the real process runs on stdin/stdout. */
   hostIn?: Readable
   hostOut?: Writable
@@ -100,7 +102,12 @@ export function runGateway(options: GatewayOptions): Promise<number> {
 
     let cordon: Cordon
     try {
-      cordon = new Cordon({ policy: options.policy, cordonHome: options.cordonHome, sessionId })
+      cordon = new Cordon({
+        policy: options.policy,
+        cordonHome: options.cordonHome,
+        sessionId,
+        ...(options.policyFile === undefined ? {} : { policyFile: options.policyFile }),
+      })
     } catch (error) {
       finish(1, `the session state is broken: ${(error as Error).message}`)
       return

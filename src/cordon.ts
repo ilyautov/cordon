@@ -6,6 +6,7 @@ import { comparePins, shadows, type HeldTool, type ListedTool } from './gate/pin
 import { pastedSecrets } from './gate/secrets.js'
 import { FileNotifier, SILENT, labelled, stamped, type Notifier } from './notify/notifier.js'
 import { policyHash } from './policy/hash.js'
+import { loadPolicyFile } from './policy/load.js'
 import { cutOutbound, outboundAfterRead } from './output/egress.js'
 import type { Policy } from './policy/defaults.js'
 import { readLookup, vouched, type Observation } from './provenance/bindings.js'
@@ -48,6 +49,14 @@ export interface CordonOptions {
    * call, where provenance is always empty.
    */
   sessionId?: string
+  /**
+   * The file the policy was loaded from, for an instance that outlives a
+   * call (the MCP gateway). Each unattended decision compares it with the
+   * policy in hand, and refuses once they differ: a stricter policy applied
+   * while a gateway ran would otherwise leave the old rights in force,
+   * approvals included (Codex).
+   */
+  policyFile?: string
 }
 
 /**
@@ -111,9 +120,11 @@ export class Cordon {
 
   /** The state key on disk. It comes from the harness, that is, from outside. */
   readonly sessionId: string
+  private readonly policyFile: string | null
 
   constructor(options: CordonOptions) {
     this.policy = options.policy
+    this.policyFile = options.policyFile ?? null
     this.cordonHome = options.cordonHome
     this.notifier = stamped(options.notifier ?? (options.policy.notify.file
       ? new FileNotifier(options.policy.notify.file)
@@ -175,6 +186,25 @@ export class Cordon {
    * approval checked against memory alone passed after it (Codex). The hook
    * adapters start a process per event and are fresh already.
    */
+  /**
+   * Why the policy in hand is no longer the one on disk, or null. Not
+   * reloaded in place: the certificate, the pins and the questions already
+   * asked were all made under the old one, and a restart is the one
+   * boundary where all of them start over together.
+   */
+  private policyMoved(): string | null {
+    if (this.policyFile === null) return null
+    let current: string
+    try {
+      current = policyHash(loadPolicyFile(this.policyFile))
+    } catch (error) {
+      // Unreadable is not "unchanged": the call is refused, loudly.
+      return `the policy at ${this.policyFile} can no longer be read (${(error as Error).message}); nothing is done until it is fixed and Cordon restarted`
+    }
+    if (current === policyHash(this.policy)) return null
+    return `the policy at ${this.policyFile} changed after this Cordon started; restart it to act under the policy now in force`
+  }
+
   private refresh(): void {
     this.adopt(this.sessions.load(this.sessionId))
     this.carryMemory()
@@ -400,6 +430,11 @@ export class Cordon {
    * there the policy is what should change, in the open.
    */
   gateUnattended(call: ToolCall): Decision {
+    const moved = this.policyMoved()
+    if (moved !== null) {
+      this.notifier.notify({ at: new Date().toISOString(), decision: 'deny', tool: call.tool, reason: moved, source: null, ...labelled('failure') })
+      return { kind: 'deny', rule: 'failure', reason: moved }
+    }
     this.refresh()
     const decision = this.gate(call)
     if (decision.kind !== 'ask') return decision

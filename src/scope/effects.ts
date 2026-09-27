@@ -68,3 +68,8 @@ export function classify(
   }
   return { effects: [...declared], classified: true, reason: '' }
 }
+
+/** A tool's built-in classification, or null for a tool with none. */
+export function builtinEffects(tool: string): readonly EffectClass[] | null {
+  return declaredFor(BUILTIN, tool) ?? null
+}

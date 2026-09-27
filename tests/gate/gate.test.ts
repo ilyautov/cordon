@@ -1266,4 +1266,16 @@ describe('gate: taint in one field never lowers what the call answers to', () =>
     const decision = gate({ tool: 'sync_file', args: { file_path: '/work/notes.md', content: `notes: ${paragraph}` } }, ctx)
     expect(decision.kind).toBe('deny')
   })
+
+  it('a shell command is never run with a piece cut out, exposure rule or not', () => {
+    // Codex, third review: with the exposure rule off, a recorded paragraph
+    // in the description made quarantine cut the description and run the
+    // command. A command is executed, not read: a hole in what it was
+    // described as is no more mendable than a hole in a sent message.
+    const ctx = setup({ mode: 'interactive', exposure: false, profile: { effects: ['read', 'exec'], resources: { paths: [], hosts: [] } } })
+    ctx.taint.record(paragraph, web)
+    const decision = gate({ tool: 'Bash', args: { command: 'sh ./setup.sh', description: `run it: ${paragraph}` } }, ctx)
+    expect(decision.kind).toBe('ask')
+    expect(decision.kind === 'ask' && decision.reason).toMatch(/shell command/)
+  })
 })

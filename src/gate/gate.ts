@@ -5,6 +5,7 @@ import { secretKinds } from './secrets.js'
 import { memoryTarget } from './memory.js'
 import type { Rule } from './rules.js'
 import type { Policy } from '../policy/defaults.js'
+import { destinationPattern } from '../policy/destinations.js'
 import { canonicalForms, fold as foldSegment, touchesCordonItself } from '../policy/selfprotect.js'
 import { vouchKey } from '../provenance/bindings.js'
 import { atoms } from '../provenance/normalize.js'
@@ -282,6 +283,19 @@ function decide(call: ToolCall, ctx: GateContext): Decision {
   const exposedToo = exposedCall(call.tool, verdict.effects, parts, ctx, bound)
   if (exposedToo) {
     return escalate(ctx, ctx.exposure?.memory === true ? 'memory-carry' : 'exposure', exposedToo, ctx.exposure?.source)
+  }
+
+  // A shell command is run, not read. Cutting a paragraph out of the
+  // description that came with it runs the command the owner never saw
+  // described (Codex); the command itself is indivisible in quarantine
+  // already, and the call around it is judged whole the same way.
+  if (verdict.effects.includes('exec')) {
+    return escalate(
+      ctx,
+      'provenance',
+      `an untrusted fragment would be cut out of a shell command${origin(blamedLabels)}; it is not run with a piece cut out`,
+      blamed,
+    )
   }
 
   return {
@@ -643,7 +657,7 @@ function boundBy(tool: string, own: Record<string, unknown>, ctx: GateContext): 
 function inMandate(value: string, mandate: readonly string[]): boolean {
   const whole = value.trim().normalize('NFKC').toLowerCase()
   return mandate.some((entry) => {
-    const pattern = entry.trim().normalize('NFKC').toLowerCase()
+    const pattern = destinationPattern(entry)
     return pattern.startsWith('*') ? whole.endsWith(pattern.replace(/^\*+/u, '')) : whole === pattern
   })
 }
