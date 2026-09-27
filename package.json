@@ -1,7 +1,7 @@
 {
   "name": "@ilyautov/cordon",
   "version": "0.11.0",
-  "description": "A deterministic layer between untrusted content and agent actions: it removes the hidden layer, remembers where data came from, and keeps calls inside the boundaries of the intent.",
+  "description": "A prompt-injection firewall for AI agents, with no AI inside: your agent reads anything and takes orders only from you. For Claude Code, Gemini CLI, MCP hosts and LangChain.",
   "keywords": [
     "prompt-injection",
     "indirect-prompt-injection",

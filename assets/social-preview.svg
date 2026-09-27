@@ -10,7 +10,7 @@
 
   <g font-family="Helvetica Neue, Helvetica, Arial, sans-serif">
     <text x="88" y="150" font-size="86" font-weight="700" fill="#F2F6F4" letter-spacing="-1">Cordon</text>
-    <text x="88" y="200" font-size="27" fill="#8FAFA4">a deterministic layer between untrusted text and agent actions</text>
+    <text x="88" y="200" font-size="27" fill="#8FAFA4">your agent reads anything, takes orders only from you</text>
   </g>
 
   <g>
@@ -30,7 +30,7 @@
   </g>
 
   <g font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="22">
-    <text x="88" y="558" fill="#6E8C82">no model calls in the hot path</text>
+    <text x="88" y="558" fill="#6E8C82">no AI inside: plain code decides</text>
     <text x="443" y="558" fill="#2C4B43">|</text>
     <text x="478" y="558" fill="#6E8C82">no network</text>
     <text x="620" y="558" fill="#2C4B43">|</text>
