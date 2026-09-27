@@ -515,6 +515,19 @@ describe('records of who allowed what', () => {
     expect(event?.policy).toMatch(/^[0-9a-f]{64}$/u)
   })
 
+  it('an approval the journal cannot hold is not given', () => {
+    const home = mkdtempSync(join(tmpdir(), 'cordon-home-'))
+    const blocker = join(home, 'not-a-dir')
+    writeFileSync(blocker, '')
+    writeFileSync(join(home, 'policy.yaml'), `mode: interactive\nnotify:\n  file: ${join(blocker, 'events.jsonl')}\n`)
+    const id = 'cf'.repeat(8)
+    new ApprovalStore(home).request(id, { tool: 'send_email', reason: 'r', args: {}, binding: 'cf'.repeat(32) })
+    const { status, stderr } = run(['approve', id], '', { CORDON_HOME: home })
+    expect(status).toBe(1)
+    expect(stderr).toContain('not given')
+    expect(new ApprovalStore(home).take(id, 'cf'.repeat(32)).taken).toBe(false)
+  })
+
   it('--as is recorded as declared, apart from the OS user', () => {
     // Anyone at the shell types any name (Kimi): it is labelled as a claim.
     const { home, journal } = homeWithJournal()
@@ -540,6 +553,18 @@ describe('records of who allowed what', () => {
     expect(event?.policy).toMatch(/^[0-9a-f]{64}$/u)
     expect(event?.previous).toMatch(/^[0-9a-f]{64}$/u)
     expect(event?.policy).not.toBe(event?.previous)
+  })
+
+  it('policy apply records the change in the old journal too, so a draft cannot move the record away', () => {
+    // A drafted policy can point notify.file anywhere; the SIEM tails the old
+    // file, and that is where the change must show.
+    const { home, journal } = homeWithJournal()
+    const elsewhere = join(mkdtempSync(join(tmpdir(), 'cordon-elsewhere-')), 'quiet.jsonl')
+    const drafted = join(mkdtempSync(join(tmpdir(), 'cordon-draft-')), 'p.yaml')
+    writeFileSync(drafted, `mode: interactive\nnotify:\n  file: ${elsewhere}\n`)
+    expect(run(['policy', 'apply', drafted], '', { CORDON_HOME: home }).status).toBe(0)
+    expect(lines(journal).some((line) => line.decision === 'policy-applied')).toBe(true)
+    expect(lines(elsewhere).some((line) => line.decision === 'policy-applied')).toBe(true)
   })
 
   it('policy apply refuses a file with warnings unless they are accepted by name', () => {

@@ -866,15 +866,21 @@ function approveCall(args: string[]): number {
     process.stderr.write(`nothing waits under ${id}: it was never asked for, was already used, is older than an hour, or was asked again under a changed context\n`)
     return 1
   }
-  // The record comes first: an approval the journal cannot hold is not
-  // given, because an owner's act nobody can audit afterwards is the gap
-  // this record exists to close.
   const at = args.indexOf('--as')
   const declared = at >= 0 ? args[at + 1] : undefined
   if (at >= 0 && (declared === undefined || declared.startsWith('--'))) {
     process.stderr.write(`--as takes a name\n${USAGE}\n`)
     return 2
   }
+  const approved = store.approve(id)
+  if (approved === null) {
+    process.stderr.write(`nothing waits under ${id}: it expired or was retired while you approved it\n`)
+    return 1
+  }
+  // No record, no approval: an owner's act nobody can audit afterwards is
+  // the gap this record exists to close. The approval is written first and
+  // withdrawn if the line cannot be, so the journal never shows an approval
+  // that was not given.
   const recorded = ownerRecord({
     at: new Date().toISOString(),
     decision: 'approval-given',
@@ -888,12 +894,8 @@ function approveCall(args: string[]): number {
     ...(declared === undefined ? {} : { declared }),
   })
   if (recorded !== null) {
+    store.withdraw(id)
     process.stderr.write(`cordon approve: the journal could not record the approval, so it is not given: ${visible(recorded)}\n`)
-    return 1
-  }
-  const approved = store.approve(id)
-  if (approved === null) {
-    process.stderr.write(`nothing waits under ${id}: it expired or was retired while you approved it; the journal line stands, the approval does not\n`)
     return 1
   }
   process.stdout.write(`approved once: ${visible(approved.tool)}\n    arguments: ${visible(approved.args)}\n    ${asked(approved)}${visible(approved.reason)}\n` +
@@ -977,8 +979,14 @@ function applyPolicy(args: string[]): number {
 
   const home = cordonHome()
   let previous: string | null
+  // The journal of the policy being replaced gets the record too: a drafted
+  // policy can point notify.file anywhere, and the change must show where
+  // the SIEM was already reading.
+  let oldJournal: string | null = null
   try {
-    previous = policyHash(loadPolicy(home))
+    const old = loadPolicy(home)
+    previous = policyHash(old)
+    oldJournal = old.notify.file
   } catch {
     // The policy in force could not be read: the record says so rather than
     // inventing a hash for it.
@@ -987,8 +995,15 @@ function applyPolicy(args: string[]): number {
   makeDirectory(home, 0o700)
   const target = join(home, 'policy.yaml')
   const staged = join(home, `.policy.yaml.${process.pid}`)
-  writeFileSync(staged, body, { mode: 0o600 })
-  renameSync(staged, target)
+  try {
+    writeFileSync(staged, body, { mode: 0o600, flag: 'wx' })
+    renameSync(staged, target)
+  } catch (error) {
+    // Nothing half-applied stays behind: the policy in force is the old one.
+    rmSync(staged, { force: true })
+    process.stderr.write(`cordon policy apply: ${visible((error as Error).message)}; nothing was applied\n`)
+    return 1
+  }
 
   for (const line of explain(policy)) process.stdout.write(`${visible(line)}\n`)
   const recorded = ownerRecord({
@@ -999,7 +1014,7 @@ function applyPolicy(args: string[]): number {
     source: null,
     previous,
     ...(declared === undefined ? {} : { declared }),
-  })
+  }, oldJournal)
   if (recorded !== null) {
     process.stderr.write(`cordon policy apply: the policy is in force, but the journal could not record it: ${visible(recorded)}\n`)
     return 1
@@ -1015,12 +1030,15 @@ function applyPolicy(args: string[]): number {
  * reported, because an owner's act is the one line an audit cannot do
  * without. No journal configured is not a failure: there is nowhere to write.
  */
-function ownerRecord(event: NotifyEvent): string | null {
+function ownerRecord(event: NotifyEvent, alsoTo: string | null = null): string | null {
   try {
     const policy = loadPolicy(cordonHome())
-    if (policy.notify.file === null) return null
-    makeDirectory(dirname(policy.notify.file), 0o755)
-    appendFileSync(policy.notify.file, JSON.stringify({ ...event, approver: userInfo().username, policy: policyHash(policy) }) + '\n', 'utf8')
+    const line = JSON.stringify({ ...event, approver: userInfo().username, policy: policyHash(policy) }) + '\n'
+    for (const file of new Set([policy.notify.file, alsoTo])) {
+      if (file === null) continue
+      makeDirectory(dirname(file), 0o755)
+      appendFileSync(file, line, 'utf8')
+    }
     return null
   } catch (error) {
     return (error as Error).message

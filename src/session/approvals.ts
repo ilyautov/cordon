@@ -172,6 +172,17 @@ export class ApprovalStore {
     return { tool: request.tool, reason: request.reason, args: request.args, ...(request.context === undefined ? {} : { context: request.context }) }
   }
 
+  /** Takes back an approval given a moment ago; the question keeps waiting. */
+  withdraw(id: string): void {
+    try {
+      unlinkSync(this.approvedPath(id))
+    } catch (error) {
+      // Gone already is withdrawn. Anything else must not leave an approval
+      // standing that the owner was told was not given.
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+    }
+  }
+
   private stale(path: string): boolean {
     try {
       return Date.now() - statSync(path).mtimeMs > APPROVAL_TTL_MS

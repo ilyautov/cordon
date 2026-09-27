@@ -12173,6 +12173,14 @@ var ApprovalStore = class {
     }
     return { tool: request.tool, reason: request.reason, args: request.args, ...request.context === void 0 ? {} : { context: request.context } };
   }
+  /** Takes back an approval given a moment ago; the question keeps waiting. */
+  withdraw(id) {
+    try {
+      unlinkSync(this.approvedPath(id));
+    } catch (error) {
+      if (error.code !== "ENOENT") throw error;
+    }
+  }
   stale(path) {
     try {
       return Date.now() - statSync2(path).mtimeMs > APPROVAL_TTL_MS;
@@ -16331,6 +16339,12 @@ ${USAGE}
 `);
     return 2;
   }
+  const approved = store.approve(id);
+  if (approved === null) {
+    process.stderr.write(`nothing waits under ${id}: it expired or was retired while you approved it
+`);
+    return 1;
+  }
   const recorded = ownerRecord({
     at: (/* @__PURE__ */ new Date()).toISOString(),
     decision: "approval-given",
@@ -16344,13 +16358,8 @@ ${USAGE}
     ...declared === void 0 ? {} : { declared }
   });
   if (recorded !== null) {
+    store.withdraw(id);
     process.stderr.write(`cordon approve: the journal could not record the approval, so it is not given: ${visible(recorded)}
-`);
-    return 1;
-  }
-  const approved = store.approve(id);
-  if (approved === null) {
-    process.stderr.write(`nothing waits under ${id}: it expired or was retired while you approved it; the journal line stands, the approval does not
 `);
     return 1;
   }
@@ -16428,16 +16437,26 @@ ${USAGE}
   }
   const home = cordonHome();
   let previous;
+  let oldJournal = null;
   try {
-    previous = policyHash(loadPolicy(home));
+    const old = loadPolicy(home);
+    previous = policyHash(old);
+    oldJournal = old.notify.file;
   } catch {
     previous = null;
   }
   makeDirectory(home, 448);
   const target = join14(home, "policy.yaml");
   const staged = join14(home, `.policy.yaml.${process.pid}`);
-  writeFileSync6(staged, body, { mode: 384 });
-  renameSync5(staged, target);
+  try {
+    writeFileSync6(staged, body, { mode: 384, flag: "wx" });
+    renameSync5(staged, target);
+  } catch (error) {
+    rmSync5(staged, { force: true });
+    process.stderr.write(`cordon policy apply: ${visible(error.message)}; nothing was applied
+`);
+    return 1;
+  }
   for (const line of explain(policy)) process.stdout.write(`${visible(line)}
 `);
   const recorded = ownerRecord({
@@ -16448,7 +16467,7 @@ ${USAGE}
     source: null,
     previous,
     ...declared === void 0 ? {} : { declared }
-  });
+  }, oldJournal);
   if (recorded !== null) {
     process.stderr.write(`cordon policy apply: the policy is in force, but the journal could not record it: ${visible(recorded)}
 `);
@@ -16458,12 +16477,15 @@ ${USAGE}
 `);
   return 0;
 }
-function ownerRecord(event) {
+function ownerRecord(event, alsoTo = null) {
   try {
     const policy = loadPolicy(cordonHome());
-    if (policy.notify.file === null) return null;
-    makeDirectory(dirname4(policy.notify.file), 493);
-    appendFileSync2(policy.notify.file, JSON.stringify({ ...event, approver: userInfo().username, policy: policyHash(policy) }) + "\n", "utf8");
+    const line = JSON.stringify({ ...event, approver: userInfo().username, policy: policyHash(policy) }) + "\n";
+    for (const file of /* @__PURE__ */ new Set([policy.notify.file, alsoTo])) {
+      if (file === null) continue;
+      makeDirectory(dirname4(file), 493);
+      appendFileSync2(file, line, "utf8");
+    }
     return null;
   } catch (error) {
     return error.message;
