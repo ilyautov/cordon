@@ -259,7 +259,9 @@ function decide(call: ToolCall, ctx: GateContext): Decision {
       ctx,
       'provenance',
       `an untrusted fragment would be cut out of a call that leaves the machine${origin(blamedLabels)}; ` +
-        'it is not sent with a piece cut out — read the whole draft and decide',
+        (ctx.policy.mode === 'interactive'
+          ? 'it is not sent with a piece cut out — read the whole draft and decide'
+          : 'it is not sent with a piece cut out, and with nobody to read the draft it is refused'),
       blamed,
     )
   }

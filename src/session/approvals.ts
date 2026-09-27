@@ -134,6 +134,7 @@ export class ApprovalStore {
     // A request past its hour can no longer be approved, so it is replaced
     // rather than left to block the id forever; an approval left over from it
     // goes too, so the renewal cannot revive it.
+    this.sweep()
     if (this.stale(this.pendingPath(id))) {
       for (const path of [this.pendingPath(id), this.approvedPath(id)]) {
         try {
@@ -263,6 +264,32 @@ export class ApprovalStore {
     }
   }
 
+
+  /**
+   * Removes questions and approvals past their hour. Read-time checks already
+   * ignore them; without this an agent steered into many distinct questions
+   * leaves a file per question behind, and every listing reads them all
+   * (Kimi).
+   */
+  private sweep(): void {
+    let names: string[]
+    try {
+      names = readdirSync(this.dir)
+    } catch {
+      return
+    }
+    for (const name of names) {
+      const id = name.replace(/\.(?:request\.json|approved)$/u, '')
+      if (id === name || !ID.test(id)) continue
+      if (this.stale(join(this.dir, name))) {
+        try {
+          unlinkSync(join(this.dir, name))
+        } catch {
+          // Another process swept it first.
+        }
+      }
+    }
+  }
 
   private retire(id: string): void {
     for (const path of [this.pendingPath(id), this.approvedPath(id)]) {

@@ -8623,7 +8623,7 @@ function decide(call, ctx) {
     return escalate(
       ctx,
       "provenance",
-      `an untrusted fragment would be cut out of a call that leaves the machine${origin(blamedLabels)}; it is not sent with a piece cut out \u2014 read the whole draft and decide`,
+      `an untrusted fragment would be cut out of a call that leaves the machine${origin(blamedLabels)}; ` + (ctx.policy.mode === "interactive" ? "it is not sent with a piece cut out \u2014 read the whole draft and decide" : "it is not sent with a piece cut out, and with nobody to read the draft it is refused"),
       blamed
     );
   }
@@ -12144,6 +12144,7 @@ var ApprovalStore = class {
       ...request.call === void 0 ? {} : { call: request.call },
       at: (/* @__PURE__ */ new Date()).toISOString()
     });
+    this.sweep();
     if (this.stale(this.pendingPath(id))) {
       for (const path of [this.pendingPath(id), this.approvedPath(id)]) {
         try {
@@ -12253,6 +12254,30 @@ var ApprovalStore = class {
       return isContext(context) ? context : null;
     } catch {
       return null;
+    }
+  }
+  /**
+   * Removes questions and approvals past their hour. Read-time checks already
+   * ignore them; without this an agent steered into many distinct questions
+   * leaves a file per question behind, and every listing reads them all
+   * (Kimi).
+   */
+  sweep() {
+    let names2;
+    try {
+      names2 = readdirSync2(this.dir);
+    } catch {
+      return;
+    }
+    for (const name of names2) {
+      const id = name.replace(/\.(?:request\.json|approved)$/u, "");
+      if (id === name || !ID.test(id)) continue;
+      if (this.stale(join4(this.dir, name))) {
+        try {
+          unlinkSync(join4(this.dir, name));
+        } catch {
+        }
+      }
     }
   }
   retire(id) {
@@ -13513,6 +13538,16 @@ var Cordon = class {
       });
     }
     const taken = approvals.take(id, binding);
+    if (taken.void) {
+      this.notifier.notify({
+        at: (/* @__PURE__ */ new Date()).toISOString(),
+        decision: "approval-void",
+        tool: call.tool,
+        reason: `an approval under ${id} carried another binding than this question; it is void`,
+        source: decision.source ?? null,
+        ...labelled(decision.rule)
+      });
+    }
     if (taken.taken) {
       this.notifier.notify({
         at: (/* @__PURE__ */ new Date()).toISOString(),

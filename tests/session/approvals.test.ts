@@ -1,4 +1,4 @@
-import { mkdtempSync, unlinkSync, utimesSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, unlinkSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -185,3 +185,19 @@ describe('ApprovalStore: a retired question stays retired', () => {
   })
 })
 
+
+describe('ApprovalStore: old questions are swept', () => {
+  it('a new question removes questions and approvals past their hour', () => {
+    const approvals = store()
+    const old = 'a'.repeat(64)
+    approvals.request(old.slice(0, 16), { tool: CALL.tool, reason: 'r', binding: old })
+    approvals.approve(old.slice(0, 16))
+    const past = new Date(Date.now() - APPROVAL_TTL_MS - 60_000)
+    utimesSync(approvals.pendingPath(old.slice(0, 16)), past, past)
+    utimesSync(approvals.approvedPath(old.slice(0, 16)), past, past)
+    const fresh = 'b'.repeat(64)
+    approvals.request(fresh.slice(0, 16), { tool: CALL.tool, reason: 'r', binding: fresh })
+    expect(existsSync(approvals.pendingPath(old.slice(0, 16)))).toBe(false)
+    expect(existsSync(approvals.approvedPath(old.slice(0, 16)))).toBe(false)
+  })
+})

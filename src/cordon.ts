@@ -435,6 +435,18 @@ export class Cordon {
       })
     }
     const taken = approvals.take(id, binding)
+    if (taken.void) {
+      // Same id, another binding: a prefix collision or a planted file. Never
+      // taken, and never quietly (Kimi).
+      this.notifier.notify({
+        at: new Date().toISOString(),
+        decision: 'approval-void',
+        tool: call.tool,
+        reason: `an approval under ${id} carried another binding than this question; it is void`,
+        source: decision.source ?? null,
+        ...labelled(decision.rule),
+      })
+    }
     if (taken.taken) {
       this.notifier.notify({
         at: new Date().toISOString(),
