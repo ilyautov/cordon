@@ -269,6 +269,25 @@ describe('adversarial: ways to get an action past the gate', () => {
     expect(gate({ tool: 'Bash', args: { command: "git commit -m 'feat: cordon: approve once'" } }, wide()).kind).not.toBe('deny')
   })
 
+  it('a command that rewrites the policy on the owner\'s behalf', () => {
+    // `cordon init --force` writes policy.yaml without naming its path, so
+    // the path markers never saw it: an agent with a shell widened its own
+    // policy in one command. Every verb that is the owner's is refused.
+    for (const command of [
+      'cordon init --profile coding --force',
+      'npx @ilyautov/cordon init --force',
+      'node plugin/dist/cli.js init --profile coding --force',
+      'cordon policy apply wide.yaml',
+    ]) {
+      const decision = gate({ tool: 'Bash', args: { command } }, wide())
+      expect(decision.kind, command).toBe('deny')
+      expect(decision.kind === 'deny' && decision.rule, command).toBe('self-protection')
+    }
+    // Reading the policy back is not the owner's word.
+    expect(gate({ tool: 'Bash', args: { command: 'cordon policy explain' } }, wide()).kind).not.toBe('deny')
+    expect(gate({ tool: 'Bash', args: { command: 'cordon doctor' } }, wide()).kind).not.toBe('deny')
+  })
+
   it('4. a path passed as an array instead of a string', () => {
     const ctx = wide()
     const decision = gate(

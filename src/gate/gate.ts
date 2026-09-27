@@ -314,7 +314,7 @@ function selfProtection(parts: readonly Field[], ctx: GateContext): Decision | n
       // a pending call approved, a changed MCP server re-pinned. The same
       // substring crudeness as below, and the same answer to its limit.
       if (APPROVES.test(value.replace(/["'\\]/gu, ''))) {
-        return { kind: 'deny', rule: 'self-protection', reason: 'self-protection: the command gives an approval only the owner may give' }
+        return { kind: 'deny', rule: 'self-protection', reason: 'self-protection: the command gives an approval or writes a policy, which only the owner may do' }
       }
       for (const marker of selfMarkers(ctx.cordonHome)) {
         if (value.includes(marker)) {
@@ -406,8 +406,12 @@ function asPaths(value: unknown): string[] | null {
 }
 
 /** Substrings whose mention in a shell command means an attempt to reach Cordon. */
-/** `cordon approve`, `cordon mcp approve`, and the same through the bundle's path. */
-const APPROVES = /(?:\bcordon(?:@[\w.^~-]+)?|\bcli\.m?js)\s+(?:mcp\s+)?approve\b/iu
+/**
+ * The owner's verbs: `cordon approve`, `cordon mcp approve`, `cordon init`
+ * and `cordon policy apply`, and the same through the bundle's path. `init
+ * --force` rewrites policy.yaml without naming it, so no path marker sees it.
+ */
+const APPROVES = /(?:\bcordon(?:@[\w.^~-]+)?|\bcli\.m?js)\s+(?:(?:mcp\s+)?approve|init|policy\s+apply)\b/iu
 
 function selfMarkers(cordonHome: string): string[] {
   return [cordonHome, '.cordon', '.claude/settings', '.claude/hooks', '.cursor', '.codex', '.gemini']

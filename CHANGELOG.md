@@ -4,6 +4,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versions follo
 
 ## [Unreleased]
 
+An agent with a shell could widen its own policy: `cordon init --profile coding --force` rewrites `policy.yaml` without naming its path, and self-protection looked for the path. The gate now refuses `cordon init` and `cordon policy apply` the way it refuses `cordon approve`. Found while building `policy apply`, after Kimi pointed out that the new verb would need the same guard.
+
 Quarantine no longer cuts a call that leaves the machine. An email, an export or a payment memo with a fragment cut out reached a stranger damaged, while the model reported it sent whole; AgentDojo lost tasks exactly so, an address cut out of the body of an email. Such a call now escalates with the draft whole: the human sees it and decides in interactive mode, and autonomous mode refuses rather than send it damaged. Local edits are still quarantined, since a file can be looked at and fixed. Proposed in an outside review as "a silently damaged result is part of the price of protection".
 
 A one-time approval holds only in the context it was given in: the rule that asked, the untrusted content the session had read, and the policy, hashed together with the call. An approval given before a page was read no longer covers the same call after it, and a changed policy voids it too. The journal records `approval-void` with what changed, rather than leaving the owner to wonder why nothing waits (Kimi), and the request is renewed under the same id so the owner approves the question as it now stands. From FIDES, which binds a grant to its context the same way.
