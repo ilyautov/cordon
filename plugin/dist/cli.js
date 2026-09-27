@@ -12174,6 +12174,7 @@ import { existsSync, readdirSync as readdirSync2, readFileSync as readFileSync3,
 import { join as join4 } from "node:path";
 var APPROVAL_TTL_MS = 60 * 60 * 1e3;
 var ID = /^[0-9a-f]{16}$/u;
+var NONCE = /^[0-9a-f]{16}$/u;
 function approvalId(sessionId, call) {
   const canonical2 = JSON.stringify([sessionId, call.tool, sorted(call.args ?? {})]);
   return createHash3("sha256").update(canonical2, "utf8").digest("hex").slice(0, 16);
@@ -12191,8 +12192,8 @@ var ApprovalStore = class {
   approvedPath(id) {
     return join4(this.dir, `${checked(id)}.approved`);
   }
-  takenPath(id) {
-    return join4(this.dir, `${checked(id)}.taken`);
+  takenPath(id, nonce) {
+    return join4(this.dir, `${checked(id)}.taken.${nonce}`);
   }
   /** Records that a call waits for the owner. A request already waiting is left as it is. */
   request(id, request) {
@@ -12220,7 +12221,6 @@ var ApprovalStore = class {
     }
     try {
       writeFileSync2(this.pendingPath(id), body, { encoding: "utf8", mode: 384, flag: "wx" });
-      rmSync2(this.takenPath(id), { force: true });
     } catch (error) {
       if (error.code !== "EEXIST") throw error;
     }
@@ -12233,9 +12233,11 @@ var ApprovalStore = class {
     const request = this.read(id);
     if (request === null) return null;
     const shown2 = { tool: request.tool, reason: request.reason, args: request.args, ...request.context === void 0 ? {} : { context: request.context } };
-    writeFileSync2(this.approvedPath(id), request.binding, { mode: 384 });
+    const nonce = randomBytes2(8).toString("hex");
+    writeFileSync2(this.approvedPath(id), `${request.binding}
+${nonce}`, { mode: 384 });
     if (this.read(id) === null) {
-      if (existsSync(this.takenPath(id))) return shown2;
+      if (existsSync(this.takenPath(id, nonce))) return shown2;
       this.retire(id);
       return null;
     }
@@ -12271,13 +12273,13 @@ var ApprovalStore = class {
     }
     try {
       const fresh = Date.now() - statSync2(claimed).mtimeMs <= APPROVAL_TTL_MS;
-      const given = readFileSync3(claimed, "utf8");
+      const [given, nonce] = readFileSync3(claimed, "utf8").split("\n");
       if (!existsSync(this.pendingPath(id))) return { taken: false, void: false };
       if (fresh && given !== binding) {
         this.retire(id);
         return { taken: false, void: true };
       }
-      if (fresh) writeFileSync2(this.takenPath(id), "", { mode: 384 });
+      if (fresh && nonce !== void 0 && NONCE.test(nonce)) writeFileSync2(this.takenPath(id, nonce), "", { mode: 384 });
       try {
         unlinkSync(this.pendingPath(id));
       } catch {
@@ -12342,7 +12344,7 @@ var ApprovalStore = class {
       return;
     }
     for (const name of names2) {
-      const id = name.replace(/\.(?:request\.json|approved|taken|taking\.\d+\.[0-9a-f]{8})$/u, "");
+      const id = name.replace(/\.(?:request\.json|approved|taken\.[0-9a-f]{16}|taking\.\d+\.[0-9a-f]{8})$/u, "");
       if (id === name || !ID.test(id)) continue;
       if (this.stale(join4(this.dir, name))) {
         try {
@@ -13705,7 +13707,12 @@ var Cordon = class {
       return refusal;
     }
     const taken = approvals.take(id, binding);
-    if (!taken.taken) held.release();
+    if (!taken.taken) {
+      try {
+        held.release();
+      } catch {
+      }
+    }
     if (taken.void) {
       this.notifier.notify({
         at: (/* @__PURE__ */ new Date()).toISOString(),
@@ -13834,22 +13841,17 @@ var Cordon = class {
     return cutOutbound(text, found2);
   }
   /**
-   * The budgets, asked last, of a call that would otherwise go through.
-   *
-   * Only a call that would run spends: a refused one changes nothing in the
-   * world, and counting it would let a page that provokes refusals spend
-   * the owner's budget. Over the limit is a refusal in either mode and never
-   * a question: a budget is the owner's answer given in advance. Several
-   * budgets are reserved one after another; one refusing leaves the others
-   * reserved, which over-counts, the safe direction. A store that cannot be
-   * counted refuses, with the reason in the journal.
-   */
-  /**
    * Counts a call against the policy's budgets, or refuses it. A call that
    * may run spends: allowed, rewritten, or put to a human in the harness,
    * who may say yes (Codex, Kimi: a call behind an approval ran uncounted).
    * The reservations of one call are all or nothing: refused by one budget,
    * it takes back what it reserved in the others.
+   *
+   * A refused call does not spend: counting it would let a page that
+   * provokes refusals spend the owner's budget. Over the limit is a refusal
+   * in either mode and never a question, since a budget is the owner's
+   * answer given in advance. A store that cannot be counted refuses. Only a
+   * classified effect is counted: an unclassified tool matches no budget.
    */
   spend(call, decision) {
     if (decision.kind !== "allow" && decision.kind !== "rewrite" && decision.kind !== "ask") return decision;

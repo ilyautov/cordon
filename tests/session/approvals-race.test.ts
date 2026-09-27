@@ -78,5 +78,26 @@ describe('approve against a take', () => {
     expect(store.approve(id)).not.toBeNull()
     expect(taken).toBe(true)
   })
+
+  it('the mark of an earlier take does not answer for a later approval', () => {
+    // Codex, fifth review: a mark shared by every question under one id let
+    // an approval retired mid-write read as taken.
+    const home = mkdtempSync(join(tmpdir(), 'cordon-home-'))
+    const store = new ApprovalStore(home)
+    const id = 'ce'.repeat(8)
+    const binding = 'ce'.repeat(32)
+    store.request(id, { tool: 'send_email', reason: 'r', args: {}, binding })
+    const asked = fs.readFileSync(store.pendingPath(id), 'utf8')
+    store.approve(id)
+    expect(store.take(id, binding).taken).toBe(true)
+    // The same question asked again, caught between writing its file and
+    // clearing anything left from before.
+    writeFileSync(store.pendingPath(id), asked)
+    interleave = () => {
+      fs.rmSync(store.pendingPath(id), { force: true })
+      fs.rmSync(store.approvedPath(id), { force: true })
+    }
+    expect(store.approve(id)).toBeNull()
+  })
 })
 

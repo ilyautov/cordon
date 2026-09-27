@@ -499,7 +499,13 @@ export class Cordon {
       return refusal
     }
     const taken = approvals.take(id, binding)
-    if (!taken.taken) held.release()
+    if (!taken.taken) {
+      try {
+        held.release()
+      } catch {
+        // A reservation left in place over-counts; the call is refused either way (Kimi).
+      }
+    }
     if (taken.void) {
       // Same id, another binding: a prefix collision or a planted file. Never
       // taken, and never quietly (Kimi).
@@ -640,22 +646,17 @@ export class Cordon {
   }
 
   /**
-   * The budgets, asked last, of a call that would otherwise go through.
-   *
-   * Only a call that would run spends: a refused one changes nothing in the
-   * world, and counting it would let a page that provokes refusals spend
-   * the owner's budget. Over the limit is a refusal in either mode and never
-   * a question: a budget is the owner's answer given in advance. Several
-   * budgets are reserved one after another; one refusing leaves the others
-   * reserved, which over-counts, the safe direction. A store that cannot be
-   * counted refuses, with the reason in the journal.
-   */
-  /**
    * Counts a call against the policy's budgets, or refuses it. A call that
    * may run spends: allowed, rewritten, or put to a human in the harness,
    * who may say yes (Codex, Kimi: a call behind an approval ran uncounted).
    * The reservations of one call are all or nothing: refused by one budget,
    * it takes back what it reserved in the others.
+   *
+   * A refused call does not spend: counting it would let a page that
+   * provokes refusals spend the owner's budget. Over the limit is a refusal
+   * in either mode and never a question, since a budget is the owner's
+   * answer given in advance. A store that cannot be counted refuses. Only a
+   * classified effect is counted: an unclassified tool matches no budget.
    */
   private spend(call: ToolCall, decision: Decision): Decision {
     if (decision.kind !== 'allow' && decision.kind !== 'rewrite' && decision.kind !== 'ask') return decision

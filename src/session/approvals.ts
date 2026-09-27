@@ -14,6 +14,7 @@ import { canonical, sorted } from '../core/canonical.js'
 export const APPROVAL_TTL_MS = 60 * 60 * 1000
 
 const ID = /^[0-9a-f]{16}$/u
+const NONCE = /^[0-9a-f]{16}$/u
 
 /**
  * The identity of one exact call in one session.
@@ -113,8 +114,8 @@ export class ApprovalStore {
     return join(this.dir, `${checked(id)}.approved`)
   }
 
-  takenPath(id: string): string {
-    return join(this.dir, `${checked(id)}.taken`)
+  takenPath(id: string, nonce: string): string {
+    return join(this.dir, `${checked(id)}.taken.${nonce}`)
   }
 
   /** Records that a call waits for the owner. A request already waiting is left as it is. */
@@ -150,9 +151,6 @@ export class ApprovalStore {
     }
     try {
       writeFileSync(this.pendingPath(id), body, { encoding: 'utf8', mode: 0o600, flag: 'wx' })
-      // A mark left by an earlier take of the same question would tell a
-      // later approve that this one was taken too.
-      rmSync(this.takenPath(id), { force: true })
     } catch (error) {
       // Already waiting: the first request stands, and its age with it. Any
       // other failure propagates; the caller's refusal is issued either way.
@@ -170,13 +168,18 @@ export class ApprovalStore {
     // The approval carries the binding it was given under, so a retry in a
     // different context cannot take it.
     const shown: ShownRequest = { tool: request.tool, reason: request.reason, args: request.args, ...(request.context === undefined ? {} : { context: request.context }) }
-    writeFileSync(this.approvedPath(id), request.binding, { mode: 0o600 })
+    // Each approval carries its own nonce, and a take marks the nonce it
+    // took: a mark shared by every question under one id let an approval
+    // retired mid-write read as taken, and a later question's cleanup erase
+    // the mark of one that was (Codex).
+    const nonce = randomBytes(8).toString('hex')
+    writeFileSync(this.approvedPath(id), `${request.binding}\n${nonce}`, { mode: 0o600 })
     // Retired while this ran: the approval would be void anyway, and the
     // owner must not read "approved once" about a question that is gone.
     // Gone because a retry took the approval is the opposite case, and the
     // take leaves a mark saying so (Codex): the call ran on this approval.
     if (this.read(id) === null) {
-      if (existsSync(this.takenPath(id))) return shown
+      if (existsSync(this.takenPath(id, nonce))) return shown
       this.retire(id)
       return null
     }
@@ -221,7 +224,7 @@ export class ApprovalStore {
     }
     try {
       const fresh = Date.now() - statSync(claimed).mtimeMs <= APPROVAL_TTL_MS
-      const given = readFileSync(claimed, 'utf8')
+      const [given, nonce] = readFileSync(claimed, 'utf8').split('\n')
       // An approval is only as good as its question. One whose question was
       // retired, by a retry under a newer context racing the owner's
       // `approve`, is void however it got written (Codex).
@@ -232,7 +235,7 @@ export class ApprovalStore {
       }
       // The mark an `approve` still running reads to tell a take from a
       // retirement; swept with the rest once stale.
-      if (fresh) writeFileSync(this.takenPath(id), '', { mode: 0o600 })
+      if (fresh && nonce !== undefined && NONCE.test(nonce)) writeFileSync(this.takenPath(id, nonce), '', { mode: 0o600 })
       try {
         unlinkSync(this.pendingPath(id))
       } catch {
@@ -305,7 +308,7 @@ export class ApprovalStore {
     }
     for (const name of names) {
       // A claimed approval left by a process that died mid-take is swept too.
-      const id = name.replace(/\.(?:request\.json|approved|taken|taking\.\d+\.[0-9a-f]{8})$/u, '')
+      const id = name.replace(/\.(?:request\.json|approved|taken\.[0-9a-f]{16}|taking\.\d+\.[0-9a-f]{8})$/u, '')
       if (id === name || !ID.test(id)) continue
       if (this.stale(join(this.dir, name))) {
         try {
