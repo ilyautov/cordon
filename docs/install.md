@@ -116,6 +116,8 @@ No profile grants `delete`, `export` or `financial`, because those are irreversi
 
 `cordon policy explain [file]` reads a policy back in plain words, the one in force by default, with the defaults merged in. It says what each field does and what it does not: `destinations` count as named by you after an untrusted read and do not confine where the agent sends before one, `tools` classifies a tool and allows nothing the effects do not grant, and an empty list of paths or hosts bounds nothing. `cordon policy check [file]` validates a file by the loader's own rules and lints it: a destination that matches a whole domain zone or every mailbox at a public provider, the exposure rule switched off, trusted sources, unpinned MCP tools, the shell in autonomous mode, and an autonomous policy with no journal are warnings, and any warning fails the check. Irreversible effects and an unbounded network are notes. Use both on a mandate a model drafted for you: Cordon never calls a model, so the drafting happens outside it, and the reading back happens here, in code.
 
+`cordon policy apply <file>` installs a checked policy as the one in force: it refuses a file the loader refuses, refuses one with warnings unless you pass `--accept-warnings`, prints the explanation, and replaces `policy.yaml` in one rename. The journal records `policy-applied` with the hash of the new policy, the hash of the one it replaced, and the OS user who ran it. The gate refuses this command, like `cordon approve` and `cordon init`, from the agent's own shell.
+
 ### Fields
 
 **`mode`**: `interactive` or `autonomous`. See the section on modes below.

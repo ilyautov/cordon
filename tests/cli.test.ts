@@ -4,7 +4,7 @@ import { PinStore } from '../src/session/pins.js'
 import { ApprovalStore, approvalId } from '../src/session/approvals.js'
 import { spawnSync } from 'node:child_process'
 import { readFileSync, writeFileSync, mkdtempSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { tmpdir, userInfo } from 'node:os'
 import { join } from 'node:path'
 
 const CLI = join(process.cwd(), 'dist', 'cli.js')
@@ -486,6 +486,79 @@ describe('cordon policy check and explain', () => {
     const home = mkdtempSync(join(tmpdir(), 'cordon-home-'))
     writeFileSync(join(home, 'policy.yaml'), 'mode: interactive\n')
     expect(run(['policy', 'explain'], '', { CORDON_HOME: home }).stdout).toContain('Mode: interactive')
+  })
+})
+
+describe('records of who allowed what', () => {
+  beforeAll(() => {
+    ensureBuiltCli()
+  }, 60_000)
+
+  function homeWithJournal(): { home: string; journal: string } {
+    const home = mkdtempSync(join(tmpdir(), 'cordon-home-'))
+    const journal = join(home, 'events.jsonl')
+    writeFileSync(join(home, 'policy.yaml'), `mode: interactive\nnotify:\n  file: ${journal}\n`)
+    return { home, journal }
+  }
+
+  const lines = (path: string) => readFileSync(path, 'utf8').trim().split('\n').map((line) => JSON.parse(line) as Record<string, unknown>)
+
+  it('an approval is journaled with the OS user who gave it', () => {
+    const { home, journal } = homeWithJournal()
+    const id = 'cd'.repeat(8)
+    new ApprovalStore(home).request(id, { tool: 'send_email', reason: 'r', args: { to: 'a@example.com' }, binding: 'cd'.repeat(32) })
+    expect(run(['approve', id], '', { CORDON_HOME: home }).status).toBe(0)
+    const event = lines(journal).find((line) => line.decision === 'approval-given')
+    expect(event?.approver).toBe(userInfo().username)
+    expect(event?.id).toBe(id)
+    expect(event?.binding).toBe('cd'.repeat(32))
+    expect(event?.policy).toMatch(/^[0-9a-f]{64}$/u)
+  })
+
+  it('--as is recorded as declared, apart from the OS user', () => {
+    // Anyone at the shell types any name (Kimi): it is labelled as a claim.
+    const { home, journal } = homeWithJournal()
+    const id = 'ce'.repeat(8)
+    new ApprovalStore(home).request(id, { tool: 'send_email', reason: 'r', args: {}, binding: 'ce'.repeat(32) })
+    run(['approve', id, '--as', 'Ilya'], '', { CORDON_HOME: home })
+    const event = lines(journal).find((line) => line.decision === 'approval-given')
+    expect(event?.declared).toBe('Ilya')
+    expect(event?.approver).toBe(userInfo().username)
+  })
+
+  it('policy apply installs a checked file and journals its hash and who applied it', () => {
+    const { home, journal } = homeWithJournal()
+    const drafted = join(mkdtempSync(join(tmpdir(), 'cordon-draft-')), 'p.yaml')
+    const body = `mode: interactive\nprofile:\n  effects: [read, create]\nnotify:\n  file: ${journal}\n`
+    writeFileSync(drafted, body)
+    const { status, stdout } = run(['policy', 'apply', drafted], '', { CORDON_HOME: home })
+    expect(status).toBe(0)
+    expect(stdout).toContain('The agent may: read, create')
+    expect(readFileSync(join(home, 'policy.yaml'), 'utf8')).toBe(body)
+    const event = lines(journal).find((line) => line.decision === 'policy-applied')
+    expect(event?.approver).toBe(userInfo().username)
+    expect(event?.policy).toMatch(/^[0-9a-f]{64}$/u)
+    expect(event?.previous).toMatch(/^[0-9a-f]{64}$/u)
+    expect(event?.policy).not.toBe(event?.previous)
+  })
+
+  it('policy apply refuses a file with warnings unless they are accepted by name', () => {
+    const { home } = homeWithJournal()
+    const before = readFileSync(join(home, 'policy.yaml'), 'utf8')
+    const drafted = join(mkdtempSync(join(tmpdir(), 'cordon-draft-')), 'p.yaml')
+    writeFileSync(drafted, 'destinations: ["*@gmail.com"]\n')
+    expect(run(['policy', 'apply', drafted], '', { CORDON_HOME: home }).status).toBe(1)
+    expect(readFileSync(join(home, 'policy.yaml'), 'utf8')).toBe(before)
+    expect(run(['policy', 'apply', drafted, '--accept-warnings'], '', { CORDON_HOME: home }).status).toBe(0)
+  })
+
+  it('policy apply refuses a file the loader refuses, and leaves the policy alone', () => {
+    const { home } = homeWithJournal()
+    const before = readFileSync(join(home, 'policy.yaml'), 'utf8')
+    const drafted = join(mkdtempSync(join(tmpdir(), 'cordon-draft-')), 'p.yaml')
+    writeFileSync(drafted, 'mode: sometimes\n')
+    expect(run(['policy', 'apply', drafted], '', { CORDON_HOME: home }).status).toBe(1)
+    expect(readFileSync(join(home, 'policy.yaml'), 'utf8')).toBe(before)
   })
 })
 

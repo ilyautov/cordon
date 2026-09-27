@@ -14,6 +14,26 @@ export interface NotifyEvent {
   rule?: Rule
   class?: AttackClass
   tier?: Tier
+  /** The effective policy the event happened under (src/policy/hash.ts). */
+  policy?: string
+  /** On `policy-applied`: the policy it replaced; null when that one could not be read. */
+  previous?: string | null
+  /**
+   * On an owner's act: the OS user who ran the command. The command runs
+   * outside the agent's hook process, so this is who was at the terminal,
+   * not a proof of which person.
+   */
+  approver?: string
+  /** A name the owner typed with --as: a claim, recorded as one. */
+  declared?: string
+  /** On an approval: the question's id and full binding. */
+  id?: string
+  binding?: string
+}
+
+/** Stamps every event with the policy in force, so no line is read without it. */
+export function stamped(inner: Notifier, policy: string): Notifier {
+  return { notify: (event) => inner.notify({ ...event, policy }) }
 }
 
 /** The journal fields of a rule: the code, and the fixed label it carries. */

@@ -110,6 +110,15 @@ Every refusal, question, argument rewrite, memory write under exposure and MCP t
 | `class` | what the refused call would have done: `untrusted-payload`, `unvouched-destination`, `resource-hop`, `parameter-tampering`, `unscanned-content`, `memory-poisoning`, `tool-rug-pull`, `guard-tampering`, `flooding`, `credential-egress`, `out-of-scope`, `guard-failure` |
 | `tier` | what the rule answers to, and so how much its firing says about an attacker. `evidence`: something from outside was found in the call or the tool list, a matched fragment or a changed tool. `suspicion`: the rule fires only because the session read untrusted content, and nothing read was found in the call; an honest task after reading a page lands here too, and so does content that could not be scanned, such as an image. `precaution`: the rule fires the same whether or not anything untrusted was read; it does not say that nothing untrusted was involved, only that the decision did not turn on it |
 
+Every line also carries `policy`, the sha256 of the effective policy it was decided under, defaults merged in and keys sorted, so a comment or a key order does not change it. The owner's own acts are lines too:
+
+| `decision` | Fields beyond the common ones |
+|---|---|
+| `approval-given` | `id` and `binding` of the question approved, `approver`, and `declared` when `--as` was given |
+| `policy-applied` | `previous`, the hash of the policy replaced (`null` when it could not be read), `approver`, `declared` |
+
+`approver` is the OS user who ran the command. The command runs outside the agent's hook process, so it says who was at the terminal of that account, not which person: anyone at the shell can type any name after `--as`, and `declared` is recorded as that claim and nothing more. An owner's act the journal cannot hold is not given: `cordon approve` refuses and exits 1 when the line cannot be written. A policy applied while the journal failed stays in force, and the command exits 1 and says so.
+
 Filter on `rule`, `class` and `tier` rather than on `reason`: the reason is prose and changes when it is reworded, the codes do not. The mapping from rule to class and tier is fixed, in `src/gate/rules.ts`, and never an input to a decision. Alert on `evidence`; count `suspicion`; `precaution` is a policy that is tighter than the work, not an attack.
 
 On a single machine, `cordon log` prints the journal for a human, with control characters from source labels escaped.

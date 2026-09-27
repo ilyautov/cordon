@@ -3,6 +3,7 @@ import { readdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from '
 import { join } from 'node:path'
 import type { ToolCall } from '../core/types.js'
 import { makeDirectory } from '../core/mkdir.js'
+import { canonical, sorted } from '../core/canonical.js'
 
 /**
  * How long a request waits for the owner, and how long an approval waits for
@@ -28,21 +29,7 @@ export function approvalId(sessionId: string, call: ToolCall): string {
   return createHash('sha256').update(canonical, 'utf8').digest('hex').slice(0, 16)
 }
 
-/** JSON with every object's keys sorted: one spelling per value, for hashing. */
-export function canonical(value: unknown): string {
-  return JSON.stringify(sorted(value)) ?? ''
-}
-
-function sorted(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(sorted)
-  if (typeof value !== 'object' || value === null) return value
-  // No prototype: JSON.parse keeps "__proto__" as an own key, and on a plain
-  // object the assignment below would set the prototype instead, dropping
-  // that subtree from the hash while the upstream still receives it.
-  const result: Record<string, unknown> = Object.create(null) as Record<string, unknown>
-  for (const key of Object.keys(value).sort()) result[key] = sorted((value as Record<string, unknown>)[key])
-  return result
-}
+export { canonical }
 
 export interface ApprovalRequest {
   tool: string

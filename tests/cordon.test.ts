@@ -6,6 +6,7 @@ import { Cordon } from '../src/cordon.js'
 import type { Source } from '../src/core/types.js'
 import { DEFAULT_POLICY, type Policy } from '../src/policy/defaults.js'
 import { SessionStore } from '../src/session/store.js'
+import { policyHash } from '../src/policy/hash.js'
 
 function make(overrides: Partial<Policy> = {}) {
   const home = mkdtempSync(join(tmpdir(), 'cordon-home-'))
@@ -52,6 +53,16 @@ describe('Cordon: the scenario of replying to reviews automatically', () => {
     expect(event.decision).toBe('deny')
     expect(event.tool).toBe('wb_update_price')
     expect(event.source).toBe('wb_reviews')
+  })
+
+  it('every journal line names the policy it was decided under', () => {
+    // An approval or a refusal means nothing without the policy in force at
+    // the time (Kimi); the hash is of the effective policy, defaults merged.
+    const { cordon, log } = make()
+    cordon.gate({ tool: 'wb_update_price', args: { nmId: '1937461028', price: 1 } })
+    const event = JSON.parse(readFileSync(log, 'utf8').trim().split('\n')[0]!)
+    expect(event.policy).toMatch(/^[0-9a-f]{64}$/u)
+    expect(event.policy).toBe(policyHash(cordon.policyInForce()))
   })
 
   it('the journal names the rule, its class and its tier', () => {

@@ -4,7 +4,8 @@ import { gate as decide } from './gate/gate.js'
 import { memoryTarget } from './gate/memory.js'
 import { comparePins, shadows, type HeldTool, type ListedTool } from './gate/pins.js'
 import { pastedSecrets } from './gate/secrets.js'
-import { FileNotifier, SILENT, labelled, type Notifier } from './notify/notifier.js'
+import { FileNotifier, SILENT, labelled, stamped, type Notifier } from './notify/notifier.js'
+import { policyHash } from './policy/hash.js'
 import { cutOutbound, outboundAfterRead } from './output/egress.js'
 import type { Policy } from './policy/defaults.js'
 import { readLookup, vouched, type Observation } from './provenance/bindings.js'
@@ -112,9 +113,9 @@ export class Cordon {
   constructor(options: CordonOptions) {
     this.policy = options.policy
     this.cordonHome = options.cordonHome
-    this.notifier = options.notifier ?? (options.policy.notify.file
+    this.notifier = stamped(options.notifier ?? (options.policy.notify.file
       ? new FileNotifier(options.policy.notify.file)
-      : SILENT)
+      : SILENT), policyHash(options.policy))
 
     this.sessionId = options.sessionId ?? 'default'
     this.sessions = new SessionStore(this.cordonHome)
@@ -393,7 +394,7 @@ export class Cordon {
     const context: ApprovalContext = {
       rule: decision.rule,
       exposure: this.exposure?.source ?? null,
-      policy: digest(canonical(this.policy)),
+      policy: policyHash(this.policy),
       turn: this.turn,
       reads: this.reads,
     }
@@ -540,6 +541,11 @@ export class Cordon {
       source: this.exposure?.source ?? null,
     })
     return cutOutbound(text, found)
+  }
+
+  /** The effective policy this instance decides under. */
+  policyInForce(): Policy {
+    return this.policy
   }
 
   certificate(): Certificate {

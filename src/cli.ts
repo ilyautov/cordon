@@ -1,7 +1,7 @@
 #!/usr/bin/env node
-import { accessSync, constants, existsSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
-import { homedir, tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { accessSync, appendFileSync, constants, existsSync, mkdtempSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { homedir, tmpdir, userInfo } from 'node:os'
+import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { cordonHome, runHook as runClaudeCodeHook } from './adapters/claude-code/main.js'
 import { exitFor } from './adapters/claude-code/protocol.js'
@@ -14,13 +14,16 @@ import { makeDirectory } from './core/mkdir.js'
 import { loadPolicy, loadPolicyFile } from './policy/load.js'
 import { explain, lint } from './policy/explain.js'
 import type { Policy } from './policy/defaults.js'
+import { policyHash } from './policy/hash.js'
+import { labelled, type NotifyEvent } from './notify/notifier.js'
+import { RULES, type Rule } from './gate/rules.js'
 import { PROFILES, renderPolicy } from './policy/templates.js'
 import { sanitize } from './sanitize/index.js'
 import { ApprovalStore, MAX_SHOWN_ARGS, type ShownRequest } from './session/approvals.js'
 import { MemoryLedger } from './session/memory.js'
 
 const USAGE =
-  'usage: cordon scan <file|-> [--json] | cordon hook [--harness claude-code|gemini] | cordon mcp -- <server command...> | cordon mcp approve -- <server command...> | cordon doctor | cordon init [--profile locked|research|documents|coding] [--force] | cordon log [--last N] [--json] | cordon approve [id [--read]] | cordon policy check|explain [file] | cordon audit [dir] [--json|--sarif] [--fail-on high|medium|low]'
+  'usage: cordon scan <file|-> [--json] | cordon hook [--harness claude-code|gemini] | cordon mcp -- <server command...> | cordon mcp approve -- <server command...> | cordon doctor | cordon init [--profile locked|research|documents|coding] [--force] | cordon log [--last N] [--json] | cordon approve [id [--read] [--as name]] | cordon policy check|explain [file] | cordon policy apply <file> [--accept-warnings] [--as name] | cordon audit [dir] [--json|--sarif] [--fail-on high|medium|low]'
 
 /**
  * Event parsing depends on the harness, so the harness is named explicitly.
@@ -859,9 +862,38 @@ function approveCall(args: string[]): number {
     )
     return 1
   }
+  if (request === null) {
+    process.stderr.write(`nothing waits under ${id}: it was never asked for, was already used, is older than an hour, or was asked again under a changed context\n`)
+    return 1
+  }
+  // The record comes first: an approval the journal cannot hold is not
+  // given, because an owner's act nobody can audit afterwards is the gap
+  // this record exists to close.
+  const at = args.indexOf('--as')
+  const declared = at >= 0 ? args[at + 1] : undefined
+  if (at >= 0 && (declared === undefined || declared.startsWith('--'))) {
+    process.stderr.write(`--as takes a name\n${USAGE}\n`)
+    return 2
+  }
+  const recorded = ownerRecord({
+    at: new Date().toISOString(),
+    decision: 'approval-given',
+    tool: request.tool,
+    reason: request.reason,
+    source: request.context?.exposure ?? null,
+    id,
+    binding: request.binding,
+    // The rule is read back from a file: only a known one is labelled.
+    ...(request.context !== undefined && Object.hasOwn(RULES, request.context.rule) ? labelled(request.context.rule as Rule) : {}),
+    ...(declared === undefined ? {} : { declared }),
+  })
+  if (recorded !== null) {
+    process.stderr.write(`cordon approve: the journal could not record the approval, so it is not given: ${visible(recorded)}\n`)
+    return 1
+  }
   const approved = store.approve(id)
   if (approved === null) {
-    process.stderr.write(`nothing waits under ${id}: it was never asked for, was already used, or is older than an hour\n`)
+    process.stderr.write(`nothing waits under ${id}: it expired or was retired while you approved it; the journal line stands, the approval does not\n`)
     return 1
   }
   process.stdout.write(`approved once: ${visible(approved.tool)}\n    arguments: ${visible(approved.args)}\n    ${asked(approved)}${visible(approved.reason)}\n` +
@@ -880,8 +912,9 @@ function approveCall(args: string[]): number {
  */
 function policyCommand(args: string[]): number {
   const [verb, file] = args
+  if (verb === 'apply') return applyPolicy(args.slice(1))
   if (verb !== 'check' && verb !== 'explain') {
-    process.stderr.write(`cordon policy: check or explain\n${USAGE}\n`)
+    process.stderr.write(`cordon policy: check, explain or apply\n${USAGE}\n`)
     return 2
   }
   const path = file ?? join(cordonHome(), 'policy.yaml')
@@ -901,6 +934,97 @@ function policyCommand(args: string[]): number {
   const warnings = findings.filter((finding) => finding.level === 'warning').length
   process.stdout.write(warnings === 0 ? `${path}: valid\n` : `${path}: ${warnings} warning${warnings === 1 ? '' : 's'}\n`)
   return warnings === 0 ? 0 : 1
+}
+
+/**
+ * `cordon policy apply <file> [--accept-warnings] [--as <name>]`: installs a
+ * checked policy as the one in force, and journals which policy replaced
+ * which, and who was at the terminal.
+ *
+ * A file with warnings is refused unless they are accepted by name, so a
+ * mandate a model drafted cannot slip a broad line past a hurried owner.
+ * The file is written beside the old one and renamed over it: a crash in
+ * between leaves one whole policy or the other, never half of each. The
+ * gate refuses this command from the agent's shell (APPROVES in gate.ts).
+ */
+function applyPolicy(args: string[]): number {
+  const file = args[0]
+  if (file === undefined || file.startsWith('--')) {
+    process.stderr.write(`cordon policy apply: which file?\n${USAGE}\n`)
+    return 2
+  }
+  const at = args.indexOf('--as')
+  const declared = at >= 0 ? args[at + 1] : undefined
+  if (at >= 0 && (declared === undefined || declared.startsWith('--'))) {
+    process.stderr.write(`--as takes a name\n${USAGE}\n`)
+    return 2
+  }
+  let body: string
+  let policy: Policy
+  try {
+    body = readFileSync(file, 'utf8')
+    policy = loadPolicyFile(file)
+  } catch (error) {
+    process.stderr.write(`cordon policy apply: ${visible((error as Error).message)}; nothing was applied\n`)
+    return 1
+  }
+  const warnings = lint(policy).filter((finding) => finding.level === 'warning')
+  if (warnings.length > 0 && !args.includes('--accept-warnings')) {
+    for (const warning of warnings) process.stdout.write(`warning: ${visible(warning.text)}\n`)
+    process.stderr.write('cordon policy apply: nothing was applied; accept the warnings with --accept-warnings, or fix the file\n')
+    return 1
+  }
+
+  const home = cordonHome()
+  let previous: string | null
+  try {
+    previous = policyHash(loadPolicy(home))
+  } catch {
+    // The policy in force could not be read: the record says so rather than
+    // inventing a hash for it.
+    previous = null
+  }
+  makeDirectory(home, 0o700)
+  const target = join(home, 'policy.yaml')
+  const staged = join(home, `.policy.yaml.${process.pid}`)
+  writeFileSync(staged, body, { mode: 0o600 })
+  renameSync(staged, target)
+
+  for (const line of explain(policy)) process.stdout.write(`${visible(line)}\n`)
+  const recorded = ownerRecord({
+    at: new Date().toISOString(),
+    decision: 'policy-applied',
+    tool: '(policy)',
+    reason: `${file} applied${warnings.length > 0 ? `, with ${warnings.length} warning${warnings.length === 1 ? '' : 's'} accepted` : ''}`,
+    source: null,
+    previous,
+    ...(declared === undefined ? {} : { declared }),
+  })
+  if (recorded !== null) {
+    process.stderr.write(`cordon policy apply: the policy is in force, but the journal could not record it: ${visible(recorded)}\n`)
+    return 1
+  }
+  process.stdout.write(`applied: ${target}\n`)
+  return 0
+}
+
+/**
+ * Writes an owner's act to the journal of the policy now in force, stamped
+ * with that policy's hash and the OS user. Returns null when written, or why
+ * it was not: unlike the gate's own notifications, a failure here is
+ * reported, because an owner's act is the one line an audit cannot do
+ * without. No journal configured is not a failure: there is nowhere to write.
+ */
+function ownerRecord(event: NotifyEvent): string | null {
+  try {
+    const policy = loadPolicy(cordonHome())
+    if (policy.notify.file === null) return null
+    makeDirectory(dirname(policy.notify.file), 0o755)
+    appendFileSync(policy.notify.file, JSON.stringify({ ...event, approver: userInfo().username, policy: policyHash(policy) }) + '\n', 'utf8')
+    return null
+  } catch (error) {
+    return (error as Error).message
+  }
 }
 
 /** What a question was asked under, in words, ahead of its reason. */

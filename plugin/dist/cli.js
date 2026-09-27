@@ -7367,9 +7367,9 @@ var require_dist = __commonJS({
 });
 
 // src/cli.ts
-import { accessSync as accessSync4, constants as constants4, existsSync, mkdtempSync, readdirSync as readdirSync7, readFileSync as readFileSync7, realpathSync as realpathSync3, rmSync as rmSync5, writeFileSync as writeFileSync6 } from "node:fs";
-import { homedir as homedir6, tmpdir } from "node:os";
-import { join as join14 } from "node:path";
+import { accessSync as accessSync4, appendFileSync as appendFileSync2, constants as constants4, existsSync, mkdtempSync, readdirSync as readdirSync7, readFileSync as readFileSync7, realpathSync as realpathSync3, renameSync as renameSync5, rmSync as rmSync5, writeFileSync as writeFileSync6 } from "node:fs";
+import { homedir as homedir6, tmpdir, userInfo } from "node:os";
+import { dirname as dirname4, join as join14 } from "node:path";
 import { fileURLToPath } from "node:url";
 
 // src/adapters/claude-code/main.ts
@@ -7713,7 +7713,7 @@ function asEffects(value, where) {
 }
 
 // src/cordon.ts
-import { createHash as createHash5 } from "node:crypto";
+import { createHash as createHash6 } from "node:crypto";
 
 // src/core/types.ts
 function humanSeesRendered(source) {
@@ -9179,6 +9179,9 @@ var RULES = {
 };
 
 // src/notify/notifier.ts
+function stamped(inner, policy) {
+  return { notify: (event) => inner.notify({ ...event, policy }) };
+}
 function labelled(rule) {
   return { rule, class: RULES[rule].class, tier: RULES[rule].tier };
 }
@@ -9204,6 +9207,26 @@ var FileNotifier = class {
 };
 var SILENT = { notify: () => {
 } };
+
+// src/policy/hash.ts
+import { createHash as createHash2 } from "node:crypto";
+
+// src/core/canonical.ts
+function canonical(value) {
+  return JSON.stringify(sorted(value)) ?? "";
+}
+function sorted(value) {
+  if (Array.isArray(value)) return value.map(sorted);
+  if (typeof value !== "object" || value === null) return value;
+  const result = /* @__PURE__ */ Object.create(null);
+  for (const key of Object.keys(value).sort()) result[key] = sorted(value[key]);
+  return result;
+}
+
+// src/policy/hash.ts
+function policyHash(policy) {
+  return createHash2("sha256").update(canonical(policy), "utf8").digest("hex");
+}
 
 // src/output/egress.ts
 function outbound(answer, known, userHost = () => false) {
@@ -12080,24 +12103,14 @@ function isEntry(value) {
 }
 
 // src/session/approvals.ts
-import { createHash as createHash2 } from "node:crypto";
+import { createHash as createHash3 } from "node:crypto";
 import { readdirSync as readdirSync2, readFileSync as readFileSync3, statSync as statSync2, unlinkSync, writeFileSync as writeFileSync2 } from "node:fs";
 import { join as join4 } from "node:path";
 var APPROVAL_TTL_MS = 60 * 60 * 1e3;
 var ID = /^[0-9a-f]{16}$/u;
 function approvalId(sessionId, call) {
   const canonical2 = JSON.stringify([sessionId, call.tool, sorted(call.args ?? {})]);
-  return createHash2("sha256").update(canonical2, "utf8").digest("hex").slice(0, 16);
-}
-function canonical(value) {
-  return JSON.stringify(sorted(value)) ?? "";
-}
-function sorted(value) {
-  if (Array.isArray(value)) return value.map(sorted);
-  if (typeof value !== "object" || value === null) return value;
-  const result = /* @__PURE__ */ Object.create(null);
-  for (const key of Object.keys(value).sort()) result[key] = sorted(value[key]);
-  return result;
+  return createHash3("sha256").update(canonical2, "utf8").digest("hex").slice(0, 16);
 }
 var BINDING = /^(?:[0-9a-f]{64})?$/u;
 var MAX_SHOWN_ARGS = 4e3;
@@ -12291,11 +12304,11 @@ function checked(id) {
 }
 
 // src/session/pins.ts
-import { createHash as createHash3 } from "node:crypto";
+import { createHash as createHash4 } from "node:crypto";
 import { readdirSync as readdirSync3, readFileSync as readFileSync4, renameSync as renameSync3, rmSync as rmSync2, writeFileSync as writeFileSync3 } from "node:fs";
 import { join as join5 } from "node:path";
 function serverId(command) {
-  return createHash3("sha256").update(JSON.stringify(command), "utf8").digest("hex").slice(0, 24);
+  return createHash4("sha256").update(JSON.stringify(command), "utf8").digest("hex").slice(0, 24);
 }
 var PinStore = class {
   dir;
@@ -12392,7 +12405,7 @@ var PinStore = class {
 };
 
 // src/session/store.ts
-import { createHash as createHash4, randomBytes as randomBytes2 } from "node:crypto";
+import { createHash as createHash5, randomBytes as randomBytes2 } from "node:crypto";
 import { readFileSync as readFileSync5, readdirSync as readdirSync4, renameSync as renameSync4, rmSync as rmSync3, writeFileSync as writeFileSync4 } from "node:fs";
 import { join as join6 } from "node:path";
 
@@ -13094,7 +13107,7 @@ function shown(sessionId) {
 }
 function safeName(sessionId) {
   const cleaned = sessionId.replace(/[^a-zA-Z0-9_-]/gu, "_").slice(0, 64);
-  const digest2 = createHash4("sha256").update(sessionId, "utf8").digest("hex").slice(0, 16);
+  const digest2 = createHash5("sha256").update(sessionId, "utf8").digest("hex").slice(0, 16);
   return cleaned === "" ? digest2 : `${cleaned}-${digest2}`;
 }
 function isExposure(value) {
@@ -13269,7 +13282,7 @@ var Cordon = class {
   constructor(options) {
     this.policy = options.policy;
     this.cordonHome = options.cordonHome;
-    this.notifier = options.notifier ?? (options.policy.notify.file ? new FileNotifier(options.policy.notify.file) : SILENT);
+    this.notifier = stamped(options.notifier ?? (options.policy.notify.file ? new FileNotifier(options.policy.notify.file) : SILENT), policyHash(options.policy));
     this.sessionId = options.sessionId ?? "default";
     this.sessions = new SessionStore(this.cordonHome);
     const restored = this.sessions.load(this.sessionId);
@@ -13441,7 +13454,7 @@ var Cordon = class {
     const context = {
       rule: decision.rule,
       exposure: this.exposure?.source ?? null,
-      policy: digest(canonical(this.policy)),
+      policy: policyHash(this.policy),
       turn: this.turn,
       reads: this.reads
     };
@@ -13584,6 +13597,10 @@ var Cordon = class {
       source: this.exposure?.source ?? null
     });
     return cutOutbound(text, found2);
+  }
+  /** The effective policy this instance decides under. */
+  policyInForce() {
+    return this.policy;
   }
   certificate() {
     return this.cert;
@@ -13752,7 +13769,7 @@ function changed(earlier, now) {
   return "in a different context: the certificate or what was read has changed";
 }
 function digest(text) {
-  return createHash5("sha256").update(text, "utf8").digest("hex");
+  return createHash6("sha256").update(text, "utf8").digest("hex");
 }
 
 // src/output/subject.ts
@@ -14767,7 +14784,7 @@ function failure2(event, reason) {
 
 // src/adapters/mcp/gateway.ts
 import { spawn } from "node:child_process";
-import { createHash as createHash6 } from "node:crypto";
+import { createHash as createHash7 } from "node:crypto";
 import { accessSync as accessSync3, constants as constants3 } from "node:fs";
 import { join as join11 } from "node:path";
 import { createInterface } from "node:readline";
@@ -14833,7 +14850,7 @@ function runGateway(options) {
       finish(1, `the home directory is not usable: ${error.message}`);
       return;
     }
-    const sessionId = `mcp-${createHash6("sha256").update(options.command.join(" "), "utf8").digest("hex").slice(0, 12)}-${process.pid}`;
+    const sessionId = `mcp-${createHash7("sha256").update(options.command.join(" "), "utf8").digest("hex").slice(0, 12)}-${process.pid}`;
     let cordon;
     try {
       cordon = new Cordon({ policy: options.policy, cordonHome: options.cordonHome, sessionId });
@@ -15672,7 +15689,7 @@ notify:
 }
 
 // src/cli.ts
-var USAGE = "usage: cordon scan <file|-> [--json] | cordon hook [--harness claude-code|gemini] | cordon mcp -- <server command...> | cordon mcp approve -- <server command...> | cordon doctor | cordon init [--profile locked|research|documents|coding] [--force] | cordon log [--last N] [--json] | cordon approve [id [--read]] | cordon policy check|explain [file] | cordon audit [dir] [--json|--sarif] [--fail-on high|medium|low]";
+var USAGE = "usage: cordon scan <file|-> [--json] | cordon hook [--harness claude-code|gemini] | cordon mcp -- <server command...> | cordon mcp approve -- <server command...> | cordon doctor | cordon init [--profile locked|research|documents|coding] [--force] | cordon log [--last N] [--json] | cordon approve [id [--read] [--as name]] | cordon policy check|explain [file] | cordon policy apply <file> [--accept-warnings] [--as name] | cordon audit [dir] [--json|--sarif] [--fail-on high|medium|low]";
 var HARNESSES = /* @__PURE__ */ new Map([
   ["claude-code", runHook],
   ["gemini", runHook2]
@@ -16230,9 +16247,39 @@ read all of them in ${store.pendingPath(id)}, then approve with: cordon approve 
     );
     return 1;
   }
+  if (request === null) {
+    process.stderr.write(`nothing waits under ${id}: it was never asked for, was already used, is older than an hour, or was asked again under a changed context
+`);
+    return 1;
+  }
+  const at = args.indexOf("--as");
+  const declared = at >= 0 ? args[at + 1] : void 0;
+  if (at >= 0 && (declared === void 0 || declared.startsWith("--"))) {
+    process.stderr.write(`--as takes a name
+${USAGE}
+`);
+    return 2;
+  }
+  const recorded = ownerRecord({
+    at: (/* @__PURE__ */ new Date()).toISOString(),
+    decision: "approval-given",
+    tool: request.tool,
+    reason: request.reason,
+    source: request.context?.exposure ?? null,
+    id,
+    binding: request.binding,
+    // The rule is read back from a file: only a known one is labelled.
+    ...request.context !== void 0 && Object.hasOwn(RULES, request.context.rule) ? labelled(request.context.rule) : {},
+    ...declared === void 0 ? {} : { declared }
+  });
+  if (recorded !== null) {
+    process.stderr.write(`cordon approve: the journal could not record the approval, so it is not given: ${visible(recorded)}
+`);
+    return 1;
+  }
   const approved = store.approve(id);
   if (approved === null) {
-    process.stderr.write(`nothing waits under ${id}: it was never asked for, was already used, or is older than an hour
+    process.stderr.write(`nothing waits under ${id}: it expired or was retired while you approved it; the journal line stands, the approval does not
 `);
     return 1;
   }
@@ -16245,8 +16292,9 @@ the agent's next identical call goes through, and only that one, while nothing m
 }
 function policyCommand(args) {
   const [verb, file] = args;
+  if (verb === "apply") return applyPolicy(args.slice(1));
   if (verb !== "check" && verb !== "explain") {
-    process.stderr.write(`cordon policy: check or explain
+    process.stderr.write(`cordon policy: check, explain or apply
 ${USAGE}
 `);
     return 2;
@@ -16273,6 +16321,82 @@ ${USAGE}
 ` : `${path}: ${warnings} warning${warnings === 1 ? "" : "s"}
 `);
   return warnings === 0 ? 0 : 1;
+}
+function applyPolicy(args) {
+  const file = args[0];
+  if (file === void 0 || file.startsWith("--")) {
+    process.stderr.write(`cordon policy apply: which file?
+${USAGE}
+`);
+    return 2;
+  }
+  const at = args.indexOf("--as");
+  const declared = at >= 0 ? args[at + 1] : void 0;
+  if (at >= 0 && (declared === void 0 || declared.startsWith("--"))) {
+    process.stderr.write(`--as takes a name
+${USAGE}
+`);
+    return 2;
+  }
+  let body;
+  let policy;
+  try {
+    body = readFileSync7(file, "utf8");
+    policy = loadPolicyFile(file);
+  } catch (error) {
+    process.stderr.write(`cordon policy apply: ${visible(error.message)}; nothing was applied
+`);
+    return 1;
+  }
+  const warnings = lint(policy).filter((finding) => finding.level === "warning");
+  if (warnings.length > 0 && !args.includes("--accept-warnings")) {
+    for (const warning of warnings) process.stdout.write(`warning: ${visible(warning.text)}
+`);
+    process.stderr.write("cordon policy apply: nothing was applied; accept the warnings with --accept-warnings, or fix the file\n");
+    return 1;
+  }
+  const home = cordonHome();
+  let previous;
+  try {
+    previous = policyHash(loadPolicy(home));
+  } catch {
+    previous = null;
+  }
+  makeDirectory(home, 448);
+  const target = join14(home, "policy.yaml");
+  const staged = join14(home, `.policy.yaml.${process.pid}`);
+  writeFileSync6(staged, body, { mode: 384 });
+  renameSync5(staged, target);
+  for (const line of explain(policy)) process.stdout.write(`${visible(line)}
+`);
+  const recorded = ownerRecord({
+    at: (/* @__PURE__ */ new Date()).toISOString(),
+    decision: "policy-applied",
+    tool: "(policy)",
+    reason: `${file} applied${warnings.length > 0 ? `, with ${warnings.length} warning${warnings.length === 1 ? "" : "s"} accepted` : ""}`,
+    source: null,
+    previous,
+    ...declared === void 0 ? {} : { declared }
+  });
+  if (recorded !== null) {
+    process.stderr.write(`cordon policy apply: the policy is in force, but the journal could not record it: ${visible(recorded)}
+`);
+    return 1;
+  }
+  process.stdout.write(`applied: ${target}
+`);
+  return 0;
+}
+function ownerRecord(event) {
+  try {
+    const policy = loadPolicy(cordonHome());
+    if (policy.notify.file === null) return null;
+    makeDirectory(dirname4(policy.notify.file), 493);
+    appendFileSync2(policy.notify.file, JSON.stringify({ ...event, approver: userInfo().username, policy: policyHash(policy) }) + "\n", "utf8");
+    return null;
+  } catch (error) {
+    return error.message;
+  }
 }
 function asked(request) {
   const context = request.context;
