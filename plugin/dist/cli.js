@@ -8607,10 +8607,6 @@ function decide(call, ctx) {
     return escalate(ctx, "provenance", `an argument carries a target from an untrusted source: ${targets.map(safeLabel).join(", ")}`, blamed);
   }
   if (returnsToOrigin(scan.sources, parts, verdict.effects)) return { kind: "allow" };
-  const exposedToo = exposedCall(call.tool, verdict.effects, parts, ctx, bound);
-  if (exposedToo) {
-    return escalate(ctx, ctx.exposure?.memory === true ? "memory-carry" : "exposure", exposedToo, ctx.exposure?.source);
-  }
   if (scan.nested) {
     return escalate(ctx, "provenance", `quarantine is impossible: the untrusted fragment sits inside a nested argument${origin(blamedLabels)}`, blamed);
   }
@@ -8634,6 +8630,10 @@ function decide(call, ctx) {
   const cleaned = quarantine(own2, scan.spans);
   if (!cleaned.possible) {
     return escalate(ctx, "provenance", `quarantine is impossible: ${cleaned.reason}${origin(blamedLabels)}`, blamed);
+  }
+  const exposedToo = exposedCall(call.tool, verdict.effects, parts, ctx, bound);
+  if (exposedToo) {
+    return escalate(ctx, ctx.exposure?.memory === true ? "memory-carry" : "exposure", exposedToo, ctx.exposure?.source);
   }
   return {
     kind: "rewrite",
