@@ -12066,8 +12066,7 @@ var ApprovalStore = class {
   /** Records that a call waits for the owner. A request already waiting is left as it is. */
   request(id, request) {
     makeDirectory(this.dir, 448);
-    const shown2 = JSON.stringify(sorted(request.args ?? {})) ?? "";
-    const args = shown2.length > MAX_SHOWN_ARGS ? `${shown2.slice(0, MAX_SHOWN_ARGS)}\u2026 (${shown2.length} characters in all)` : shown2;
+    const args = JSON.stringify(sorted(request.args ?? {})) ?? "";
     const body = JSON.stringify({ tool: request.tool, reason: request.reason, args, at: (/* @__PURE__ */ new Date()).toISOString() });
     if (this.stale(this.pendingPath(id))) {
       for (const path of [this.pendingPath(id), this.approvedPath(id)]) {
@@ -12138,6 +12137,9 @@ var ApprovalStore = class {
     return result;
   }
   /** A waiting request that is still fresh, or null. */
+  waiting(id) {
+    return this.read(checked(id));
+  }
   read(id) {
     const path = this.pendingPath(id);
     try {
@@ -15348,7 +15350,7 @@ notify:
 }
 
 // src/cli.ts
-var USAGE = "usage: cordon scan <file|-> [--json] | cordon hook [--harness claude-code|gemini] | cordon mcp -- <server command...> | cordon mcp approve -- <server command...> | cordon doctor | cordon init [--profile locked|research|documents|coding] [--force] | cordon log [--last N] [--json] | cordon approve [id] | cordon audit [dir] [--json|--sarif] [--fail-on high|medium|low]";
+var USAGE = "usage: cordon scan <file|-> [--json] | cordon hook [--harness claude-code|gemini] | cordon mcp -- <server command...> | cordon mcp approve -- <server command...> | cordon doctor | cordon init [--profile locked|research|documents|coding] [--force] | cordon log [--last N] [--json] | cordon approve [id [--read]] | cordon audit [dir] [--json|--sarif] [--fail-on high|medium|low]";
 var HARNESSES = /* @__PURE__ */ new Map([
   ["claude-code", runHook],
   ["gemini", runHook2]
@@ -15883,7 +15885,7 @@ function approveCall(args) {
     }
     for (const item of waiting) {
       process.stdout.write(`${item.id}  ${visible(item.at)}  ${visible(item.tool)}
-    arguments: ${visible(item.args)}
+    arguments: ${visible(shortened(item.args, store.pendingPath(item.id)))}
     ${visible(item.reason)}
 `);
     }
@@ -15895,6 +15897,15 @@ function approveCall(args) {
 ${USAGE}
 `);
     return 2;
+  }
+  const request = store.waiting(id);
+  if (request !== null && request.args.length > MAX_SHOWN_ARGS && !args.includes("--read")) {
+    process.stderr.write(
+      `the arguments run to ${request.args.length} characters, more than a terminal shows
+read all of them in ${store.pendingPath(id)}, then approve with: cordon approve ${id} --read
+`
+    );
+    return 1;
   }
   const approved = store.approve(id);
   if (approved === null) {
@@ -15908,6 +15919,10 @@ ${USAGE}
 the agent's next identical call goes through, and only that one
 `);
   return 0;
+}
+function shortened(args, path) {
+  if (args.length <= MAX_SHOWN_ARGS) return args;
+  return `${args.slice(0, MAX_SHOWN_ARGS)}\u2026 (${args.length} characters in all, every one of them in ${path})`;
 }
 function showLog(args) {
   const asJson = args.includes("--json");

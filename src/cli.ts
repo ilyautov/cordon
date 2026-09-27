@@ -14,11 +14,11 @@ import { makeDirectory } from './core/mkdir.js'
 import { loadPolicy } from './policy/load.js'
 import { PROFILES, renderPolicy } from './policy/templates.js'
 import { sanitize } from './sanitize/index.js'
-import { ApprovalStore } from './session/approvals.js'
+import { ApprovalStore, MAX_SHOWN_ARGS } from './session/approvals.js'
 import { MemoryLedger } from './session/memory.js'
 
 const USAGE =
-  'usage: cordon scan <file|-> [--json] | cordon hook [--harness claude-code|gemini] | cordon mcp -- <server command...> | cordon mcp approve -- <server command...> | cordon doctor | cordon init [--profile locked|research|documents|coding] [--force] | cordon log [--last N] [--json] | cordon approve [id] | cordon audit [dir] [--json|--sarif] [--fail-on high|medium|low]'
+  'usage: cordon scan <file|-> [--json] | cordon hook [--harness claude-code|gemini] | cordon mcp -- <server command...> | cordon mcp approve -- <server command...> | cordon doctor | cordon init [--profile locked|research|documents|coding] [--force] | cordon log [--last N] [--json] | cordon approve [id [--read]] | cordon audit [dir] [--json|--sarif] [--fail-on high|medium|low]'
 
 /**
  * Event parsing depends on the harness, so the harness is named explicitly.
@@ -838,7 +838,7 @@ function approveCall(args: string[]): number {
       return 0
     }
     for (const item of waiting) {
-      process.stdout.write(`${item.id}  ${visible(item.at)}  ${visible(item.tool)}\n    arguments: ${visible(item.args)}\n    ${visible(item.reason)}\n`)
+      process.stdout.write(`${item.id}  ${visible(item.at)}  ${visible(item.tool)}\n    arguments: ${visible(shortened(item.args, store.pendingPath(item.id)))}\n    ${visible(item.reason)}\n`)
     }
     process.stdout.write('approve one call with: cordon approve <id>\n')
     return 0
@@ -847,6 +847,14 @@ function approveCall(args: string[]): number {
     process.stderr.write(`not an approval id: ${visible(id)}\n${USAGE}\n`)
     return 2
   }
+  const request = store.waiting(id)
+  if (request !== null && request.args.length > MAX_SHOWN_ARGS && !args.includes('--read')) {
+    process.stderr.write(
+      `the arguments run to ${request.args.length} characters, more than a terminal shows\n` +
+        `read all of them in ${store.pendingPath(id)}, then approve with: cordon approve ${id} --read\n`,
+    )
+    return 1
+  }
   const approved = store.approve(id)
   if (approved === null) {
     process.stderr.write(`nothing waits under ${id}: it was never asked for, was already used, or is older than an hour\n`)
@@ -854,6 +862,12 @@ function approveCall(args: string[]): number {
   }
   process.stdout.write(`approved once: ${visible(approved.tool)}\n    arguments: ${visible(approved.args)}\n    ${visible(approved.reason)}\nthe agent's next identical call goes through, and only that one\n`)
   return 0
+}
+
+/** Arguments for a listing: cut when long, with where the whole of them is. */
+function shortened(args: string, path: string): string {
+  if (args.length <= MAX_SHOWN_ARGS) return args
+  return `${args.slice(0, MAX_SHOWN_ARGS)}… (${args.length} characters in all, every one of them in ${path})`
 }
 
 function showLog(args: string[]): number {

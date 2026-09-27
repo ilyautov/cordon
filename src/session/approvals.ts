@@ -58,8 +58,12 @@ export interface PendingApproval extends ShownRequest {
   at: string
 }
 
-/** Enough of the arguments to judge them, not a whole attached file. */
-const MAX_SHOWN_ARGS = 4000
+/**
+ * How much of the arguments a terminal listing shows. Only the listing is
+ * cut: the request file keeps every argument, and a request longer than this
+ * is not approved until the owner says they read the file.
+ */
+export const MAX_SHOWN_ARGS = 4000
 
 /**
  * One-time approvals for transports with no one to ask: the MCP gateway and
@@ -90,8 +94,10 @@ export class ApprovalStore {
   /** Records that a call waits for the owner. A request already waiting is left as it is. */
   request(id: string, request: ApprovalRequest): void {
     makeDirectory(this.dir, 0o700)
-    const shown = JSON.stringify(sorted(request.args ?? {})) ?? ''
-    const args = shown.length > MAX_SHOWN_ARGS ? `${shown.slice(0, MAX_SHOWN_ARGS)}… (${shown.length} characters in all)` : shown
+    // Whole, never cut. Keys are sorted, so a long body pushes whatever sorts
+    // after it (a "to", say) past any cut: the owner would approve a
+    // recipient they were never shown.
+    const args = JSON.stringify(sorted(request.args ?? {})) ?? ''
     const body = JSON.stringify({ tool: request.tool, reason: request.reason, args, at: new Date().toISOString() })
     // A request past its hour can no longer be approved, so it is replaced
     // rather than left to block the id forever; an approval left over from it
@@ -175,6 +181,10 @@ export class ApprovalStore {
   }
 
   /** A waiting request that is still fresh, or null. */
+  waiting(id: string): (ShownRequest & { at: string }) | null {
+    return this.read(checked(id))
+  }
+
   private read(id: string): (ShownRequest & { at: string }) | null {
     const path = this.pendingPath(id)
     try {

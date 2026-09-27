@@ -4,6 +4,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versions follo
 
 ## [Unreleased]
 
+`cordon approve` no longer approves arguments the owner could not see. The request file kept only the first 4000 characters of the arguments, with their keys sorted, so a long `body` pushed the `to` past the cut: the owner approved a recipient that was never shown. The file now keeps every argument; the listing still cuts, names the file, and a call longer than the cut is approved only with `--read`. Codex found it in a design review.
+
 `docs/comparison.md` places Cordon against the projects whose source we read in September 2026: IntentCap, Progent, Cupcake, Microsoft's Agent Governance Toolkit, the shipped FIDES, Docker's MCP gateway, Invariant and mcpguard-dynamic. It also corrects two stale claims: Cordon does refuse a call that carries a credential off the machine, and interactive utility is 96 of 97, not 100%.
 
 ## [0.10.0] - 2026-09-27

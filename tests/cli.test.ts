@@ -378,6 +378,44 @@ describe('cordon approve', () => {
     expect(stderr).toContain('nothing waits')
   })
 
+  // Keys are sorted, so a long body puts the recipient after the cut: the owner
+  // would approve an address they were never shown.
+  function waitingLong() {
+    const home = mkdtempSync(join(tmpdir(), 'cordon-approve-'))
+    const args = { body: 'x'.repeat(5000), to: 'attacker@evil.example' }
+    const id = approvalId('s', { tool: 'send_email', args })
+    new ApprovalStore(home).request(id, { tool: 'send_email', reason: 'outside the certificate', args })
+    return { home, id }
+  }
+
+  it('arguments longer than the screen are not approved unseen', () => {
+    const { home, id } = waitingLong()
+    const { stderr, status } = run(['approve', id], '', { CORDON_HOME: home })
+    expect(status).toBe(1)
+    expect(stderr).toContain(new ApprovalStore(home).pendingPath(id))
+    expect(stderr).toContain('--read')
+    expect(new ApprovalStore(home).consume(id)).toBe(false)
+  })
+
+  it('the listing points to the whole request when it cuts the arguments', () => {
+    const { home, id } = waitingLong()
+    const { stdout } = run(['approve'], '', { CORDON_HOME: home })
+    expect(stdout).toContain(new ApprovalStore(home).pendingPath(id))
+  })
+
+  it('the request file holds every argument, the recipient past the cut included', () => {
+    const { home, id } = waitingLong()
+    expect(readFileSync(new ApprovalStore(home).pendingPath(id), 'utf8')).toContain('attacker@evil.example')
+  })
+
+  it('with --read, a long request is approved and said back whole', () => {
+    const { home, id } = waitingLong()
+    const { stdout, status } = run(['approve', id, '--read'], '', { CORDON_HOME: home })
+    expect(status).toBe(0)
+    expect(stdout).toContain('attacker@evil.example')
+    expect(new ApprovalStore(home).consume(id)).toBe(true)
+  })
+
   it('a malformed id is a usage error', () => {
     expect(run(['approve', '../policy'], '', { CORDON_HOME: mkdtempSync(join(tmpdir(), 'cordon-approve-')) }).status).toBe(2)
   })
