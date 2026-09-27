@@ -388,7 +388,7 @@ const PERIODS: ReadonlySet<string> = new Set(['minute', 'hour', 'day'])
 
 function asBudgets(value: unknown, where: string): Budget[] {
   if (!Array.isArray(value)) throw new Error(`${where}: expected a list`)
-  return value.map((item, index) => {
+  const budgets = value.map((item, index): Budget => {
     const entry = asObject(item, `${where}[${index}]`)
     onlyKnown(entry, ['effect', 'limit', 'per'], where, `[${index}].`)
     const { effect, limit, per } = entry
@@ -401,4 +401,13 @@ function asBudgets(value: unknown, where: string): Budget[] {
     if (typeof per !== 'string' || !PERIODS.has(per)) throw new Error(`${where}[${index}]: per must be minute, hour or day, not ${String(per)}`)
     return { effect: effect as EffectClass, limit, per: per as Budget['per'] }
   })
+  // Two budgets on one effect and window share one count, and the second
+  // would refuse every call the first let by (Codex).
+  const seen = new Set<string>()
+  for (const budget of budgets) {
+    const key = `${budget.effect} per ${budget.per}`
+    if (seen.has(key)) throw new Error(`${where}: two budgets for ${key}; keep one`)
+    seen.add(key)
+  }
+  return budgets
 }

@@ -7727,7 +7727,7 @@ function asEffects(value, where) {
 var PERIODS = /* @__PURE__ */ new Set(["minute", "hour", "day"]);
 function asBudgets(value, where) {
   if (!Array.isArray(value)) throw new Error(`${where}: expected a list`);
-  return value.map((item, index) => {
+  const budgets = value.map((item, index) => {
     const entry = asObject(item, `${where}[${index}]`);
     onlyKnown(entry, ["effect", "limit", "per"], where, `[${index}].`);
     const { effect, limit, per } = entry;
@@ -7738,10 +7738,17 @@ function asBudgets(value, where) {
     if (typeof per !== "string" || !PERIODS.has(per)) throw new Error(`${where}[${index}]: per must be minute, hour or day, not ${String(per)}`);
     return { effect, limit, per };
   });
+  const seen = /* @__PURE__ */ new Set();
+  for (const budget of budgets) {
+    const key = `${budget.effect} per ${budget.per}`;
+    if (seen.has(key)) throw new Error(`${where}: two budgets for ${key}; keep one`);
+    seen.add(key);
+  }
+  return budgets;
 }
 
 // src/cordon.ts
-import { createHash as createHash7, randomBytes as randomBytes5 } from "node:crypto";
+import { createHash as createHash6, randomBytes as randomBytes5 } from "node:crypto";
 
 // src/core/types.ts
 function humanSeesRendered(source) {
@@ -8013,8 +8020,23 @@ function classify(call, fromPolicy) {
   }
   return { effects: [...declared], classified: true, reason: "" };
 }
+var GEMINI_BUILTIN = {
+  read_file: ["read"],
+  read_many_files: ["read"],
+  list_directory: ["read"],
+  glob: ["read"],
+  search_file_content: ["read"],
+  web_fetch: ["read", "network-egress"],
+  google_web_search: ["read", "network-egress"],
+  write_file: ["create", "update"],
+  replace: ["update"],
+  run_shell_command: ["exec"],
+  // A write into the agent's persistent memory outlives the session, that is,
+  // it changes the behaviour of future turns. That is an edit, not a note.
+  save_memory: ["create", "update"]
+};
 function builtinEffects(tool) {
-  return declaredFor(BUILTIN, tool) ?? null;
+  return declaredFor(BUILTIN, tool) ?? declaredFor(GEMINI_BUILTIN, tool) ?? null;
 }
 
 // src/gate/memory.ts
@@ -12169,6 +12191,9 @@ var ApprovalStore = class {
   approvedPath(id) {
     return join4(this.dir, `${checked(id)}.approved`);
   }
+  takenPath(id) {
+    return join4(this.dir, `${checked(id)}.taken`);
+  }
   /** Records that a call waits for the owner. A request already waiting is left as it is. */
   request(id, request) {
     makeDirectory(this.dir, 448);
@@ -12195,6 +12220,7 @@ var ApprovalStore = class {
     }
     try {
       writeFileSync2(this.pendingPath(id), body, { encoding: "utf8", mode: 384, flag: "wx" });
+      rmSync2(this.takenPath(id), { force: true });
     } catch (error) {
       if (error.code !== "EEXIST") throw error;
     }
@@ -12206,12 +12232,14 @@ var ApprovalStore = class {
   approve(id) {
     const request = this.read(id);
     if (request === null) return null;
+    const shown2 = { tool: request.tool, reason: request.reason, args: request.args, ...request.context === void 0 ? {} : { context: request.context } };
     writeFileSync2(this.approvedPath(id), request.binding, { mode: 384 });
     if (this.read(id) === null) {
+      if (existsSync(this.takenPath(id))) return shown2;
       this.retire(id);
       return null;
     }
-    return { tool: request.tool, reason: request.reason, args: request.args, ...request.context === void 0 ? {} : { context: request.context } };
+    return shown2;
   }
   stale(path) {
     try {
@@ -12249,6 +12277,7 @@ var ApprovalStore = class {
         this.retire(id);
         return { taken: false, void: true };
       }
+      if (fresh) writeFileSync2(this.takenPath(id), "", { mode: 384 });
       try {
         unlinkSync(this.pendingPath(id));
       } catch {
@@ -12313,7 +12342,7 @@ var ApprovalStore = class {
       return;
     }
     for (const name of names2) {
-      const id = name.replace(/\.(?:request\.json|approved|taking\.\d+\.[0-9a-f]{8})$/u, "");
+      const id = name.replace(/\.(?:request\.json|approved|taken|taking\.\d+\.[0-9a-f]{8})$/u, "");
       if (id === name || !ID.test(id)) continue;
       if (this.stale(join4(this.dir, name))) {
         try {
@@ -12485,7 +12514,7 @@ var PinStore = class {
 };
 
 // src/session/budgets.ts
-import { createHash as createHash5, randomBytes as randomBytes3 } from "node:crypto";
+import { randomBytes as randomBytes3 } from "node:crypto";
 import { readdirSync as readdirSync4, unlinkSync as unlinkSync2, writeFileSync as writeFileSync4 } from "node:fs";
 import { join as join6 } from "node:path";
 var WINDOW_MS = {
@@ -12498,12 +12527,12 @@ var BudgetStore = class {
   constructor(cordonHome2) {
     this.dir = join6(cordonHome2, "budgets");
   }
-  keyFor(policy, budget) {
-    return createHash5("sha256").update(JSON.stringify([policy, budget.effect, budget.per, budget.limit]), "utf8").digest("hex").slice(0, 32);
+  keyFor(budget) {
+    return `${budget.effect}-${budget.per}`;
   }
   /** Reserves one call in the window, or refuses and reserves nothing. */
-  reserve(policy, budget, now = Date.now()) {
-    const dir = join6(this.dir, this.keyFor(policy, budget));
+  reserve(budget, now = Date.now()) {
+    const dir = join6(this.dir, this.keyFor(budget));
     makeDirectory(dir, 448);
     const own2 = `${now.toString(36).padStart(10, "0")}-${randomBytes3(6).toString("hex")}`;
     writeFileSync4(join6(dir, own2), "", { mode: 384, flag: "wx" });
@@ -12521,16 +12550,20 @@ var BudgetStore = class {
       }
       counted++;
     }
-    if (counted > budget.limit) {
+    const release = () => {
       unlinkSync2(join6(dir, own2));
-      return { ok: false, used: counted - 1 };
+    };
+    if (counted > budget.limit) {
+      release();
+      return { ok: false, used: counted - 1, release: () => {
+      } };
     }
-    return { ok: true, used: counted - 1 };
+    return { ok: true, used: counted - 1, release };
   }
 };
 
 // src/session/store.ts
-import { createHash as createHash6, randomBytes as randomBytes4 } from "node:crypto";
+import { createHash as createHash5, randomBytes as randomBytes4 } from "node:crypto";
 import { readFileSync as readFileSync5, readdirSync as readdirSync5, renameSync as renameSync5, rmSync as rmSync4, writeFileSync as writeFileSync5 } from "node:fs";
 import { join as join7 } from "node:path";
 
@@ -13234,7 +13267,7 @@ function shown(sessionId) {
 }
 function safeName(sessionId) {
   const cleaned = sessionId.replace(/[^a-zA-Z0-9_-]/gu, "_").slice(0, 64);
-  const digest2 = createHash6("sha256").update(sessionId, "utf8").digest("hex").slice(0, 16);
+  const digest2 = createHash5("sha256").update(sessionId, "utf8").digest("hex").slice(0, 16);
   return cleaned === "" ? digest2 : `${cleaned}-${digest2}`;
 }
 function isExposure(value) {
@@ -13564,6 +13597,14 @@ var Cordon = class {
     return new PinStore(cordonHome2).forget(command);
   }
   gate(call) {
+    return this.judge(call, true);
+  }
+  /**
+   * The decision, spent against the budgets. A question spends when a human
+   * in the harness answers it; asked of nobody, it spends only when an
+   * approval is taken (gateUnattended), or every retry would count twice.
+   */
+  judge(call, askSpends) {
     let decision = gate(call, {
       policy: this.policy,
       cert: this.cert,
@@ -13579,7 +13620,7 @@ var Cordon = class {
       assigned: new Set(this.turnNames.turn === this.turn ? this.turnNames.assigned ?? [] : []),
       heldTools: this.heldTools
     });
-    decision = this.spend(call, decision);
+    if (askSpends || decision.kind !== "ask") decision = this.spend(call, decision);
     this.recordMemory(call, decision);
     if (decision.kind === "deny" || decision.kind === "ask" || decision.kind === "rewrite") {
       this.notifier.notify({
@@ -13617,7 +13658,7 @@ var Cordon = class {
       return { kind: "deny", rule: "failure", reason: moved };
     }
     this.refresh();
-    const decision = this.gate(call);
+    const decision = this.judge(call, false);
     if (decision.kind !== "ask") return decision;
     const approvals = new ApprovalStore(this.cordonHome);
     const context = {
@@ -13650,7 +13691,21 @@ var Cordon = class {
         ...labelled(decision.rule)
       });
     }
+    const held = this.reserve(call);
+    if (held.refusal !== null) {
+      const refusal = held.refusal;
+      this.notifier.notify({
+        at: (/* @__PURE__ */ new Date()).toISOString(),
+        decision: "deny",
+        tool: call.tool,
+        reason: refusal.kind === "deny" ? refusal.reason : "",
+        source: null,
+        ...labelled(refusal.kind === "deny" ? refusal.rule : "failure")
+      });
+      return refusal;
+    }
     const taken = approvals.take(id, binding);
+    if (!taken.taken) held.release();
     if (taken.void) {
       this.notifier.notify({
         at: (/* @__PURE__ */ new Date()).toISOString(),
@@ -13789,35 +13844,68 @@ var Cordon = class {
    * reserved, which over-counts, the safe direction. A store that cannot be
    * counted refuses, with the reason in the journal.
    */
+  /**
+   * Counts a call against the policy's budgets, or refuses it. A call that
+   * may run spends: allowed, rewritten, or put to a human in the harness,
+   * who may say yes (Codex, Kimi: a call behind an approval ran uncounted).
+   * The reservations of one call are all or nothing: refused by one budget,
+   * it takes back what it reserved in the others.
+   */
   spend(call, decision) {
-    if (decision.kind !== "allow" && decision.kind !== "rewrite") return decision;
+    if (decision.kind !== "allow" && decision.kind !== "rewrite" && decision.kind !== "ask") return decision;
+    const held = this.reserve(call);
+    return held.refusal ?? decision;
+  }
+  reserve(call) {
     const budgets = this.policy.budgets ?? [];
-    if (budgets.length === 0) return decision;
+    const none = { refusal: null, release: () => {
+    } };
+    if (budgets.length === 0) return none;
     const verdict = classify(call, this.policy.tools);
     const effects = verdict.classified ? verdict.effects : [];
     const store = new BudgetStore(this.cordonHome);
-    const policy = policyHash(this.policy);
+    const held = [];
+    const release = () => {
+      for (const undo of held) undo();
+    };
     for (const budget of budgets) {
       if (!effects.includes(budget.effect)) continue;
       let reservation;
       try {
-        reservation = store.reserve(policy, budget);
+        reservation = store.reserve(budget);
       } catch (error) {
+        try {
+          release();
+        } catch {
+        }
         return {
-          kind: "deny",
-          rule: "failure",
-          reason: `Cordon failure: the budget for ${budget.effect} could not be counted (${error.message}); the call is refused rather than let through uncounted`
+          refusal: {
+            kind: "deny",
+            rule: "failure",
+            reason: `Cordon failure: the budget for ${budget.effect} could not be counted (${error.message}); the call is refused rather than let through uncounted`
+          },
+          release: () => {
+          }
         };
       }
       if (!reservation.ok) {
+        try {
+          release();
+        } catch {
+        }
         return {
-          kind: "deny",
-          rule: "budget",
-          reason: `the budget for ${budget.effect} is spent: ${reservation.used} of ${budget.limit} per ${budget.per}; the call is refused until the window moves on, whatever else allowed it`
+          refusal: {
+            kind: "deny",
+            rule: "budget",
+            reason: `the budget for ${budget.effect} is spent: ${reservation.used} of ${budget.limit} per ${budget.per}; the call is refused until the window moves on, whatever else allowed it`
+          },
+          release: () => {
+          }
         };
       }
+      held.push(reservation.release);
     }
-    return decision;
+    return { refusal: null, release };
   }
   /** The effective policy this instance decides under. */
   policyInForce() {
@@ -13990,7 +14078,7 @@ function changed(earlier, now) {
   return "in a different context: the certificate or what was read has changed";
 }
 function digest(text) {
-  return createHash7("sha256").update(text, "utf8").digest("hex");
+  return createHash6("sha256").update(text, "utf8").digest("hex");
 }
 function noteRead(ids) {
   const id = `${Date.now().toString(36)}-${randomBytes5(6).toString("hex")}`;
@@ -14875,25 +14963,10 @@ function dispatch2(event, env) {
   if (warnings.length === 0) return {};
   return { systemMessage: `Cordon: ${warnings.join("; ")}` };
 }
-var HARNESS_TOOLS = {
-  read_file: ["read"],
-  read_many_files: ["read"],
-  list_directory: ["read"],
-  glob: ["read"],
-  search_file_content: ["read"],
-  web_fetch: ["read", "network-egress"],
-  google_web_search: ["read", "network-egress"],
-  write_file: ["create", "update"],
-  replace: ["update"],
-  run_shell_command: ["exec"],
-  // A write into the agent's persistent memory outlives the session, that is,
-  // it changes the behaviour of future turns. That is an edit, not a note.
-  save_memory: ["create", "update"]
-};
 function withHarnessTools(policy, event) {
   const mcp2 = (event.kind === "BeforeTool" || event.kind === "AfterTool") && event.mcpServer !== void 0;
   if (mcp2) return policy;
-  return { ...policy, tools: { ...HARNESS_TOOLS, ...policy.tools } };
+  return { ...policy, tools: { ...GEMINI_BUILTIN, ...policy.tools } };
 }
 function footer(event, env) {
   try {
@@ -15009,7 +15082,7 @@ function failure2(event, reason) {
 
 // src/adapters/mcp/gateway.ts
 import { spawn } from "node:child_process";
-import { createHash as createHash8 } from "node:crypto";
+import { createHash as createHash7 } from "node:crypto";
 import { accessSync as accessSync3, constants as constants3 } from "node:fs";
 import { join as join12 } from "node:path";
 import { createInterface } from "node:readline";
@@ -15075,7 +15148,7 @@ function runGateway(options) {
       finish(1, `the home directory is not usable: ${error.message}`);
       return;
     }
-    const sessionId = `mcp-${createHash8("sha256").update(options.command.join(" "), "utf8").digest("hex").slice(0, 12)}-${process.pid}`;
+    const sessionId = `mcp-${createHash7("sha256").update(options.command.join(" "), "utf8").digest("hex").slice(0, 12)}-${process.pid}`;
     let cordon;
     try {
       cordon = new Cordon({
@@ -16570,10 +16643,17 @@ ${USAGE}
 `);
     return 1;
   }
-  const approved = store.approve(id);
+  let approved;
+  let failure3 = "the question expired or was retired while it was being approved";
+  try {
+    approved = store.approve(id);
+  } catch (error) {
+    approved = null;
+    failure3 = `the approval could not be written (${error.message})`;
+  }
   if (approved === null) {
-    const corrected = ownerRecord({ ...event, at: (/* @__PURE__ */ new Date()).toISOString(), decision: "approval-lapsed", reason: "the question expired or was retired while it was being approved; nothing was approved" });
-    process.stderr.write(`nothing waits under ${id}: it expired or was retired while you approved it; nothing was approved${corrected === null ? "" : `, and the journal could not say so: ${visible(corrected)}`}
+    const corrected = ownerRecord({ ...event, at: (/* @__PURE__ */ new Date()).toISOString(), decision: "approval-lapsed", reason: `${failure3}; nothing was approved` });
+    process.stderr.write(`cordon approve: ${visible(failure3)}; nothing was approved${corrected === null ? "" : `, and the journal could not say so: ${visible(corrected)}`}
 `);
     return 1;
   }
@@ -16687,14 +16767,17 @@ ${USAGE}
     }
     written.push(target2);
   }
-  makeDirectory(home, 448);
   const target = join15(home, "policy.yaml");
   const staged = join15(home, `.policy.yaml.${process.pid}`);
   try {
+    makeDirectory(home, 448);
     writeFileSync7(staged, body, { mode: 384, flag: "wx" });
     renameSync6(staged, target);
   } catch (error) {
-    rmSync6(staged, { force: true });
+    try {
+      rmSync6(staged, { force: true });
+    } catch {
+    }
     undo(error.message);
     process.stderr.write(`cordon policy apply: ${visible(error.message)}; nothing was applied
 `);

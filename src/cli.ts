@@ -881,10 +881,19 @@ function approveCall(args: string[]): number {
     process.stderr.write(`cordon approve: the journal could not record the approval, so it is not given: ${visible(recorded)}\n`)
     return 1
   }
-  const approved = store.approve(id)
+  let approved: ReturnType<ApprovalStore['approve']>
+  let failure = 'the question expired or was retired while it was being approved'
+  try {
+    approved = store.approve(id)
+  } catch (error) {
+    // The line above already says "given": the one below must follow it
+    // whatever stopped the approval (Codex).
+    approved = null
+    failure = `the approval could not be written (${(error as Error).message})`
+  }
   if (approved === null) {
-    const corrected = ownerRecord({ ...event, at: new Date().toISOString(), decision: 'approval-lapsed', reason: 'the question expired or was retired while it was being approved; nothing was approved' })
-    process.stderr.write(`nothing waits under ${id}: it expired or was retired while you approved it; nothing was approved${corrected === null ? '' : `, and the journal could not say so: ${visible(corrected)}`}\n`)
+    const corrected = ownerRecord({ ...event, at: new Date().toISOString(), decision: 'approval-lapsed', reason: `${failure}; nothing was approved` })
+    process.stderr.write(`cordon approve: ${visible(failure)}; nothing was approved${corrected === null ? '' : `, and the journal could not say so: ${visible(corrected)}`}\n`)
     return 1
   }
   process.stdout.write(`approved once: ${visible(approved.tool)}\n    arguments: ${visible(approved.args)}\n    ${asked(approved)}${visible(approved.reason)}\n` +
@@ -1018,15 +1027,21 @@ function applyPolicy(args: string[]): number {
     written.push(target)
   }
 
-  makeDirectory(home, 0o700)
   const target = join(home, 'policy.yaml')
   const staged = join(home, `.policy.yaml.${process.pid}`)
   try {
+    makeDirectory(home, 0o700)
     writeFileSync(staged, body, { mode: 0o600, flag: 'wx' })
     renameSync(staged, target)
   } catch (error) {
     // Nothing half-applied stays behind: the policy in force is the old one.
-    rmSync(staged, { force: true })
+    // Every step after the record is on this path, so the record is always
+    // followed by its correction (Codex).
+    try {
+      rmSync(staged, { force: true })
+    } catch {
+      // A staged file left behind is not in force; the correction still goes.
+    }
     undo((error as Error).message)
     process.stderr.write(`cordon policy apply: ${visible((error as Error).message)}; nothing was applied\n`)
     return 1

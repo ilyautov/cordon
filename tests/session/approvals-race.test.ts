@@ -29,6 +29,10 @@ vi.mock('node:fs', async (original) => {
       at(path)
       real.unlinkSync(path)
     },
+    writeFileSync: (path: fs.PathOrFileDescriptor, data: string, options?: fs.WriteFileOptions) => {
+      real.writeFileSync(path, data, options)
+      at(path)
+    },
     renameSync: (from: fs.PathLike, to: fs.PathLike) => {
       at(from)
       real.renameSync(from, to)
@@ -56,3 +60,23 @@ describe('take against a retirement and a late approval', () => {
     expect(store.take(id, binding).taken).toBe(false)
   })
 })
+
+describe('approve against a take', () => {
+  it('an approval taken the moment it was written was given, not lapsed', () => {
+    // Codex, fourth review: the question gone after the write read as a
+    // retirement, and the owner was told nothing was approved while the call
+    // had already run on it.
+    const home = mkdtempSync(join(tmpdir(), 'cordon-home-'))
+    const store = new ApprovalStore(home)
+    const id = 'cd'.repeat(8)
+    const binding = 'cd'.repeat(32)
+    store.request(id, { tool: 'send_email', reason: 'r', args: {}, binding })
+    let taken = false
+    interleave = () => {
+      taken = store.take(id, binding).taken
+    }
+    expect(store.approve(id)).not.toBeNull()
+    expect(taken).toBe(true)
+  })
+})
+

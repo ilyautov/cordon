@@ -1,11 +1,12 @@
 import { Cordon } from '../../cordon.js'
-import { viewIsUnknown, type EffectClass, type Source, type ToolCall } from '../../core/types.js'
+import { viewIsUnknown, type Source, type ToolCall } from '../../core/types.js'
 import { attribute } from '../../output/attribute.js'
 import { renderFooter } from '../../output/footer.js'
 import { outboundAfterRead, renderOutbound } from '../../output/egress.js'
 import { humanReport, removingFindings } from '../../output/report.js'
 import type { Policy } from '../../policy/defaults.js'
 import { classifySource } from '../../provenance/trust.js'
+import { GEMINI_BUILTIN } from '../../scope/effects.js'
 import { SessionStore } from '../../session/store.js'
 import { sweep } from '../../session/sweep.js'
 import { renderDecision, type HookEvent, type HookOutput } from './protocol.js'
@@ -103,34 +104,6 @@ function dispatch(event: HookEvent, env: AdapterEnv): HookOutput {
 }
 
 /**
- * Gemini CLI's built-in tools and their effect classes.
- *
- * The table is its own, because the harnesses name their built-in tools
- * differently: `Read` on the first one and `read_file` on this one. A tool
- * absent from here is not classified by the core and its call is escalated —
- * that is, a mistake in a name costs an extra question rather than a pass.
- *
- * `run_shell_command` is a single `exec` class rather than a set of guesses
- * from the command's text: parsing the command means a shell parser, and any
- * shell parser can be worked around.
- */
-const HARNESS_TOOLS: Readonly<Record<string, EffectClass[]>> = {
-  read_file: ['read'],
-  read_many_files: ['read'],
-  list_directory: ['read'],
-  glob: ['read'],
-  search_file_content: ['read'],
-  web_fetch: ['read', 'network-egress'],
-  google_web_search: ['read', 'network-egress'],
-  write_file: ['create', 'update'],
-  replace: ['update'],
-  run_shell_command: ['exec'],
-  // A write into the agent's persistent memory outlives the session, that is,
-  // it changes the behaviour of future turns. That is an edit, not a note.
-  save_memory: ['create', 'update'],
-}
-
-/**
  * Adds the harness's built-in tool table to the policy.
  *
  * The user's declarations are laid on top and therefore win: the human's
@@ -145,7 +118,7 @@ const HARNESS_TOOLS: Readonly<Record<string, EffectClass[]>> = {
 function withHarnessTools(policy: Policy, event: HookEvent): Policy {
   const mcp = (event.kind === 'BeforeTool' || event.kind === 'AfterTool') && event.mcpServer !== undefined
   if (mcp) return policy
-  return { ...policy, tools: { ...HARNESS_TOOLS, ...policy.tools } }
+  return { ...policy, tools: { ...GEMINI_BUILTIN, ...policy.tools } }
 }
 
 /**

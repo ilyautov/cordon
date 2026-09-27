@@ -113,6 +113,10 @@ export class ApprovalStore {
     return join(this.dir, `${checked(id)}.approved`)
   }
 
+  takenPath(id: string): string {
+    return join(this.dir, `${checked(id)}.taken`)
+  }
+
   /** Records that a call waits for the owner. A request already waiting is left as it is. */
   request(id: string, request: ApprovalRequest): void {
     makeDirectory(this.dir, 0o700)
@@ -146,6 +150,9 @@ export class ApprovalStore {
     }
     try {
       writeFileSync(this.pendingPath(id), body, { encoding: 'utf8', mode: 0o600, flag: 'wx' })
+      // A mark left by an earlier take of the same question would tell a
+      // later approve that this one was taken too.
+      rmSync(this.takenPath(id), { force: true })
     } catch (error) {
       // Already waiting: the first request stands, and its age with it. Any
       // other failure propagates; the caller's refusal is issued either way.
@@ -162,14 +169,18 @@ export class ApprovalStore {
     if (request === null) return null
     // The approval carries the binding it was given under, so a retry in a
     // different context cannot take it.
+    const shown: ShownRequest = { tool: request.tool, reason: request.reason, args: request.args, ...(request.context === undefined ? {} : { context: request.context }) }
     writeFileSync(this.approvedPath(id), request.binding, { mode: 0o600 })
     // Retired while this ran: the approval would be void anyway, and the
     // owner must not read "approved once" about a question that is gone.
+    // Gone because a retry took the approval is the opposite case, and the
+    // take leaves a mark saying so (Codex): the call ran on this approval.
     if (this.read(id) === null) {
+      if (existsSync(this.takenPath(id))) return shown
       this.retire(id)
       return null
     }
-    return { tool: request.tool, reason: request.reason, args: request.args, ...(request.context === undefined ? {} : { context: request.context }) }
+    return shown
   }
 
   private stale(path: string): boolean {
@@ -219,6 +230,9 @@ export class ApprovalStore {
         this.retire(id)
         return { taken: false, void: true }
       }
+      // The mark an `approve` still running reads to tell a take from a
+      // retirement; swept with the rest once stale.
+      if (fresh) writeFileSync(this.takenPath(id), '', { mode: 0o600 })
       try {
         unlinkSync(this.pendingPath(id))
       } catch {
@@ -291,7 +305,7 @@ export class ApprovalStore {
     }
     for (const name of names) {
       // A claimed approval left by a process that died mid-take is swept too.
-      const id = name.replace(/\.(?:request\.json|approved|taking\.\d+\.[0-9a-f]{8})$/u, '')
+      const id = name.replace(/\.(?:request\.json|approved|taken|taking\.\d+\.[0-9a-f]{8})$/u, '')
       if (id === name || !ID.test(id)) continue
       if (this.stale(join(this.dir, name))) {
         try {

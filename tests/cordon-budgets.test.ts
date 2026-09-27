@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { Cordon } from '../src/cordon.js'
 import { DEFAULT_POLICY, type Policy } from '../src/policy/defaults.js'
+import { ApprovalStore } from '../src/session/approvals.js'
 
 /**
  * A budget caps what an unattended agent can do however it was steered: a
@@ -77,4 +78,52 @@ describe('budgets', () => {
     expect(decision.kind === 'deny' && decision.rule).toBe('failure')
     expect(readFileSync(join(home, 'events.jsonl'), 'utf8')).toMatch(/budget/)
   })
+
+  it('a call that runs on an approval spends too', () => {
+    // Codex and Kimi, fourth review: the approved retry returned allow
+    // without counting, so every call behind `cordon approve` was free.
+    const home = mkdtempSync(join(tmpdir(), 'cordon-home-'))
+    const cordon = make(home, { mode: 'interactive', profile: { effects: ['read'], resources: { paths: [], hosts: [] } }, budgets: [{ effect: 'create', limit: 1, per: 'hour' }] })
+    const first = cordon.gateUnattended(NOTE)
+    const id = /cordon approve ([0-9a-f]{16})/u.exec(first.kind === 'deny' ? first.reason : '')![1]!
+    new ApprovalStore(home).approve(id)
+    expect(cordon.gateUnattended(NOTE).kind).toBe('allow')
+    const again = cordon.gateUnattended(NOTE)
+    expect(again.kind === 'deny' && again.rule).toBe('budget')
+  })
+
+  it('a question offered in the harness spends: the human may say yes', () => {
+    const home = mkdtempSync(join(tmpdir(), 'cordon-home-'))
+    const cordon = make(home, { mode: 'interactive', profile: { effects: ['read'], resources: { paths: [], hosts: [] } }, budgets: [{ effect: 'create', limit: 1, per: 'hour' }] })
+    expect(cordon.gate(NOTE).kind).toBe('ask')
+    const second = cordon.gate(NOTE)
+    expect(second.kind === 'deny' && second.rule).toBe('budget')
+  })
+
+  it('one count per effect whatever else the policy declares', () => {
+    // Codex, fourth review: Gemini lays its built-in tools over the policy
+    // for some calls and not others, and a count keyed by the policy's hash
+    // split into two.
+    const home = mkdtempSync(join(tmpdir(), 'cordon-home-'))
+    make(home).gate(NOTE)
+    make(home, { tools: { post_note: ['create'], other_tool: ['read'] } }).gate(NOTE)
+    const third = make(home).gate(NOTE)
+    expect(third.kind === 'deny' && third.rule).toBe('budget')
+  })
+
+  it('a call refused by one budget takes back what it reserved in the others', () => {
+    const home = mkdtempSync(join(tmpdir(), 'cordon-home-'))
+    const both = {
+      tools: { post_note: ['create' as const], post_and_ping: ['network-egress' as const, 'create' as const], ping: ['network-egress' as const] },
+      profile: { effects: ['read' as const, 'create' as const, 'network-egress' as const], resources: { paths: [], hosts: [] } },
+      budgets: [{ effect: 'network-egress' as const, limit: 2, per: 'hour' as const }, { effect: 'create' as const, limit: 1, per: 'hour' as const }],
+    }
+    const cordon = make(home, both)
+    const PING = { tool: 'ping', args: { text: 'ok' } }
+    expect(cordon.gate({ tool: 'post_and_ping', args: { text: 'one' } }).kind).toBe('allow')
+    for (let i = 0; i < 3; i++) expect(cordon.gate({ tool: 'post_and_ping', args: { text: 'more' } }).kind).toBe('deny')
+    expect(cordon.gate(PING).kind).toBe('allow')
+    expect(cordon.gate(PING).kind).toBe('deny')
+  })
 })
+

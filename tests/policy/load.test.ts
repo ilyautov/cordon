@@ -416,6 +416,12 @@ describe('loadPolicy: budgets', () => {
       .toEqual([{ effect: 'network-egress', limit: 20, per: 'hour' }])
   })
 
+  it('two budgets on the same effect and window stop the load', () => {
+    // Codex, fourth review: the second refused every call the first let by.
+    expect(() => load('budgets:\n  - effect: create\n    limit: 1\n    per: hour\n  - effect: create\n    limit: 5\n    per: hour\n'))
+      .toThrow(/create per hour/)
+  })
+
   it('no budgets by default', () => {
     expect(DEFAULT_POLICY.budgets).toEqual([])
   })

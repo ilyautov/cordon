@@ -69,7 +69,36 @@ export function classify(
   return { effects: [...declared], classified: true, reason: '' }
 }
 
-/** A tool's built-in classification, or null for a tool with none. */
+/**
+ * Gemini CLI's built-in tools and their effect classes.
+ *
+ * Kept in the core rather than the adapter so lint reads the same table
+ * (Codex). The table is its own, because the harnesses name their built-in tools
+ * differently: `Read` on the first one and `read_file` on this one. A tool
+ * absent from here is not classified by the core and its call is escalated —
+ * that is, a mistake in a name costs an extra question rather than a pass.
+ *
+ * `run_shell_command` is a single `exec` class rather than a set of guesses
+ * from the command's text: parsing the command means a shell parser, and any
+ * shell parser can be worked around.
+ */
+export const GEMINI_BUILTIN: Readonly<Record<string, EffectClass[]>> = {
+  read_file: ['read'],
+  read_many_files: ['read'],
+  list_directory: ['read'],
+  glob: ['read'],
+  search_file_content: ['read'],
+  web_fetch: ['read', 'network-egress'],
+  google_web_search: ['read', 'network-egress'],
+  write_file: ['create', 'update'],
+  replace: ['update'],
+  run_shell_command: ['exec'],
+  // A write into the agent's persistent memory outlives the session, that is,
+  // it changes the behaviour of future turns. That is an edit, not a note.
+  save_memory: ['create', 'update'],
+}
+
+/** A tool's built-in classification in either harness, or null for none. */
 export function builtinEffects(tool: string): readonly EffectClass[] | null {
-  return declaredFor(BUILTIN, tool) ?? null
+  return declaredFor(BUILTIN, tool) ?? declaredFor(GEMINI_BUILTIN, tool) ?? null
 }

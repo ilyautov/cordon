@@ -1,4 +1,4 @@
-import { createHash, randomBytes } from 'node:crypto'
+import { randomBytes } from 'node:crypto'
 import { readdirSync, unlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { makeDirectory } from '../core/mkdir.js'
@@ -14,6 +14,8 @@ export interface Reservation {
   ok: boolean
   /** Calls already counted in the window, this one excluded. */
   used: number
+  /** Takes the reservation back: the call it was made for did not run. */
+  release(): void
 }
 
 /**
@@ -21,8 +23,13 @@ export interface Reservation {
  *
  * State an attacker can aim at (AGENTS.md), so its shape answers the ways to
  * aim at it that the reviewers named (Codex, Kimi):
- * - keyed by the policy and the budget, never by the session: an agent that
- *   restarts itself gets a new session and would get a fresh budget with it;
+ * - keyed by the effect and the window, never by the session: an agent that
+ *   restarts itself gets a new session and would get a fresh budget with it.
+ *   Nor by the policy's hash: Gemini lays its built-in tools over the policy
+ *   for its own tools and not for MCP ones, and one budget split into two
+ *   counts an agent could alternate between (Codex). The limit is read at
+ *   each call, so a policy that lowers it takes hold at once, and the set
+ *   of directories is bounded by effects times windows;
  * - one file per reservation, written with `wx`, and the count read after
  *   the write: processes racing each other both see both files, so a race
  *   over-counts and refuses, never under-counts and lets both through;
@@ -36,16 +43,13 @@ export class BudgetStore {
     this.dir = join(cordonHome, 'budgets')
   }
 
-  keyFor(policy: string, budget: Budget): string {
-    return createHash('sha256')
-      .update(JSON.stringify([policy, budget.effect, budget.per, budget.limit]), 'utf8')
-      .digest('hex')
-      .slice(0, 32)
+  keyFor(budget: Budget): string {
+    return `${budget.effect}-${budget.per}`
   }
 
   /** Reserves one call in the window, or refuses and reserves nothing. */
-  reserve(policy: string, budget: Budget, now: number = Date.now()): Reservation {
-    const dir = join(this.dir, this.keyFor(policy, budget))
+  reserve(budget: Budget, now: number = Date.now()): Reservation {
+    const dir = join(this.dir, this.keyFor(budget))
     makeDirectory(dir, 0o700)
     const own = `${now.toString(36).padStart(10, '0')}-${randomBytes(6).toString('hex')}`
     writeFileSync(join(dir, own), '', { mode: 0o600, flag: 'wx' })
@@ -66,11 +70,14 @@ export class BudgetStore {
       }
       counted++
     }
+    const release = (): void => {
+      unlinkSync(join(dir, own))
+    }
     if (counted > budget.limit) {
       // Refused calls spend nothing: the reservation is taken back.
-      unlinkSync(join(dir, own))
-      return { ok: false, used: counted - 1 }
+      release()
+      return { ok: false, used: counted - 1, release: () => {} }
     }
-    return { ok: true, used: counted - 1 }
+    return { ok: true, used: counted - 1, release }
   }
 }

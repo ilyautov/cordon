@@ -19,6 +19,12 @@ export interface CordonMiddlewareOptions {
    * safer than a random new one per run, where provenance is always empty.
    */
   sessionId?: string
+  /**
+   * Where `policy` was loaded from, when it was: every call then compares
+   * the file with the policy in hand and refuses once they differ, so a
+   * stricter policy applied while the service runs is not ignored (Kimi).
+   */
+  policyFile?: string
 }
 
 /**
@@ -64,6 +70,7 @@ export function createCordonMiddleware(options: CordonMiddlewareOptions) {
     policy: options.policy,
     cordonHome,
     sessionId: options.sessionId ?? 'langchain',
+    ...(options.policyFile === undefined ? {} : { policyFile: options.policyFile }),
   })
   const policy = options.policy
 

@@ -3,9 +3,9 @@ import { ensureBuiltCli } from './support/built-cli.js'
 import { PinStore } from '../src/session/pins.js'
 import { ApprovalStore, approvalId } from '../src/session/approvals.js'
 import { spawnSync } from 'node:child_process'
-import { readFileSync, writeFileSync, mkdtempSync } from 'node:fs'
+import { chmodSync, readFileSync, writeFileSync, mkdtempSync } from 'node:fs'
 import { tmpdir, userInfo } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 
 const CLI = join(process.cwd(), 'dist', 'cli.js')
 
@@ -528,6 +528,24 @@ describe('records of who allowed what', () => {
     expect(new ApprovalStore(home).take(id, 'cf'.repeat(32)).taken).toBe(false)
   })
 
+  it('an approval that cannot be written is recorded as lapsed', () => {
+    // Codex, fourth review: the write threw and the journal kept only
+    // approval-given.
+    const { home, journal } = homeWithJournal()
+    const id = 'c1'.repeat(8)
+    const store = new ApprovalStore(home)
+    store.request(id, { tool: 'send_email', reason: 'r', args: {}, binding: 'c1'.repeat(32) })
+    const dir = dirname(store.pendingPath(id))
+    chmodSync(dir, 0o500)
+    try {
+      const { status } = run(['approve', id], '', { CORDON_HOME: home })
+      expect(status).toBe(1)
+    } finally {
+      chmodSync(dir, 0o700)
+    }
+    expect(lines(journal).map((line) => line.decision)).toEqual(expect.arrayContaining(['approval-given', 'approval-lapsed']))
+  })
+
   it('--as is recorded as declared, apart from the OS user', () => {
     // Anyone at the shell types any name (Kimi): it is labelled as a claim.
     const { home, journal } = homeWithJournal()
@@ -584,6 +602,22 @@ describe('records of who allowed what', () => {
     expect(readFileSync(join(home, 'policy.yaml'), 'utf8')).toBe(before)
     const decisions = lines(journal).map((line) => line.decision)
     expect(decisions).toContain('policy-apply-failed')
+  })
+
+  it('policy apply that cannot make its home says so in the journal it wrote to', () => {
+    // Codex, fourth review: the home was made outside the compensated path.
+    const locked = mkdtempSync(join(tmpdir(), 'cordon-locked-'))
+    const home = join(locked, 'home')
+    const journal = join(mkdtempSync(join(tmpdir(), 'cordon-journal-')), 'events.jsonl')
+    const drafted = join(mkdtempSync(join(tmpdir(), 'cordon-draft-')), 'p.yaml')
+    writeFileSync(drafted, `mode: interactive\nnotify:\n  file: ${journal}\n`)
+    chmodSync(locked, 0o500)
+    try {
+      expect(run(['policy', 'apply', drafted], '', { CORDON_HOME: home }).status).toBe(1)
+    } finally {
+      chmodSync(locked, 0o700)
+    }
+    expect(lines(journal).map((line) => line.decision)).toEqual(['policy-applied', 'policy-apply-failed'])
   })
 
   it('policy apply names where the journal goes next', () => {

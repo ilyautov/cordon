@@ -114,6 +114,8 @@ describe('lint', () => {
     // and the default read-only profile then lets `rm -rf` through.
     expect(found(policy({ tools: { Bash: ['read'] } }))).toMatch(/warning: .*Bash.*exec/)
     expect(found(policy({ tools: { Write: ['create', 'update'] } }))).not.toMatch(/warning/)
+    // Gemini's shell too (Codex, fourth review).
+    expect(found(policy({ tools: { run_shell_command: ['read'] } }))).toMatch(/warning: .*run_shell_command.*exec/)
     expect(found(policy({ tools: { WebFetch: ['read', 'network-egress', 'export'] } }))).not.toMatch(/warning/)
   })
 
