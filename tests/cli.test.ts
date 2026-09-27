@@ -444,3 +444,48 @@ describe('cordon approve', () => {
     expect(run(['approve', '../policy'], '', { CORDON_HOME: mkdtempSync(join(tmpdir(), 'cordon-approve-')) }).status).toBe(2)
   })
 })
+
+describe('cordon policy check and explain', () => {
+  beforeAll(() => {
+    ensureBuiltCli()
+  }, 60_000)
+
+  function file(body: string): string {
+    const dir = mkdtempSync(join(tmpdir(), 'cordon-policy-'))
+    const path = join(dir, 'drafted.yaml')
+    writeFileSync(path, body)
+    return path
+  }
+
+  it('check passes a sound file and prints its notes', () => {
+    const { stdout, status } = run(['policy', 'check', file('mode: interactive\nprofile:\n  effects: [read, financial]\n')], '', {})
+    expect(status).toBe(0)
+    expect(stdout).toContain('financial is granted')
+  })
+
+  it('check fails a file the loader would refuse, with the loader\'s words', () => {
+    const { stderr, status } = run(['policy', 'check', file('mode: sometimes\n')], '', {})
+    expect(status).toBe(1)
+    expect(stderr).toContain('mode must be interactive or autonomous')
+  })
+
+  it('check fails on a warning, so a drafted mandate that grants too much does not pass quietly', () => {
+    const { stdout, status } = run(['policy', 'check', file('destinations: ["*@gmail.com"]\n')], '', {})
+    expect(status).toBe(1)
+    expect(stdout).toContain('public provider')
+  })
+
+  it('explain reads the policy back in words', () => {
+    const { stdout, status } = run(['policy', 'explain', file('mode: autonomous\ndestinations: ["*@acme.example"]\n')], '', {})
+    expect(status).toBe(0)
+    expect(stdout).toContain('anything ending in @acme.example')
+    expect(stdout).toContain('do not limit where the agent may send')
+  })
+
+  it('with no file, both read the policy in force', () => {
+    const home = mkdtempSync(join(tmpdir(), 'cordon-home-'))
+    writeFileSync(join(home, 'policy.yaml'), 'mode: interactive\n')
+    expect(run(['policy', 'explain'], '', { CORDON_HOME: home }).stdout).toContain('Mode: interactive')
+  })
+})
+

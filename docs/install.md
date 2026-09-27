@@ -114,6 +114,8 @@ Without a policy file the default applies: `autonomous` mode, a profile of two c
 
 No profile grants `delete`, `export` or `financial`, because those are irreversible and adding them is your decision to write down. The widened profiles are interactive: under the exposure rule, autonomous mode refuses what interactive mode asks you about.
 
+`cordon policy explain [file]` reads a policy back in plain words, the one in force by default, with the defaults merged in. It says what each field does and what it does not: `destinations` count as named by you after an untrusted read and do not confine where the agent sends before one, `tools` classifies a tool and allows nothing the effects do not grant, and an empty list of paths or hosts bounds nothing. `cordon policy check [file]` validates a file by the loader's own rules and lints it: a destination that matches a whole domain zone or every mailbox at a public provider, the exposure rule switched off, trusted sources, unpinned MCP tools, the shell in autonomous mode, and an autonomous policy with no journal are warnings, and any warning fails the check. Irreversible effects and an unbounded network are notes. Use both on a mandate a model drafted for you: Cordon never calls a model, so the drafting happens outside it, and the reading back happens here, in code.
+
 ### Fields
 
 **`mode`**: `interactive` or `autonomous`. See the section on modes below.

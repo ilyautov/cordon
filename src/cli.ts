@@ -11,14 +11,16 @@ import { humanSeesRendered, type SourceView } from './core/types.js'
 import { audit, CODES, type AuditFinding, type Severity } from './audit/audit.js'
 import { Cordon } from './cordon.js'
 import { makeDirectory } from './core/mkdir.js'
-import { loadPolicy } from './policy/load.js'
+import { loadPolicy, loadPolicyFile } from './policy/load.js'
+import { explain, lint } from './policy/explain.js'
+import type { Policy } from './policy/defaults.js'
 import { PROFILES, renderPolicy } from './policy/templates.js'
 import { sanitize } from './sanitize/index.js'
 import { ApprovalStore, MAX_SHOWN_ARGS, type ShownRequest } from './session/approvals.js'
 import { MemoryLedger } from './session/memory.js'
 
 const USAGE =
-  'usage: cordon scan <file|-> [--json] | cordon hook [--harness claude-code|gemini] | cordon mcp -- <server command...> | cordon mcp approve -- <server command...> | cordon doctor | cordon init [--profile locked|research|documents|coding] [--force] | cordon log [--last N] [--json] | cordon approve [id [--read]] | cordon audit [dir] [--json|--sarif] [--fail-on high|medium|low]'
+  'usage: cordon scan <file|-> [--json] | cordon hook [--harness claude-code|gemini] | cordon mcp -- <server command...> | cordon mcp approve -- <server command...> | cordon doctor | cordon init [--profile locked|research|documents|coding] [--force] | cordon log [--last N] [--json] | cordon approve [id [--read]] | cordon policy check|explain [file] | cordon audit [dir] [--json|--sarif] [--fail-on high|medium|low]'
 
 /**
  * Event parsing depends on the harness, so the harness is named explicitly.
@@ -60,6 +62,8 @@ export function main(argv: string[]): number | Promise<number> {
   if (command === 'log') return showLog(rest)
 
   if (command === 'approve') return approveCall(rest)
+
+  if (command === 'policy') return policyCommand(rest)
 
   if (command !== 'scan') {
     process.stderr.write(USAGE + '\n')
@@ -863,6 +867,40 @@ function approveCall(args: string[]): number {
   process.stdout.write(`approved once: ${visible(approved.tool)}\n    arguments: ${visible(approved.args)}\n    ${asked(approved)}${visible(approved.reason)}\n` +
     'the agent\'s next identical call goes through, and only that one, while nothing more is read or said; a changed context is a new question\n')
   return 0
+}
+
+/**
+ * `cordon policy check [file]` and `cordon policy explain [file]`: a policy
+ * read back before anyone relies on it, by default the one in force.
+ *
+ * check exits 1 on a file the loader refuses and on any warning: it stands
+ * between a mandate a model drafted and the owner's signature, and a
+ * warning printed under exit 0 is a warning nobody's script reads. Notes
+ * are printed and do not fail it.
+ */
+function policyCommand(args: string[]): number {
+  const [verb, file] = args
+  if (verb !== 'check' && verb !== 'explain') {
+    process.stderr.write(`cordon policy: check or explain\n${USAGE}\n`)
+    return 2
+  }
+  const path = file ?? join(cordonHome(), 'policy.yaml')
+  let policy: Policy
+  try {
+    policy = loadPolicyFile(path)
+  } catch (error) {
+    process.stderr.write(`cordon policy ${verb}: ${visible((error as Error).message)}\n`)
+    return 1
+  }
+  if (verb === 'explain') {
+    for (const line of explain(policy)) process.stdout.write(`${visible(line)}\n`)
+    return 0
+  }
+  const findings = lint(policy)
+  for (const finding of findings) process.stdout.write(`${finding.level}: ${visible(finding.text)}\n`)
+  const warnings = findings.filter((finding) => finding.level === 'warning').length
+  process.stdout.write(warnings === 0 ? `${path}: valid\n` : `${path}: ${warnings} warning${warnings === 1 ? '' : 's'}\n`)
+  return warnings === 0 ? 0 : 1
 }
 
 /** What a question was asked under, in words, ahead of its reason. */

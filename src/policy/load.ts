@@ -22,7 +22,16 @@ const VIEWS: ReadonlySet<string> = new Set<SourceView>(['rendered', 'source'])
  * before it had a chance to fire.
  */
 export function loadPolicy(cordonHome: string): Policy {
-  const path = join(cordonHome, 'policy.yaml')
+  return loadPolicyFile(join(cordonHome, 'policy.yaml'))
+}
+
+/**
+ * Reads and validates one policy file, by the same rules as the policy in
+ * force. For `cordon policy check` and `explain`, which read a drafted file
+ * before anyone relies on it; the gate itself only ever calls loadPolicy.
+ * A missing file is the default policy, as at home.
+ */
+export function loadPolicyFile(path: string): Policy {
 
   let raw: string
   try {

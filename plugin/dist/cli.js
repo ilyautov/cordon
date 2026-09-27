@@ -7466,7 +7466,9 @@ var EFFECTS = /* @__PURE__ */ new Set([
 var MODES = /* @__PURE__ */ new Set(["interactive", "autonomous"]);
 var VIEWS = /* @__PURE__ */ new Set(["rendered", "source"]);
 function loadPolicy(cordonHome2) {
-  const path = join(cordonHome2, "policy.yaml");
+  return loadPolicyFile(join(cordonHome2, "policy.yaml"));
+}
+function loadPolicyFile(path) {
   let raw;
   try {
     raw = readFileSync(path, "utf8");
@@ -15468,6 +15470,137 @@ function isRecord3(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+// src/policy/explain.ts
+var ALL_EFFECTS = [
+  "read",
+  "summarize",
+  "create",
+  "update",
+  "delete",
+  "export",
+  "network-egress",
+  "financial",
+  "exec"
+];
+var IRREVERSIBLE2 = /* @__PURE__ */ new Set(["delete", "export", "financial"]);
+var PUBLIC_MAIL = /* @__PURE__ */ new Set([
+  "gmail.com",
+  "googlemail.com",
+  "outlook.com",
+  "hotmail.com",
+  "live.com",
+  "yahoo.com",
+  "icloud.com",
+  "me.com",
+  "proton.me",
+  "protonmail.com",
+  "aol.com",
+  "gmx.com",
+  "mail.ru",
+  "yandex.ru",
+  "ya.ru"
+]);
+function explain(policy) {
+  const lines = [];
+  lines.push(
+    policy.mode === "interactive" ? "Mode: interactive. When a call is in doubt, Cordon asks you." : "Mode: autonomous. When a call is in doubt, Cordon refuses it and writes it to the journal; nobody is asked."
+  );
+  const granted = policy.profile.effects;
+  const withheld = ALL_EFFECTS.filter((effect) => !granted.includes(effect));
+  lines.push(`The agent may: ${granted.join(", ") || "nothing"}.`);
+  if (withheld.length > 0) lines.push(`It may not: ${withheld.join(", ")}.`);
+  const { paths, hosts } = policy.profile.resources;
+  lines.push(paths.length === 0 ? "Files: anywhere the effects above reach; no path bound is set." : `Files: only under ${paths.join(", ")}.`);
+  lines.push(hosts.length === 0 ? "Hosts: any; no host bound is set." : `Hosts: only ${hosts.join(", ")}.`);
+  if (policy.exposure) {
+    lines.push(
+      "After the agent reads untrusted content (a page, a tool result), a call that acts beyond reading goes through only when every destination in it was named by you in your message" + (policy.destinations.length > 0 ? " or is on the destinations list below" : "") + (policy.mode === "interactive" ? "; otherwise you are asked." : "; otherwise it is refused until your next message.")
+    );
+  } else {
+    lines.push(
+      "The exposure rule is OFF: reading untrusted content changes nothing by itself, and only a match against what was read is caught."
+    );
+  }
+  if (policy.destinations.length > 0) {
+    const shown2 = policy.destinations.map((entry) => entry.startsWith("*") ? `anything ending in ${entry.replace(/^\*+/u, "")}` : entry);
+    lines.push(
+      `Destinations counted as named by you after an untrusted read: ${shown2.join("; ")}. They do not limit where the agent may send before it reads anything untrusted; the effects above do that.`
+    );
+  }
+  if (policy.task !== null) lines.push(`Task, standing in for your words where no message arrives: "${policy.task}".`);
+  const tools = Object.entries(policy.tools);
+  if (tools.length > 0) {
+    lines.push(
+      `Tools: ${tools.map(([tool, effects]) => `${tool} counts as ${effects.join(" and ") || "nothing (refused)"}`).join("; ")}. This classifies a tool, it does not allow it: a tool whose class is not granted above is still refused.`
+    );
+  }
+  for (const [tool, roles] of Object.entries(policy.arguments)) {
+    for (const [field3, role] of Object.entries(roles)) {
+      if (role === "controlled") {
+        lines.push(`${tool}.${field3} is controlled: after an untrusted read it must hold a value you assigned in your message, by name.`);
+      } else {
+        lines.push(`${tool}.${field3} is read as a ${role}.`);
+      }
+    }
+  }
+  for (const [tool, lookup] of Object.entries(policy.lookups)) {
+    const fills = Object.entries(lookup.values).map(([field3, consumers]) => `${field3} may fill ${consumers.join(", ")}`).join("; ");
+    lines.push(`${tool} is a lookup: asked with a name you said (${lookup.query}), its ${lookup.key} record vouches that ${fills}.`);
+  }
+  if (policy.trustedSources.length > 0) {
+    lines.push(`Trusted without scanning: ${policy.trustedSources.join(", ")}. Content from these never marks the session.`);
+  }
+  if (policy.memory.files.length > 0 || policy.memory.tools.length > 0) {
+    lines.push(`Memory the agent reloads, besides the harness's own files: ${[...policy.memory.files, ...policy.memory.tools].join(", ")}.`);
+  }
+  lines.push(policy.mcp.pin ? "MCP tools are pinned on first sight; a tool that changes is held until you approve the server." : "MCP tools are not pinned: a server may change a tool under the agent.");
+  lines.push(policy.notify.file === null ? "Journal: none." : `Journal: ${policy.notify.file}.`);
+  return lines;
+}
+function lint(policy) {
+  const found2 = [];
+  const granted = policy.profile.effects;
+  if (!policy.exposure) {
+    found2.push({ level: "warning", text: "the exposure rule is off: a paraphrased or encoded attack that repeats nothing it read goes through" });
+  }
+  for (const entry of policy.destinations) {
+    const broad = broadDestination(entry);
+    if (broad !== null) found2.push({ level: "warning", text: `destination ${entry} ${broad}` });
+  }
+  const acts = granted.some((effect) => effect !== "read" && effect !== "summarize");
+  if (policy.mode === "autonomous" && policy.notify.file === null && acts) {
+    found2.push({ level: "warning", text: "autonomous mode with no journal (notify.file): a refusal overnight is seen by nobody" });
+  }
+  for (const source of policy.trustedSources) {
+    found2.push({ level: "warning", text: `${source} is trusted: whatever it serves is read as your own, with no scanning` });
+  }
+  if (!policy.mcp.pin) {
+    found2.push({ level: "warning", text: "mcp.pin is off: a server can change a tool's description after you approved it" });
+  }
+  if (policy.mode === "autonomous" && granted.includes("exec")) {
+    found2.push({ level: "warning", text: "exec in autonomous mode: a shell command is never aimed by a name, so after an untrusted read every one is refused, and before it any one runs" });
+  }
+  for (const effect of granted) {
+    if (IRREVERSIBLE2.has(effect)) found2.push({ level: "note", text: `${effect} is granted, and it cannot be undone` });
+  }
+  if ((granted.includes("network-egress") || granted.includes("exec")) && policy.profile.resources.hosts.length === 0) {
+    found2.push({ level: "note", text: "the network is granted with no hosts listed: any host is reachable" });
+  }
+  if (policy.mode === "autonomous" && policy.task === null && policy.destinations.length === 0 && policy.exposure) {
+    found2.push({ level: "note", text: "no task and no destinations: after an untrusted read, every call that acts is refused" });
+  }
+  return found2;
+}
+function broadDestination(entry) {
+  if (!entry.startsWith("*")) return null;
+  const suffix = entry.replace(/^\*+/u, "").toLowerCase();
+  const at = suffix.lastIndexOf("@");
+  const domain = (at >= 0 ? suffix.slice(at + 1) : suffix).replace(/^\.+/u, "");
+  if (at >= 0 && PUBLIC_MAIL.has(domain)) return "matches every mailbox at a public provider, the attacker's included";
+  if (!domain.includes(".")) return "matches a whole domain zone";
+  return null;
+}
+
 // src/policy/templates.ts
 import { join as join13 } from "node:path";
 var PROFILES = {
@@ -15539,7 +15672,7 @@ notify:
 }
 
 // src/cli.ts
-var USAGE = "usage: cordon scan <file|-> [--json] | cordon hook [--harness claude-code|gemini] | cordon mcp -- <server command...> | cordon mcp approve -- <server command...> | cordon doctor | cordon init [--profile locked|research|documents|coding] [--force] | cordon log [--last N] [--json] | cordon approve [id [--read]] | cordon audit [dir] [--json|--sarif] [--fail-on high|medium|low]";
+var USAGE = "usage: cordon scan <file|-> [--json] | cordon hook [--harness claude-code|gemini] | cordon mcp -- <server command...> | cordon mcp approve -- <server command...> | cordon doctor | cordon init [--profile locked|research|documents|coding] [--force] | cordon log [--last N] [--json] | cordon approve [id [--read]] | cordon policy check|explain [file] | cordon audit [dir] [--json|--sarif] [--fail-on high|medium|low]";
 var HARNESSES = /* @__PURE__ */ new Map([
   ["claude-code", runHook],
   ["gemini", runHook2]
@@ -15557,6 +15690,7 @@ function main(argv) {
   if (command === "init") return init(rest);
   if (command === "log") return showLog(rest);
   if (command === "approve") return approveCall(rest);
+  if (command === "policy") return policyCommand(rest);
   if (command !== "scan") {
     process.stderr.write(USAGE + "\n");
     return 2;
@@ -16108,6 +16242,37 @@ read all of them in ${store.pendingPath(id)}, then approve with: cordon approve 
 the agent's next identical call goes through, and only that one, while nothing more is read or said; a changed context is a new question
 `);
   return 0;
+}
+function policyCommand(args) {
+  const [verb, file] = args;
+  if (verb !== "check" && verb !== "explain") {
+    process.stderr.write(`cordon policy: check or explain
+${USAGE}
+`);
+    return 2;
+  }
+  const path = file ?? join14(cordonHome(), "policy.yaml");
+  let policy;
+  try {
+    policy = loadPolicyFile(path);
+  } catch (error) {
+    process.stderr.write(`cordon policy ${verb}: ${visible(error.message)}
+`);
+    return 1;
+  }
+  if (verb === "explain") {
+    for (const line of explain(policy)) process.stdout.write(`${visible(line)}
+`);
+    return 0;
+  }
+  const findings = lint(policy);
+  for (const finding of findings) process.stdout.write(`${finding.level}: ${visible(finding.text)}
+`);
+  const warnings = findings.filter((finding) => finding.level === "warning").length;
+  process.stdout.write(warnings === 0 ? `${path}: valid
+` : `${path}: ${warnings} warning${warnings === 1 ? "" : "s"}
+`);
+  return warnings === 0 ? 0 : 1;
 }
 function asked(request) {
   const context = request.context;
