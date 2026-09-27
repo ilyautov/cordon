@@ -930,7 +930,8 @@ function showLog(args: string[]): number {
   if (shown.length === 0) process.stdout.write(`no events in ${file}\n`)
   for (const event of shown) {
     const decision = visible(event.decision).padEnd(9)
-    process.stdout.write(`${visible(event.at)}  ${decision} ${visible(event.tool)}  ${visible(event.reason)}\n`)
+    const rule = event.rule === undefined ? '' : `[${visible(event.rule)}] `
+    process.stdout.write(`${visible(event.at)}  ${decision} ${visible(event.tool)}  ${rule}${visible(event.reason)}\n`)
     if (event.source !== null && event.source !== undefined) {
       process.stdout.write(`    source: ${visible(event.source)}\n`)
     }
@@ -943,6 +944,23 @@ function showLog(args: string[]): number {
     }
     const summary = [...counts].map(([decision, count]) => `${count} ${decision}`).join(', ')
     process.stdout.write(`\n${shown.length} event${shown.length === 1 ? '' : 's'}: ${summary}\n`)
+    // The classes by tier: what the refused calls would have done, told apart
+    // by how much each decision knew about an attacker (src/gate/rules.ts).
+    const tiers = new Map<string, Map<string, number>>()
+    for (const event of shown) {
+      if (event.class === undefined || event.tier === undefined) continue
+      const tier = visible(event.tier)
+      const classes = tiers.get(tier) ?? new Map<string, number>()
+      const name = visible(event.class)
+      classes.set(name, (classes.get(name) ?? 0) + 1)
+      tiers.set(tier, classes)
+    }
+    for (const tier of ['evidence', 'suspicion', 'precaution', ...tiers.keys()]) {
+      const classes = tiers.get(tier)
+      if (classes === undefined) continue
+      tiers.delete(tier)
+      process.stdout.write(`  ${tier}: ${[...classes].map(([name, count]) => `${count} ${name}`).join(', ')}\n`)
+    }
   }
   if (unreadable > 0) {
     process.stdout.write(`${unreadable} line${unreadable === 1 ? '' : 's'} could not be read in ${file}\n`)

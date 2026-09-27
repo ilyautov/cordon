@@ -4,6 +4,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versions follo
 
 ## [Unreleased]
 
+Every refusal, question and rewrite names the rule that made it, and the journal carries the rule with a class and a tier. The class says what the refused call would have done, from a closed list; the tier says how much the decision knew about an attacker: `evidence` when something from outside was found in the call, `suspicion` when the session read untrusted content and the call is not vouched for, `precaution` when no untrusted content is involved. A key leaving the machine is a precaution, not an attack, so a SIEM stream stays believable (Kimi). The labels are fixed per rule and never feed a decision. `cordon log` prints the rule on each line and the classes by tier at the end.
+
 `cordon approve` no longer approves arguments the owner could not see. The request file kept only the first 4000 characters of the arguments, with their keys sorted, so a long `body` pushed the `to` past the cut: the owner approved a recipient that was never shown. The file now keeps every argument; the listing still cuts, names the file, and a call longer than the cut is approved only with `--read`. Codex found it in a design review.
 
 `docs/comparison.md` places Cordon against the projects whose source we read in September 2026: IntentCap, Progent, Cupcake, Microsoft's Agent Governance Toolkit, the shipped FIDES, Docker's MCP gateway, Invariant and mcpguard-dynamic. It also corrects two stale claims: Cordon does refuse a call that carries a credential off the machine, and interactive utility is 96 of 97, not 100%.

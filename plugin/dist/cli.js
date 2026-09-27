@@ -8519,28 +8519,30 @@ function gate(call, ctx) {
   try {
     return decide(call, ctx);
   } catch (error) {
-    return { kind: "deny", reason: `Cordon failure: ${error.message}` };
+    return { kind: "deny", rule: "failure", reason: `Cordon failure: ${error.message}` };
   }
 }
 function decide(call, ctx) {
   if (typeof call?.tool !== "string" || call.tool === "") {
-    return { kind: "deny", reason: "a call without a tool name" };
+    return { kind: "deny", rule: "malformed", reason: "a call without a tool name" };
   }
   const args = call.args;
   if (typeof args !== "object" || args === null || Array.isArray(args)) {
-    return { kind: "deny", reason: `the arguments of call ${call.tool} did not arrive as an object` };
+    return { kind: "deny", rule: "malformed", reason: `the arguments of call ${call.tool} did not arrive as an object` };
   }
   const own2 = args;
   const held = ctx.heldTools?.get(call.tool);
   if (held !== void 0 && held.why === "shadow") {
     return {
       kind: "deny",
+      rule: "pin",
       reason: `the MCP tool ${call.tool} imitates ${held.imitates ?? "another server's tool"} with lookalike characters (${held.server}); approving the server does not release it, remove the server or ask its author to rename the tool`
     };
   }
   if (held !== void 0) {
     return {
       kind: "deny",
+      rule: "pin",
       reason: `the MCP tool ${call.tool} ${held.why === "new" ? "appeared" : "changed"} after the server was approved (${held.server}); review the server, then run "cordon mcp approve -- ${held.server}"`
     };
   }
@@ -8553,38 +8555,39 @@ function decide(call, ctx) {
     if (!harmless) {
       return escalate(
         ctx,
+        ctx.unredacted === true ? "hidden-layer" : "saturation",
         ctx.unredacted === true ? "a hidden layer in a tool result could not be stripped" : "provenance is full: this session read more than the store holds, and stopped remembering"
       );
     }
   }
   if (!verdict.classified) {
-    return escalate(ctx, verdict.reason);
+    return escalate(ctx, "unclassified", verdict.reason);
   }
   const coverage = covers(ctx.cert, verdict.effects);
   if (!coverage.ok) {
-    return escalate(ctx, coverage.reason);
+    return escalate(ctx, "certificate", coverage.reason);
   }
   const outside = outOfBounds(parts, ctx.cert);
   if (outside) {
-    return escalate(ctx, outside);
+    return escalate(ctx, "bounds", outside);
   }
   const config = agentConfigWrite(verdict.effects, parts, ctx);
   if (config) {
-    return escalate(ctx, config, ctx.exposure?.source);
+    return escalate(ctx, "agent-config", config, ctx.exposure?.source);
   }
   const leaving = credentialLeaving(verdict.effects, parts, ctx.userAtoms ?? []);
   if (leaving) {
-    return escalate(ctx, leaving);
+    return escalate(ctx, "credential", leaving);
   }
   const bound = boundBy(call.tool, own2, ctx);
   const stray = strayResource(call.tool, parts, ctx, bound);
-  if (stray) return escalate(ctx, stray, ctx.exposure?.source);
+  if (stray) return escalate(ctx, "resource", stray, ctx.exposure?.source);
   const loose = uncontrolled(call.tool, verdict.effects, parts, ctx);
-  if (loose) return escalate(ctx, loose, ctx.exposure?.source);
+  if (loose) return escalate(ctx, "controlled", loose, ctx.exposure?.source);
   const scan = scanTaint(parts, ctx.taint, ctx.userAtoms ?? [], bound);
   if (!scan.tainted) {
     const exposed = exposedCall(call.tool, verdict.effects, parts, ctx, bound);
-    if (exposed) return escalate(ctx, exposed, ctx.exposure?.source);
+    if (exposed) return escalate(ctx, ctx.exposure?.memory === true ? "memory-carry" : "exposure", exposed, ctx.exposure?.source);
     return { kind: "allow" };
   }
   const blamedLabels = scan.sources.map((source) => source.label);
@@ -8593,29 +8596,31 @@ function decide(call, ctx) {
     const targets = scan.targets.filter((atom) => !isDate(atom));
     if (targets.length === 0 || identifierReadUnderMark(verdict.effects, targets, ctx)) {
       const exposed = exposedCall(call.tool, verdict.effects, parts, ctx, bound);
-      if (exposed) return escalate(ctx, exposed, ctx.exposure?.source);
+      if (exposed) return escalate(ctx, ctx.exposure?.memory === true ? "memory-carry" : "exposure", exposed, ctx.exposure?.source);
       return { kind: "allow" };
     }
-    return escalate(ctx, `an argument carries a target from an untrusted source: ${targets.map(safeLabel).join(", ")}`, blamed);
+    return escalate(ctx, "provenance", `an argument carries a target from an untrusted source: ${targets.map(safeLabel).join(", ")}`, blamed);
   }
   if (returnsToOrigin(scan.sources, parts, verdict.effects)) return { kind: "allow" };
   if (scan.nested) {
-    return escalate(ctx, `quarantine is impossible: the untrusted fragment sits inside a nested argument${origin(blamedLabels)}`, blamed);
+    return escalate(ctx, "provenance", `quarantine is impossible: the untrusted fragment sits inside a nested argument${origin(blamedLabels)}`, blamed);
   }
   const memory = memoryTarget(call, ctx.policy);
   if (memory !== null) {
     return escalate(
       ctx,
+      "memory-write",
       `an untrusted fragment would be cut out of a write into memory (${memory}); a note the harness reloads is not rewritten silently`,
       blamed
     );
   }
   const cleaned = quarantine(own2, scan.spans);
   if (!cleaned.possible) {
-    return escalate(ctx, `quarantine is impossible: ${cleaned.reason}${origin(blamedLabels)}`, blamed);
+    return escalate(ctx, "provenance", `quarantine is impossible: ${cleaned.reason}${origin(blamedLabels)}`, blamed);
   }
   return {
     kind: "rewrite",
+    rule: "provenance",
     args: cleaned.args,
     removed: cleaned.removed,
     reason: "an untrusted fragment was cut out of the arguments",
@@ -8628,21 +8633,21 @@ function selfProtection(parts, ctx) {
     if (PATH_KEYS.has(folded)) {
       const paths = asPaths(value);
       if (paths === null) {
-        return { kind: "deny", reason: `self-protection: argument ${key} is not a path` };
+        return { kind: "deny", rule: "self-protection", reason: `self-protection: argument ${key} is not a path` };
       }
       for (const path of paths) {
         if (touchesCordonItself(path, ctx.cordonHome)) {
-          return { kind: "deny", reason: `self-protection: ${path} belongs to Cordon or to the harness` };
+          return { kind: "deny", rule: "self-protection", reason: `self-protection: ${path} belongs to Cordon or to the harness` };
         }
       }
     }
     if (COMMAND_KEYS.has(folded) && typeof value === "string") {
       if (APPROVES.test(value.replace(/["'\\]/gu, ""))) {
-        return { kind: "deny", reason: "self-protection: the command gives an approval only the owner may give" };
+        return { kind: "deny", rule: "self-protection", reason: "self-protection: the command gives an approval only the owner may give" };
       }
       for (const marker of selfMarkers(ctx.cordonHome)) {
         if (value.includes(marker)) {
-          return { kind: "deny", reason: `self-protection: the command mentions ${marker}` };
+          return { kind: "deny", rule: "self-protection", reason: `self-protection: the command mentions ${marker}` };
         }
       }
     }
@@ -8714,9 +8719,9 @@ var APPROVES = /(?:\bcordon(?:@[\w.^~-]+)?|\bcli\.m?js)\s+(?:mcp\s+)?approve\b/i
 function selfMarkers(cordonHome2) {
   return [cordonHome2, ".cordon", ".claude/settings", ".claude/hooks", ".cursor", ".codex", ".gemini"];
 }
-function escalate(ctx, reason, source) {
+function escalate(ctx, rule, reason, source) {
   const kind = ctx.policy.mode === "interactive" ? "ask" : "deny";
-  return source === void 0 ? { kind, reason } : { kind, reason, source };
+  return source === void 0 ? { kind, rule, reason } : { kind, rule, reason, source };
 }
 function exposedCall(tool, effects, parts, ctx, bound) {
   if (ctx.policy.exposure === false) return null;
@@ -9137,6 +9142,32 @@ function shadows(listed, others) {
 // src/notify/notifier.ts
 import { appendFileSync, renameSync, statSync } from "node:fs";
 import { dirname as dirname3 } from "node:path";
+
+// src/gate/rules.ts
+var RULES = {
+  malformed: { class: "guard-failure", tier: "precaution" },
+  failure: { class: "guard-failure", tier: "precaution" },
+  pin: { class: "tool-rug-pull", tier: "evidence" },
+  "self-protection": { class: "guard-tampering", tier: "suspicion" },
+  "agent-config": { class: "guard-tampering", tier: "suspicion" },
+  "hidden-layer": { class: "hidden-instruction", tier: "evidence" },
+  saturation: { class: "flooding", tier: "suspicion" },
+  unclassified: { class: "out-of-scope", tier: "precaution" },
+  certificate: { class: "out-of-scope", tier: "precaution" },
+  bounds: { class: "out-of-scope", tier: "precaution" },
+  credential: { class: "credential-egress", tier: "precaution" },
+  resource: { class: "resource-hop", tier: "suspicion" },
+  controlled: { class: "parameter-tampering", tier: "suspicion" },
+  exposure: { class: "unvouched-destination", tier: "suspicion" },
+  "memory-carry": { class: "memory-poisoning", tier: "suspicion" },
+  "memory-write": { class: "memory-poisoning", tier: "evidence" },
+  provenance: { class: "untrusted-payload", tier: "evidence" }
+};
+
+// src/notify/notifier.ts
+function labelled(rule) {
+  return { rule, class: RULES[rule].class, tier: RULES[rule].tier };
+}
 var MAX_JOURNAL_BYTES = 50 * 1024 * 1024;
 var FileNotifier = class {
   constructor(path, maxBytes = MAX_JOURNAL_BYTES) {
@@ -13236,7 +13267,8 @@ var Cordon = class {
         decision: "mcp-drift",
         tool: tool.name,
         reason: other !== void 0 ? `the tool on ${server2} imitates ${other.imitates} of ${other.server} with lookalike characters; it is hidden from the model and refused, and approving the server does not release it` : `the tool ${tool.why === "new" ? "appeared" : "changed"} after ${server2} was approved; it is hidden from the model and refused until "cordon mcp approve"`,
-        source: null
+        source: null,
+        ...labelled("pin")
       });
     }
     return held;
@@ -13270,7 +13302,8 @@ var Cordon = class {
         reason: decision.reason,
         // What the gate knows beats what the core guesses: the source the
         // decision turned on, and only failing that, the last page read.
-        source: decision.source ?? this.lastSource?.label ?? null
+        source: decision.source ?? this.lastSource?.label ?? null,
+        ...labelled(decision.rule)
       });
     }
     return decision;
@@ -13301,7 +13334,8 @@ var Cordon = class {
         decision: "approved",
         tool: call.tool,
         reason: `the owner approved this call once (${id}): ${decision.reason}`,
-        source: decision.source ?? null
+        source: decision.source ?? null,
+        ...labelled(decision.rule)
       });
       return { kind: "allow" };
     }
@@ -13311,10 +13345,12 @@ var Cordon = class {
       decision: "approval-requested",
       tool: call.tool,
       reason: `waiting for "cordon approve ${id}": ${decision.reason}`,
-      source: decision.source ?? null
+      source: decision.source ?? null,
+      ...labelled(decision.rule)
     });
     return {
       kind: "deny",
+      rule: decision.rule,
       reason: `${decision.reason}. Nobody is here to ask, so the call is refused; the owner can allow this exact call once with "cordon approve ${id}", and retrying it unchanged then goes through`,
       ...decision.source === void 0 ? {} : { source: decision.source }
     };
@@ -15982,7 +16018,8 @@ function showLog(args) {
 `);
   for (const event of shown2) {
     const decision = visible(event.decision).padEnd(9);
-    process.stdout.write(`${visible(event.at)}  ${decision} ${visible(event.tool)}  ${visible(event.reason)}
+    const rule = event.rule === void 0 ? "" : `[${visible(event.rule)}] `;
+    process.stdout.write(`${visible(event.at)}  ${decision} ${visible(event.tool)}  ${rule}${visible(event.reason)}
 `);
     if (event.source !== null && event.source !== void 0) {
       process.stdout.write(`    source: ${visible(event.source)}
@@ -15999,6 +16036,22 @@ function showLog(args) {
     process.stdout.write(`
 ${shown2.length} event${shown2.length === 1 ? "" : "s"}: ${summary}
 `);
+    const tiers = /* @__PURE__ */ new Map();
+    for (const event of shown2) {
+      if (event.class === void 0 || event.tier === void 0) continue;
+      const tier = visible(event.tier);
+      const classes = tiers.get(tier) ?? /* @__PURE__ */ new Map();
+      const name = visible(event.class);
+      classes.set(name, (classes.get(name) ?? 0) + 1);
+      tiers.set(tier, classes);
+    }
+    for (const tier of ["evidence", "suspicion", "precaution", ...tiers.keys()]) {
+      const classes = tiers.get(tier);
+      if (classes === void 0) continue;
+      tiers.delete(tier);
+      process.stdout.write(`  ${tier}: ${[...classes].map(([name, count]) => `${count} ${name}`).join(", ")}
+`);
+    }
   }
   if (unreadable > 0) {
     process.stdout.write(`${unreadable} line${unreadable === 1 ? "" : "s"} could not be read in ${file}

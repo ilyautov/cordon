@@ -288,6 +288,15 @@ describe('cordon log', () => {
     expect(stdout).toContain('3 events: 1 deny, 1 rewrite, 1 mcp-drift')
   })
 
+  it('names the rule of each event, and counts the classes by tier', () => {
+    const exposed = JSON.stringify({ at: '2026-09-26T09:17:00.000Z', decision: 'deny', tool: 'send', reason: 'r', source: null, rule: 'exposure', class: 'unvouched-destination', tier: 'suspicion' })
+    const key = JSON.stringify({ at: '2026-09-26T09:18:00.000Z', decision: 'ask', tool: 'post', reason: 'r', source: null, rule: 'credential', class: 'credential-egress', tier: 'precaution' })
+    const { stdout } = run(['log'], '', { CORDON_HOME: journal([deny, exposed, key, exposed]) })
+    expect(stdout).toContain('[exposure]')
+    expect(stdout).toContain('suspicion: 2 unvouched-destination')
+    expect(stdout).toContain('precaution: 1 credential-egress')
+  })
+
   it('--last keeps only the newest events', () => {
     const { stdout } = run(['log', '--last', '1'], '', { CORDON_HOME: journal([deny, rewrite, drift]) })
     expect(stdout).toContain('mystery_box')

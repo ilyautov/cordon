@@ -54,6 +54,17 @@ describe('Cordon: the scenario of replying to reviews automatically', () => {
     expect(event.source).toBe('wb_reviews')
   })
 
+  it('the journal names the rule, its class and its tier', () => {
+    // A SIEM filters on a code, not on a sentence that changes with rewording.
+    const { cordon, log } = make()
+    cordon.observe(attack, { id: 'r1', kind: 'tool', label: 'wb_reviews', trust: 'untrusted' })
+    cordon.gate({ tool: 'wb_update_price', args: { nmId: '1937461028', price: 1 } })
+    const event = JSON.parse(readFileSync(log, 'utf8').trim().split('\n')[0]!)
+    expect(event.rule).toBe('certificate')
+    expect(event.class).toBe('out-of-scope')
+    expect(event.tier).toBe('precaution')
+  })
+
   it('observe strips the hidden layer before writing to provenance', () => {
     const { cordon } = make()
     const envelope = cordon.observe(

@@ -1,6 +1,7 @@
 import { appendFileSync, renameSync, statSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { makeDirectory } from '../core/mkdir.js'
+import { RULES, type AttackClass, type Rule, type Tier } from '../gate/rules.js'
 
 export interface NotifyEvent {
   at: string
@@ -9,6 +10,15 @@ export interface NotifyEvent {
   reason: string
   /** Label of the source that caused the decision, when it is known. */
   source: string | null
+  /** The rule behind a decision, with its class and tier; absent on events no rule made. */
+  rule?: Rule
+  class?: AttackClass
+  tier?: Tier
+}
+
+/** The journal fields of a rule: the code, and the fixed label it carries. */
+export function labelled(rule: Rule): { rule: Rule; class: AttackClass; tier: Tier } {
+  return { rule, class: RULES[rule].class, tier: RULES[rule].tier }
 }
 
 export interface Notifier {

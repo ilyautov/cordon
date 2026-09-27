@@ -57,7 +57,7 @@ describe('renderDecision', () => {
   })
 
   it('deny prints the decision with a reason', () => {
-    const out = renderDecision({ kind: 'deny', reason: 'outside the certificate' }, 'autonomous')
+    const out = renderDecision({ kind: 'deny', rule: 'exposure', reason: 'outside the certificate' }, 'autonomous')
     expect(out.hookSpecificOutput).toMatchObject({
       hookEventName: 'PreToolUse',
       permissionDecision: 'deny',
@@ -66,13 +66,13 @@ describe('renderDecision', () => {
   })
 
   it('ask prints ask', () => {
-    const out = renderDecision({ kind: 'ask', reason: 'confirmation is needed' }, 'autonomous')
+    const out = renderDecision({ kind: 'ask', rule: 'exposure', reason: 'confirmation is needed' }, 'autonomous')
     expect(out.hookSpecificOutput?.permissionDecision).toBe('ask')
   })
 
   it('in interactive mode the quarantine is shown to the user', () => {
     const out = renderDecision(
-      { kind: 'rewrite', args: { text: 'clean', price: 1290 }, removed: ['text'], reason: 'it was cut out' },
+      { kind: 'rewrite', rule: 'provenance', args: { text: 'clean', price: 1290 }, removed: ['text'], reason: 'it was cut out' },
       'interactive',
     )
     expect(out.hookSpecificOutput?.updatedInput).toEqual({ text: 'clean', price: 1290 })
@@ -82,7 +82,7 @@ describe('renderDecision', () => {
 
   it('in autonomous mode the quarantine goes without a decision', () => {
     const out = renderDecision(
-      { kind: 'rewrite', args: { text: 'clean' }, removed: ['text'], reason: 'it was cut out' },
+      { kind: 'rewrite', rule: 'provenance', args: { text: 'clean' }, removed: ['text'], reason: 'it was cut out' },
       'autonomous',
     )
     expect(out.hookSpecificOutput?.updatedInput).toEqual({ text: 'clean' })
@@ -95,7 +95,7 @@ describe('renderDecision', () => {
     // The cut itself is right; saying nothing about it left a damaged file
     // behind a confident answer.
     const out = renderDecision(
-      { kind: 'rewrite', args: { text: 'clean' }, removed: ['text'], reason: 'it was cut out' },
+      { kind: 'rewrite', rule: 'provenance', args: { text: 'clean' }, removed: ['text'], reason: 'it was cut out' },
       'autonomous',
     )
     expect(out.hookSpecificOutput?.additionalContext).toContain('text')
@@ -108,7 +108,7 @@ describe('renderDecision', () => {
     // The harness replaces the argument object whole rather than merging it
     // field by field. A lost field means a call with a missing argument.
     const out = renderDecision(
-      { kind: 'rewrite', args: { text: 'clean', nmId: 1937461028, dryRun: false }, removed: ['text'], reason: 'r' },
+      { kind: 'rewrite', rule: 'provenance', args: { text: 'clean', nmId: 1937461028, dryRun: false }, removed: ['text'], reason: 'r' },
       'autonomous',
     )
     expect(Object.keys(out.hookSpecificOutput?.updatedInput ?? {}).sort()).toEqual(['dryRun', 'nmId', 'text'])
@@ -123,7 +123,7 @@ describe('renderDecision', () => {
     // The event name in the substitution has to match the harness event: a
     // mismatch is exactly the quiet failure where the substitution is silently
     // dropped.
-    const quarantine: Decision = { kind: 'rewrite', args: { text: 'clean' }, removed: ['text'], reason: 'r' }
+    const quarantine: Decision = { kind: 'rewrite', rule: 'provenance', args: { text: 'clean' }, removed: ['text'], reason: 'r' }
     expect(renderDecision(quarantine, 'interactive').hookSpecificOutput?.hookEventName).toBe('PreToolUse')
     expect(renderDecision(quarantine, 'autonomous').hookSpecificOutput?.hookEventName).toBe('PreToolUse')
   })
@@ -132,7 +132,7 @@ describe('renderDecision', () => {
     // The human is confirming a modified call, so they have to see what
     // exactly changed. A reason without the argument names does not give that.
     const out = renderDecision(
-      { kind: 'rewrite', args: { text: 'clean' }, removed: ['text'], reason: 'the tainted part was cut out' },
+      { kind: 'rewrite', rule: 'provenance', args: { text: 'clean' }, removed: ['text'], reason: 'the tainted part was cut out' },
       'interactive',
     )
     expect(out.hookSpecificOutput?.permissionDecisionReason).toContain('text')

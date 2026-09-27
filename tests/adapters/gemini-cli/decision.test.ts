@@ -8,13 +8,13 @@ describe('a gate decision in the Gemini shape', () => {
   })
 
   it('a refusal carries the reason', () => {
-    const out = renderDecision({ kind: 'deny', reason: 'outside the certificate: financial' }, 'interactive')
+    const out = renderDecision({ kind: 'deny', rule: 'exposure', reason: 'outside the certificate: financial' }, 'interactive')
     expect(out.decision).toBe('deny')
     expect(out.reason).toContain('financial')
   })
 
   it('in interactive mode it asks', () => {
-    const out = renderDecision({ kind: 'ask', reason: 'the argument would change its addressee' }, 'interactive')
+    const out = renderDecision({ kind: 'ask', rule: 'exposure', reason: 'the argument would change its addressee' }, 'interactive')
     expect(out.decision).toBe('ask')
   })
 
@@ -22,14 +22,14 @@ describe('a gate decision in the Gemini shape', () => {
     // Two reasons at once: there is nobody to ask, and a forced ask in
     // headless mode, judging by the harness code, hangs rather than fails. A
     // hung hook is worse than a failed one.
-    const out = renderDecision({ kind: 'ask', reason: 'the argument would change its addressee' }, 'autonomous')
+    const out = renderDecision({ kind: 'ask', rule: 'exposure', reason: 'the argument would change its addressee' }, 'autonomous')
     expect(out.decision).toBe('deny')
     expect(out.reason).toContain('addressee')
   })
 
   it('the quarantine substitutes the arguments whole', () => {
     const out = renderDecision(
-      { kind: 'rewrite', args: { path: '/tmp/a', text: 'cleaned' }, removed: ['text'], reason: 'quarantine' },
+      { kind: 'rewrite', rule: 'provenance', args: { path: '/tmp/a', text: 'cleaned' }, removed: ['text'], reason: 'quarantine' },
       'interactive',
     )
     expect(out.hookSpecificOutput?.tool_input).toEqual({ path: '/tmp/a', text: 'cleaned' })
@@ -39,7 +39,7 @@ describe('a gate decision in the Gemini shape', () => {
     // A silently edited call is indistinguishable from an unedited one, and
     // indistinguishability is what this whole project is built against.
     const out = renderDecision(
-      { kind: 'rewrite', args: { text: 'cleaned' }, removed: ['text'], reason: 'the address was cut out' },
+      { kind: 'rewrite', rule: 'provenance', args: { text: 'cleaned' }, removed: ['text'], reason: 'the address was cut out' },
       'interactive',
     )
     expect(out.systemMessage).toContain('quarantine')
@@ -55,7 +55,7 @@ describe('a gate decision in the Gemini shape', () => {
     // trace of the edit in the notification file, which the human does not
     // always open.
     const out = renderDecision(
-      { kind: 'rewrite', args: { text: 'cleaned' }, removed: ['text'], reason: 'the address was cut out' },
+      { kind: 'rewrite', rule: 'provenance', args: { text: 'cleaned' }, removed: ['text'], reason: 'the address was cut out' },
       'autonomous',
     )
     expect(out.hookSpecificOutput?.tool_input).toEqual({ text: 'cleaned' })
@@ -66,7 +66,7 @@ describe('a gate decision in the Gemini shape', () => {
     // The call has already been fixed, there is nothing to ask about. Plus an
     // ask in autonomous mode on this harness, judging by the code, hangs.
     const out = renderDecision(
-      { kind: 'rewrite', args: { text: 'cleaned' }, removed: [], reason: 'quarantine' },
+      { kind: 'rewrite', rule: 'provenance', args: { text: 'cleaned' }, removed: [], reason: 'quarantine' },
       'interactive',
     )
     expect(out.decision).toBeUndefined()
@@ -75,9 +75,9 @@ describe('a gate decision in the Gemini shape', () => {
   it('a decision never appends to the model context', () => {
     for (const mode of ['interactive', 'autonomous'] as const) {
       const decisions: Decision[] = [
-        { kind: 'deny', reason: 'r' },
-        { kind: 'ask', reason: 'r' },
-        { kind: 'rewrite', args: {}, removed: [], reason: 'r' },
+        { kind: 'deny', rule: 'exposure', reason: 'r' },
+        { kind: 'ask', rule: 'exposure', reason: 'r' },
+        { kind: 'rewrite', rule: 'provenance', args: {}, removed: [], reason: 'r' },
       ]
       for (const decision of decisions) {
         expect(renderDecision(decision, mode).hookSpecificOutput?.additionalContext).toBeUndefined()

@@ -3,6 +3,7 @@ import type { ArgumentRole, Certificate, Decision, EffectClass, ExposureMark, So
 import { fields, type Field } from './fields.js'
 import { secretKinds } from './secrets.js'
 import { memoryTarget } from './memory.js'
+import type { Rule } from './rules.js'
 import type { Policy } from '../policy/defaults.js'
 import { canonicalForms, fold as foldSegment, touchesCordonItself } from '../policy/selfprotect.js'
 import { vouchKey } from '../provenance/bindings.js'
@@ -78,17 +79,17 @@ export function gate(call: ToolCall, ctx: GateContext): Decision {
   } catch (error) {
     // A core error is a deny. The only exception handler in the
     // whole module, and everything leads here.
-    return { kind: 'deny', reason: `Cordon failure: ${(error as Error).message}` }
+    return { kind: 'deny', rule: 'failure', reason: `Cordon failure: ${(error as Error).message}` }
   }
 }
 
 function decide(call: ToolCall, ctx: GateContext): Decision {
   if (typeof call?.tool !== 'string' || call.tool === '') {
-    return { kind: 'deny', reason: 'a call without a tool name' }
+    return { kind: 'deny', rule: 'malformed', reason: 'a call without a tool name' }
   }
   const args: unknown = call.args
   if (typeof args !== 'object' || args === null || Array.isArray(args)) {
-    return { kind: 'deny', reason: `the arguments of call ${call.tool} did not arrive as an object` }
+    return { kind: 'deny', rule: 'malformed', reason: `the arguments of call ${call.tool} did not arrive as an object` }
   }
   const own = args as Record<string, unknown>
 
@@ -98,6 +99,7 @@ function decide(call: ToolCall, ctx: GateContext): Decision {
   if (held !== undefined && held.why === 'shadow') {
     return {
       kind: 'deny',
+      rule: 'pin',
       reason: `the MCP tool ${call.tool} imitates ${held.imitates ?? 'another server\'s tool'} with lookalike characters ` +
         `(${held.server}); approving the server does not release it, remove the server or ask its author to rename the tool`,
     }
@@ -105,6 +107,7 @@ function decide(call: ToolCall, ctx: GateContext): Decision {
   if (held !== undefined) {
     return {
       kind: 'deny',
+      rule: 'pin',
       reason: `the MCP tool ${call.tool} ${held.why === 'new' ? 'appeared' : 'changed'} after the server was approved ` +
         `(${held.server}); review the server, then run "cordon mcp approve -- ${held.server}"`,
     }
@@ -130,6 +133,7 @@ function decide(call: ToolCall, ctx: GateContext): Decision {
     if (!harmless) {
       return escalate(
         ctx,
+        ctx.unredacted === true ? 'hidden-layer' : 'saturation',
         ctx.unredacted === true
           ? 'a hidden layer in a tool result could not be stripped'
           : 'provenance is full: this session read more than the store holds, and stopped remembering',
@@ -138,12 +142,12 @@ function decide(call: ToolCall, ctx: GateContext): Decision {
   }
 
   if (!verdict.classified) {
-    return escalate(ctx, verdict.reason)
+    return escalate(ctx, 'unclassified', verdict.reason)
   }
 
   const coverage = covers(ctx.cert, verdict.effects)
   if (!coverage.ok) {
-    return escalate(ctx, coverage.reason)
+    return escalate(ctx, 'certificate', coverage.reason)
   }
 
   // Resource boundaries come after effect classes and before the taint
@@ -152,12 +156,12 @@ function decide(call: ToolCall, ctx: GateContext): Decision {
   // by location alone.
   const outside = outOfBounds(parts, ctx.cert)
   if (outside) {
-    return escalate(ctx, outside)
+    return escalate(ctx, 'bounds', outside)
   }
 
   const config = agentConfigWrite(verdict.effects, parts, ctx)
   if (config) {
-    return escalate(ctx, config, ctx.exposure?.source)
+    return escalate(ctx, 'agent-config', config, ctx.exposure?.source)
   }
 
   // A credential leaving the machine answers before provenance: it needs no
@@ -165,25 +169,25 @@ function decide(call: ToolCall, ctx: GateContext): Decision {
   // the key does not travel on into the journal or the model's context.
   const leaving = credentialLeaving(verdict.effects, parts, ctx.userAtoms ?? [])
   if (leaving) {
-    return escalate(ctx, leaving)
+    return escalate(ctx, 'credential', leaving)
   }
 
   // Before provenance, so that no exit below can carry the call past it: a
   // quarantine rewrite kept the repository an outside review aimed it at.
   const bound = boundBy(call.tool, own, ctx)
   const stray = strayResource(call.tool, parts, ctx, bound)
-  if (stray) return escalate(ctx, stray, ctx.exposure?.source)
+  if (stray) return escalate(ctx, 'resource', stray, ctx.exposure?.source)
   // Before provenance for the same reason: a write back to the file read, or
   // a quarantine rewrite, carried an attacker's amount through untouched
   // (Codex). A target the user named, or a lookup vouched for, says where the
   // call goes and nothing about what it changes there.
   const loose = uncontrolled(call.tool, verdict.effects, parts, ctx)
-  if (loose) return escalate(ctx, loose, ctx.exposure?.source)
+  if (loose) return escalate(ctx, 'controlled', loose, ctx.exposure?.source)
 
   const scan = scanTaint(parts, ctx.taint, ctx.userAtoms ?? [], bound)
   if (!scan.tainted) {
     const exposed = exposedCall(call.tool, verdict.effects, parts, ctx, bound)
-    if (exposed) return escalate(ctx, exposed, ctx.exposure?.source)
+    if (exposed) return escalate(ctx, ctx.exposure?.memory === true ? 'memory-carry' : 'exposure', exposed, ctx.exposure?.source)
     return { kind: 'allow' }
   }
 
@@ -207,10 +211,10 @@ function decide(call: ToolCall, ctx: GateContext): Decision {
     const targets = scan.targets.filter((atom) => !isDate(atom))
     if (targets.length === 0 || identifierReadUnderMark(verdict.effects, targets, ctx)) {
       const exposed = exposedCall(call.tool, verdict.effects, parts, ctx, bound)
-      if (exposed) return escalate(ctx, exposed, ctx.exposure?.source)
+      if (exposed) return escalate(ctx, ctx.exposure?.memory === true ? 'memory-carry' : 'exposure', exposed, ctx.exposure?.source)
       return { kind: 'allow' }
     }
-    return escalate(ctx, `an argument carries a target from an untrusted source: ${targets.map(safeLabel).join(', ')}`, blamed)
+    return escalate(ctx, 'provenance', `an argument carries a target from an untrusted source: ${targets.map(safeLabel).join(', ')}`, blamed)
   }
 
   // Content returning to the very source it was read from is not subject to
@@ -226,7 +230,7 @@ function decide(call: ToolCall, ctx: GateContext): Decision {
   // works on a whole string argument, and we cannot parse somebody else's
   // argument schema. Hence escalation.
   if (scan.nested) {
-    return escalate(ctx, `quarantine is impossible: the untrusted fragment sits inside a nested argument${origin(blamedLabels)}`, blamed)
+    return escalate(ctx, 'provenance', `quarantine is impossible: the untrusted fragment sits inside a nested argument${origin(blamedLabels)}`, blamed)
   }
 
   // A memory file is the one place a silent cut costs most: the harness
@@ -238,6 +242,7 @@ function decide(call: ToolCall, ctx: GateContext): Decision {
   if (memory !== null) {
     return escalate(
       ctx,
+      'memory-write',
       `an untrusted fragment would be cut out of a write into memory (${memory}); ` +
         'a note the harness reloads is not rewritten silently',
       blamed,
@@ -246,11 +251,12 @@ function decide(call: ToolCall, ctx: GateContext): Decision {
 
   const cleaned = quarantine(own, scan.spans)
   if (!cleaned.possible) {
-    return escalate(ctx, `quarantine is impossible: ${cleaned.reason}${origin(blamedLabels)}`, blamed)
+    return escalate(ctx, 'provenance', `quarantine is impossible: ${cleaned.reason}${origin(blamedLabels)}`, blamed)
   }
 
   return {
     kind: 'rewrite',
+    rule: 'provenance',
     args: cleaned.args,
     removed: cleaned.removed,
     reason: 'an untrusted fragment was cut out of the arguments',
@@ -273,11 +279,11 @@ function selfProtection(parts: readonly Field[], ctx: GateContext): Decision | n
       // will coerce it to one when calling. We will not reason about somebody
       // else's coercion: a path of unclear shape is a refusal.
       if (paths === null) {
-        return { kind: 'deny', reason: `self-protection: argument ${key} is not a path` }
+        return { kind: 'deny', rule: 'self-protection', reason: `self-protection: argument ${key} is not a path` }
       }
       for (const path of paths) {
         if (touchesCordonItself(path, ctx.cordonHome)) {
-          return { kind: 'deny', reason: `self-protection: ${path} belongs to Cordon or to the harness` }
+          return { kind: 'deny', rule: 'self-protection', reason: `self-protection: ${path} belongs to Cordon or to the harness` }
         }
       }
     }
@@ -293,11 +299,11 @@ function selfProtection(parts: readonly Field[], ctx: GateContext): Decision | n
       // a pending call approved, a changed MCP server re-pinned. The same
       // substring crudeness as below, and the same answer to its limit.
       if (APPROVES.test(value.replace(/["'\\]/gu, ''))) {
-        return { kind: 'deny', reason: 'self-protection: the command gives an approval only the owner may give' }
+        return { kind: 'deny', rule: 'self-protection', reason: 'self-protection: the command gives an approval only the owner may give' }
       }
       for (const marker of selfMarkers(ctx.cordonHome)) {
         if (value.includes(marker)) {
-          return { kind: 'deny', reason: `self-protection: the command mentions ${marker}` }
+          return { kind: 'deny', rule: 'self-protection', reason: `self-protection: the command mentions ${marker}` }
         }
       }
     }
@@ -392,9 +398,9 @@ function selfMarkers(cordonHome: string): string[] {
   return [cordonHome, '.cordon', '.claude/settings', '.claude/hooks', '.cursor', '.codex', '.gemini']
 }
 
-function escalate(ctx: GateContext, reason: string, source?: string): Decision {
+function escalate(ctx: GateContext, rule: Rule, reason: string, source?: string): Decision {
   const kind = ctx.policy.mode === 'interactive' ? 'ask' : 'deny'
-  return source === undefined ? { kind, reason } : { kind, reason, source }
+  return source === undefined ? { kind, rule, reason } : { kind, rule, reason, source }
 }
 
 /**

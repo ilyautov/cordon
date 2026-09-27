@@ -1,3 +1,6 @@
+import type { Rule } from '../gate/rules.js'
+
+
 /** Effect classes. Scope is expressed in them, not in tool names. */
 export type EffectClass =
   | 'read'
@@ -53,6 +56,8 @@ export interface Certificate {
 }
 
 /**
+ * `rule` is the check that made the decision, from a closed list (src/gate/rules.ts).
+ *
  * `source` names the untrusted source the decision answers to, when the gate
  * knows it: the page an argument's target came from, the read that set the
  * exposure mark. It is for the owner's journal and never changes the
@@ -60,9 +65,9 @@ export interface Certificate {
  */
 export type Decision =
   | { kind: 'allow' }
-  | { kind: 'deny'; reason: string; source?: string }
-  | { kind: 'ask'; reason: string; source?: string }
-  | { kind: 'rewrite'; args: Record<string, unknown>; removed: string[]; reason: string; source?: string }
+  | { kind: 'deny'; rule: Rule; reason: string; source?: string }
+  | { kind: 'ask'; rule: Rule; reason: string; source?: string }
+  | { kind: 'rewrite'; rule: Rule; args: Record<string, unknown>; removed: string[]; reason: string; source?: string }
 
 export type TrustLabel = 'trusted' | 'untrusted'
 

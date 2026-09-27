@@ -3,7 +3,7 @@ import { gate as decide } from './gate/gate.js'
 import { memoryTarget } from './gate/memory.js'
 import { comparePins, shadows, type HeldTool, type ListedTool } from './gate/pins.js'
 import { pastedSecrets } from './gate/secrets.js'
-import { FileNotifier, SILENT, type Notifier } from './notify/notifier.js'
+import { FileNotifier, SILENT, labelled, type Notifier } from './notify/notifier.js'
 import { cutOutbound, outboundAfterRead } from './output/egress.js'
 import type { Policy } from './policy/defaults.js'
 import { readLookup, vouched, type Observation } from './provenance/bindings.js'
@@ -301,6 +301,7 @@ export class Cordon {
           : `the tool ${tool.why === 'new' ? 'appeared' : 'changed'} after ${server} was approved; ` +
             'it is hidden from the model and refused until "cordon mcp approve"',
         source: null,
+        ...labelled('pin'),
       })
     }
     return held
@@ -349,6 +350,7 @@ export class Cordon {
         // What the gate knows beats what the core guesses: the source the
         // decision turned on, and only failing that, the last page read.
         source: decision.source ?? this.lastSource?.label ?? null,
+        ...labelled(decision.rule),
       })
     }
 
@@ -383,6 +385,7 @@ export class Cordon {
         tool: call.tool,
         reason: `the owner approved this call once (${id}): ${decision.reason}`,
         source: decision.source ?? null,
+        ...labelled(decision.rule),
       })
       return { kind: 'allow' }
     }
@@ -397,9 +400,11 @@ export class Cordon {
       tool: call.tool,
       reason: `waiting for "cordon approve ${id}": ${decision.reason}`,
       source: decision.source ?? null,
+      ...labelled(decision.rule),
     })
     return {
       kind: 'deny',
+      rule: decision.rule,
       reason: `${decision.reason}. Nobody is here to ask, so the call is refused; the owner can allow this exact call once ` +
         `with "cordon approve ${id}", and retrying it unchanged then goes through`,
       ...(decision.source === undefined ? {} : { source: decision.source }),
