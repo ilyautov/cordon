@@ -128,9 +128,9 @@ describe('deepseek: results', () => {
       // Codex, round twelve: Windows drops trailing dots from a segment, so
       // .dsh. opens .dsh.
       'type C:\\Users\\u\\.dsh.\\profiles\\web\\cordis.patch.yml', 'type C:\\Users\\u\\.kimi..\\config.toml', 'cat ~/.codex.',
-      // Kimi, round thirteen: the path markers compared only with `/`, and
-      // backslashes are how every Windows path is spelled.
-      'copy evil.js C:\\Users\\u\\.claude\\hooks\\hook.js', 'type C:\\Users\\u\\.claude\\settings.json', 'cat ~/.claude//settings.json', 'cat ~/.claude/./settings.json', 'type C:\\Users\\u\\.claude\\.\\hooks\\x.js']) {
+      // The Windows spellings of the path markers are pinned in
+      // tests/gate/markers.test.ts: a backslash separates only there.
+      'cat ~/.claude//settings.json', 'cat ~/.claude/./settings.json']) {
       const out = run(home('read, exec'), pre('bash', { command }))
       expect(out.hookSpecificOutput.permissionDecisionReason, command).toMatch(/^self-protection/)
     }

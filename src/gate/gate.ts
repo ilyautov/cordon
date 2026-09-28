@@ -347,9 +347,12 @@ function selfProtection(parts: readonly Field[], ctx: GateContext): Decision | n
       // Case-folded: macOS and Windows open .CODEX as .codex, and a check
       // that compared exactly let the capitals through (Codex, reviewing
       // the Kimi and DeepSeek connectors).
-      const lower = value.toLowerCase()
+      // Folded once, not per marker: a ten-megabyte command folded nine
+      // times outran the hook's timeout (Codex, reviewing the connectors).
+      const windows = sep === '\\'
+      const command = foldCommand(value.toLowerCase(), windows)
       for (const marker of selfMarkers(ctx.cordonHome)) {
-        if (mentions(lower, marker.toLowerCase())) {
+        if (mentions(command, foldCommand(marker.toLowerCase(), windows))) {
           return { kind: 'deny', rule: 'self-protection', reason: `self-protection: the command mentions ${marker}` }
         }
       }
@@ -449,26 +452,46 @@ function asPaths(value: unknown): string[] | null {
 const APPROVES = /(?:\bcordon(?:@[\w.^~-]+)?|\bcli\.m?js)\s+(?:(?:mcp\s+)?approve|init|policy\s+apply|hook)\b/iu
 
 /**
- * Whether the command names the marker. A bare directory name followed by a
+ * A command's paths spelled the way the platform the harness runs on reads
+ * them, in one linear pass. On Windows both slashes separate and a segment's
+ * trailing dots and spaces are dropped, so `.claude.\hooks` is `.claude/hooks`;
+ * on POSIX a backslash is an escape, and folding it refused a sed idiom that
+ * only carried the text. On both, `//` and a `.` segment collapse. Four review
+ * rounds patched the comparison one spelling at a time; this is the model
+ * they were circling (Codex and Kimi, reviewing the connectors).
+ */
+export function foldCommand(command: string, windows: boolean): string {
+  const out: string[] = []
+  let segment = 0
+  for (const char of command) {
+    if (char !== '/' && !(windows && char === '\\')) {
+      out.push(char)
+      continue
+    }
+    if (windows) {
+      while (out.length > segment && (out[out.length - 1] === '.' || out[out.length - 1] === ' ')) out.pop()
+    } else if (out.length === segment + 1 && out[segment] === '.') {
+      out.pop()
+    }
+    if (out[out.length - 1] !== '/') out.push('/')
+    segment = out.length
+  }
+  return out.join('')
+}
+
+/**
+ * Whether a folded command names a folded marker. A marker with a `/` in it
+ * is a path prefix and matches as one. A bare directory name followed by a
  * letter, a digit or `_`, after any dots, is part of another name: `.kimi` in
  * www.kimi.com is the harness's site, and the substring refused every command
  * that fetched it (Kimi, reviewing the connectors). `-` still counts, so
- * `.kimi` covers `.kimi-code`; a glob character counts too. A marker with a
- * separator in it is a path prefix and matches as one, in either spelling:
- * `.claude/settings.json`, `.claude\settings.json`.
+ * `.kimi` covers `.kimi-code`; a glob character counts too. The dots are
+ * skipped on every platform: a `.dsh.` at the end of a word is `.dsh` on
+ * Windows, and elsewhere the stricter reading costs nothing real.
  */
-function mentions(raw: string, rawMarker: string): boolean {
-  // Separators are folded first: `\` is how every Windows path is spelled,
-  // and `.claude\hooks` went past a marker written with `/` (Kimi, reviewing
-  // the connectors). A doubled separator and a `./` segment name the same
-  // directory.
-  const command = raw.replace(/[\\/]+/gu, '/').replace(/\/(?:\.\/)+/gu, '/')
-  const marker = rawMarker.replace(/[\\/]+/gu, '/')
+export function mentions(command: string, marker: string): boolean {
   if (marker.includes('/')) return command.includes(marker)
   for (let at = command.indexOf(marker); at !== -1; at = command.indexOf(marker, at + 1)) {
-    // Dots are skipped before looking: Windows drops trailing dots from a
-    // segment, so `.dsh.\profiles` opens `.dsh` (Codex, reviewing the
-    // connectors). Only a name character after them makes another name.
     if (!/^\.*[\p{L}\p{N}_]/u.test(command.slice(at + marker.length))) return true
   }
   return false

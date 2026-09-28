@@ -8830,9 +8830,10 @@ function selfProtection(parts, ctx) {
       if (APPROVES.test(value.replace(/["'\\]/gu, ""))) {
         return { kind: "deny", rule: "self-protection", reason: "self-protection: the command approves, writes a policy or speaks as the harness, which only the owner may do" };
       }
-      const lower = value.toLowerCase();
+      const windows = sep3 === "\\";
+      const command = foldCommand(value.toLowerCase(), windows);
       for (const marker of selfMarkers(ctx.cordonHome)) {
-        if (mentions(lower, marker.toLowerCase())) {
+        if (mentions(command, foldCommand(marker.toLowerCase(), windows))) {
           return { kind: "deny", rule: "self-protection", reason: `self-protection: the command mentions ${marker}` };
         }
       }
@@ -8902,9 +8903,25 @@ function asPaths(value) {
   return null;
 }
 var APPROVES = /(?:\bcordon(?:@[\w.^~-]+)?|\bcli\.m?js)\s+(?:(?:mcp\s+)?approve|init|policy\s+apply|hook)\b/iu;
-function mentions(raw, rawMarker) {
-  const command = raw.replace(/[\\/]+/gu, "/").replace(/\/(?:\.\/)+/gu, "/");
-  const marker = rawMarker.replace(/[\\/]+/gu, "/");
+function foldCommand(command, windows) {
+  const out = [];
+  let segment = 0;
+  for (const char of command) {
+    if (char !== "/" && !(windows && char === "\\")) {
+      out.push(char);
+      continue;
+    }
+    if (windows) {
+      while (out.length > segment && (out[out.length - 1] === "." || out[out.length - 1] === " ")) out.pop();
+    } else if (out.length === segment + 1 && out[segment] === ".") {
+      out.pop();
+    }
+    if (out[out.length - 1] !== "/") out.push("/");
+    segment = out.length;
+  }
+  return out.join("");
+}
+function mentions(command, marker) {
   if (marker.includes("/")) return command.includes(marker);
   for (let at = command.indexOf(marker); at !== -1; at = command.indexOf(marker, at + 1)) {
     if (!/^\.*[\p{L}\p{N}_]/u.test(command.slice(at + marker.length))) return true;
