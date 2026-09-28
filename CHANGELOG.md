@@ -4,7 +4,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versions follo
 
 ## [Unreleased]
 
-A link in an identifier field of a tool's result (`url`, `href`, `uri`, `link`) was skipped whole: not cleaned, which is right, since rewriting a link breaks it, but also not remembered, so a result of `ok` with `url` set to an attacker's page left neither a mark nor provenance. The adapter now hands such links to the core, which records any the user did not name and marks the read; the user's own link coming back changes nothing.
+A link in an identifier field of a tool's result (`url`, `href`, `uri`, `link`) was skipped whole: not cleaned, which is right, since rewriting a link breaks it, but also not remembered, so a result of `ok` with `url` set to an attacker's page left neither a mark nor provenance. The Claude Code adapter, which Codex, Kimi and DeepSeek share, now hands such links to the core, which records any the user did not name and marks the read; the user's own link coming back changes nothing, in whatever spelling (compared without scheme, case or trailing slash, against the user's atoms and words), and a link that cannot be compared counts as the source's. The MCP gateway and LangChain read only a result's text blocks and have no such fields.
 
 The emergency hold written after a failure on a tool's result gets three more attempts, 50, 150 and 400 ms apart. On one attempt, a file locked for a moment (an antivirus on Windows, `EBUSY`) cost the hold, and once the lock cleared nothing on disk said the session was held. A failure that outlasts the retries is reported as before, and the hold is not promised.
 

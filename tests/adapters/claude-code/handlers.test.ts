@@ -454,4 +454,53 @@ describe('handle: a link in an identifier field', () => {
     )
     expect(out).toEqual({})
   })
+  it('the user\'s link spelled without a scheme, or with another one, is still theirs', () => {
+    // Kimi, reviewing this change: the user's bare spelling yields fewer
+    // atoms than the scheme link, so "every atom named" failed on the very
+    // spelling AgentDojo uses.
+    for (const [said, returned] of [
+      ['www.shop.example/item/42', 'https://www.shop.example/item/42'],
+      ['https://shop.example/item/42', 'http://shop.example/item/42/'],
+      ['shop.example', 'https://shop.example'],
+    ]) {
+      const shared = env()
+      const id = `u4-${said}`
+      handle({ kind: 'UserPromptSubmit', sessionId: id, prompt: `reply to the review of ${said}` }, shared)
+      handle(
+        { kind: 'PostToolUse', sessionId: id, call: { tool: 'mcp__web__search', args: {} },
+          response: { content: [{ type: 'text', text: 'ok' }], structuredContent: { url: returned } } },
+        shared,
+      )
+      const out = handle({ kind: 'PreToolUse', sessionId: id, call: { tool: 'wb_reply', args: { text: 'thank you for the review' } } }, shared)
+      expect(out, `${said} / ${returned}`).toEqual({})
+    }
+  })
+
+  it('a link that cannot be compared is the source\'s', () => {
+    // Kimi, reviewing this change: a link with no atoms was taken for one the
+    // user named, and left no mark.
+    for (const returned of ['evil.example', 'javascript:fetch(1)']) {
+      const shared = env()
+      const id = `u5-${returned}`
+      handle(
+        { kind: 'PostToolUse', sessionId: id, call: { tool: 'mcp__web__search', args: {} },
+          response: { content: [{ type: 'text', text: 'ok' }], structuredContent: { url: returned } } },
+        shared,
+      )
+      const out = handle({ kind: 'PreToolUse', sessionId: id, call: { tool: 'wb_reply', args: { text: 'thanks' } } }, shared)
+      expect(out.hookSpecificOutput?.permissionDecisionReason, returned).toMatch(/read untrusted content/)
+    }
+  })
+
+  it('a link that carries the user\'s host inside it is not theirs', () => {
+    const shared = env()
+    handle({ kind: 'UserPromptSubmit', sessionId: 'u6', prompt: 'reply to the review of www.shop.example/item/42' }, shared)
+    handle(
+      { kind: 'PostToolUse', sessionId: 'u6', call: { tool: 'mcp__web__search', args: {} },
+        response: { content: [{ type: 'text', text: 'ok' }], structuredContent: { url: 'https://evil.example/?next=www.shop.example/item/42' } } },
+      shared,
+    )
+    const out = handle({ kind: 'PreToolUse', sessionId: 'u6', call: { tool: 'wb_reply', args: { text: 'thanks' } } }, shared)
+    expect(out.hookSpecificOutput?.permissionDecisionReason).toMatch(/read untrusted content/)
+  })
 })

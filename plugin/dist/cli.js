@@ -13537,6 +13537,9 @@ function escape(text) {
 
 // src/cordon.ts
 var INERT = /^(?:|"?(?:none|null|undefined|true|false|ok|success)"?|\{\}|\[\]|-?\d+(?:\.\d+)?)$/iu;
+function canonicalLink(link) {
+  return link.trim().toLowerCase().replace(/^https?:\/\//u, "").replace(/\/+$/u, "");
+}
 var Cordon = class {
   policy;
   cordonHome;
@@ -13932,10 +13935,10 @@ var Cordon = class {
    */
   observeLinks(links, source) {
     if (source.trust !== "untrusted") return;
+    const named2 = /* @__PURE__ */ new Set([...this.userAtoms.map(canonicalLink), ...this.userWords]);
     let foreign = false;
     for (const link of links) {
-      const found2 = atoms(link);
-      if (found2.length === 0 || found2.every((atom) => this.userAtoms.includes(atom))) continue;
+      if (named2.has(canonicalLink(link))) continue;
       this.taint.record(link, source);
       foreign = true;
     }

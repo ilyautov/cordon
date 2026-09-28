@@ -81,6 +81,11 @@ export type PieceRole = 'content' | 'label'
  */
 const INERT = /^(?:|"?(?:none|null|undefined|true|false|ok|success)"?|\{\}|\[\]|-?\d+(?:\.\d+)?)$/iu
 
+/** A link in one spelling: lower case, no http(s) scheme, no trailing slash. */
+function canonicalLink(link: string): string {
+  return link.trim().toLowerCase().replace(/^https?:\/\//u, '').replace(/\/+$/u, '')
+}
+
 /**
  * The core's facade. Exactly three entries, matching the adapter contract of
  * three: trusted input, observing a tool result, deciding on a call.
@@ -614,10 +619,17 @@ export class Cordon {
    */
   observeLinks(links: readonly string[], source: Source): void {
     if (source.trust !== 'untrusted') return
+    // Compared whole, in one spelling: the user writes www.shop.example/item
+    // and the tool returns https://www.shop.example/item/, and matching atom
+    // by atom failed there, since a scheme link yields twins the bare one
+    // does not. A bare host is no atom at all, so the user's words count too
+    // (Kimi, reviewing this change).
+    const named = new Set([...this.userAtoms.map(canonicalLink), ...this.userWords])
     let foreign = false
     for (const link of links) {
-      const found = atoms(link)
-      if (found.length === 0 || found.every((atom) => this.userAtoms.includes(atom))) continue
+      if (named.has(canonicalLink(link))) continue
+      // A link with no atoms cannot enter provenance, but it is still the
+      // source's: it marks the read rather than passing for the user's.
       this.taint.record(link, source)
       foreign = true
     }
