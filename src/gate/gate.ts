@@ -344,8 +344,12 @@ function selfProtection(parts: readonly Field[], ctx: GateContext): Decision | n
       if (APPROVES.test(value.replace(/["'\\]/gu, ''))) {
         return { kind: 'deny', rule: 'self-protection', reason: 'self-protection: the command approves, writes a policy or speaks as the harness, which only the owner may do' }
       }
+      // Case-folded: macOS and Windows open .CODEX as .codex, and a check
+      // that compared exactly let the capitals through (Codex, reviewing
+      // the Kimi and DeepSeek connectors).
+      const lower = value.toLowerCase()
       for (const marker of selfMarkers(ctx.cordonHome)) {
-        if (value.includes(marker)) {
+        if (lower.includes(marker.toLowerCase())) {
           return { kind: 'deny', rule: 'self-protection', reason: `self-protection: the command mentions ${marker}` }
         }
       }
@@ -445,7 +449,11 @@ function asPaths(value: unknown): string[] | null {
 const APPROVES = /(?:\bcordon(?:@[\w.^~-]+)?|\bcli\.m?js)\s+(?:(?:mcp\s+)?approve|init|policy\s+apply|hook)\b/iu
 
 function selfMarkers(cordonHome: string): string[] {
-  return [cordonHome, '.cordon', '.claude/settings', '.claude/hooks', '.cursor', '.codex', '.gemini']
+  // '.kimi' covers '.kimi-code' too. The file tools read HARNESS_CONFIG in
+  // src/policy/selfprotect.ts; a directory added there and not here was
+  // reachable through the shell (Codex, reviewing the Kimi and DeepSeek
+  // connectors).
+  return [cordonHome, '.cordon', '.claude/settings', '.claude/hooks', '.cursor', '.codex', '.gemini', '.kimi', '.dsh']
 }
 
 function escalate(ctx: GateContext, rule: Rule, reason: string, source?: string): Decision {

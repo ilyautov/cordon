@@ -1,5 +1,6 @@
 import { rewriteNotice } from '../../core/rewrite-notice.js'
 import type { Decision, PresenceMode, ToolCall } from '../../core/types.js'
+import { CLAUDE_CODE, type Dialect } from './dialect.js'
 
 export type HookEvent =
   | { kind: 'PreToolUse'; sessionId: string; call: ToolCall }
@@ -22,6 +23,13 @@ export type HookEvent =
     }
 
 export interface HookOutput {
+  /**
+   * Codex only: on PostToolUse, `block` shows the model `reason` in place of
+   * the tool's result. It is the one channel Codex honours for replacing a
+   * result (docs/harnesses.md).
+   */
+  decision?: 'block'
+  reason?: string
   /**
    * Shown to the human in the transcript and NOT returned to the model. A
    * field common to any hook event, unrelated to the decision.
@@ -60,7 +68,7 @@ export interface HookOutput {
  * exception in the middle of a hook is worse: the harness reads a crashed
  * hook as "let it through".
  */
-export function parseEvent(stdin: string): HookEvent {
+export function parseEvent(stdin: string, dialect: Dialect = CLAUDE_CODE): HookEvent {
   let raw: Record<string, unknown>
   try {
     const parsed: unknown = JSON.parse(stdin)
@@ -75,12 +83,11 @@ export function parseEvent(stdin: string): HookEvent {
   const name = field(raw, 'hook_event_name')
 
   if (name === 'UserPromptSubmit') {
-    const prompt = field(raw, 'prompt')
-    // A prompt that is not a string is not a user message. Coercing an object
-    // to "[object Object]" is pointless: no directive will be found in it
-    // anyway, and an empty string honestly means "there was no trusted
-    // text".
-    return { kind: 'UserPromptSubmit', sessionId, prompt: typeof prompt === 'string' ? prompt : '' }
+    // A prompt that is neither a string nor a list of text blocks is not a
+    // user message. Coercing an object to "[object Object]" is pointless: no
+    // directive will be found in it anyway, and an empty string honestly
+    // means "there was no trusted text".
+    return { kind: 'UserPromptSubmit', sessionId, prompt: promptText(field(raw, 'prompt')) }
   }
 
   if (name === 'MessageDisplay') {
@@ -121,7 +128,10 @@ export function parseEvent(stdin: string): HookEvent {
       if (input !== undefined && !isRecord(input)) {
         return { kind: 'unparsable', sessionId, reason: `the tool_input of the call ${tool} did not arrive as an object` }
       }
-      return { kind: 'PreToolUse', sessionId, call: { tool, args: isRecord(input) ? input : {} } }
+      const cwd = field(raw, 'cwd')
+      const call = dialect.translate({ tool, args: isRecord(input) ? input : {} }, typeof cwd === 'string' && cwd !== '' ? cwd : null)
+      if ('unreadable' in call) return { kind: 'unparsable', sessionId, reason: call.unreadable }
+      return { kind: 'PreToolUse', sessionId, call }
     }
 
     // On PostToolUse the arguments take no part in the decision: the result
@@ -132,7 +142,7 @@ export function parseEvent(stdin: string): HookEvent {
       kind: 'PostToolUse',
       sessionId,
       call: { tool, args: isRecord(input) ? input : {} },
-      response: field(raw, 'tool_response'),
+      response: field(raw, dialect.resultField),
     }
   }
 
@@ -226,6 +236,23 @@ export function renderDecision(decision: Decision, mode: PresenceMode): HookOutp
 export function silentOnFailure(event: HookEvent): boolean {
   if (event.kind === 'PostToolUse' || event.kind === 'MessageDisplay') return true
   return event.kind === 'unparsable' && event.silent === true
+}
+
+/**
+ * The user's words from a prompt: a string, or, on Kimi Code, a list of
+ * content blocks. Only a block whose type is text is text; an image block's
+ * caption is not something the user said.
+ */
+function promptText(prompt: unknown): string {
+  if (typeof prompt === 'string') return prompt
+  if (!Array.isArray(prompt)) return ''
+  const texts: string[] = []
+  for (const block of prompt) {
+    if (isRecord(block) && field(block, 'type') === 'text' && typeof field(block, 'text') === 'string') {
+      texts.push(field(block, 'text') as string)
+    }
+  }
+  return texts.join('\n')
 }
 
 /**

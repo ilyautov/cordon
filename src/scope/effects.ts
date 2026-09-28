@@ -1,4 +1,5 @@
 import type { EffectClass, ToolCall } from '../core/types.js'
+import { readPatch } from './patch.js'
 
 export interface EffectVerdict {
   effects: EffectClass[]
@@ -66,7 +67,17 @@ export function classify(
       reason: `tool ${call.tool} is not declared in the policy`,
     }
   }
-  return { effects: [...declared], classified: true, reason: '' }
+  const effects = [...declared]
+  // A patch that deletes or moves a file is a delete, whatever the table
+  // says, and one that cannot be read counts as one: the addition can only
+  // make the decision stricter, so a tool that merely borrows the name
+  // gains nothing by it.
+  if (call.tool === 'apply_patch' && !effects.includes('delete')) {
+    const patch = call.args['patch']
+    const read = typeof patch === 'string' ? readPatch(patch) : null
+    if (read === null || read.deletes) effects.push('delete')
+  }
+  return { effects, classified: true, reason: '' }
 }
 
 /**
@@ -98,7 +109,69 @@ export const GEMINI_BUILTIN: Readonly<Record<string, EffectClass[]>> = {
   save_memory: ['create', 'update'],
 }
 
-/** A tool's built-in classification in either harness, or null for none. */
+/**
+ * Codex CLI's built-in tools beyond the ones it shares with Claude Code.
+ *
+ * Its shell is `Bash`, the same name and the same class. Files are written by
+ * apply_patch; `classify` adds `delete` to a patch that deletes or moves, and
+ * the paths reach the gate from the adapter, which lifts them out of the
+ * patch with `readPatch`.
+ */
+export const CODEX_BUILTIN: Readonly<Record<string, EffectClass[]>> = {
+  apply_patch: ['create', 'update'],
+}
+
+/**
+ * Kimi Code's built-in tools beyond the ones it shares with Claude Code
+ * (Read, Glob, Grep, Write, Edit, Bash, WebSearch), named as Kimi Code 2.0.0
+ * names them.
+ *
+ * The bookkeeping tools touch nothing outside the conversation: a todo list,
+ * a plan, a question to the human, the state of a background task or of the
+ * goal. They are the smallest class for the reason ToolSearch is: Cordon
+ * puts no question through Kimi, so an unclassified tool is a refusal, and refusing
+ * the agent its todo list stops honest work while protecting nothing. What
+ * schedules work, stops it or sets a goal (Cron*, TaskStop, CreateGoal,
+ * UpdateGoal, SetGoalBudget) is left out, and so is a subagent (Agent): whether
+ * its calls reach the hook was not measured.
+ */
+export const KIMI_BUILTIN: Readonly<Record<string, EffectClass[]>> = {
+  FetchURL: ['read', 'network-egress'],
+  ReadMediaFile: ['read'],
+  Skill: ['read'],
+  TodoList: ['read'],
+  TaskList: ['read'],
+  TaskOutput: ['read'],
+  WaitFor: ['read'],
+  GetGoal: ['read'],
+  AskUserQuestion: ['read'],
+  EnterPlanMode: ['read'],
+  ExitPlanMode: ['read'],
+}
+
+/**
+ * DeepSeek Harness's built-in tools, as its bridge for Claude Code hooks
+ * names them: lower case, the file under `file_path` or `path`.
+ *
+ * `str_replace_editor` views, creates and edits by its `command` field, so
+ * it carries all three classes: a read-only profile refuses its `view`, and
+ * `read` does the same job there.
+ */
+export const DEEPSEEK_BUILTIN: Readonly<Record<string, EffectClass[]>> = {
+  read: ['read'],
+  read_image: ['read'],
+  glob: ['read'],
+  grep: ['read'],
+  web_fetch: ['read', 'network-egress'],
+  web_search: ['read', 'network-egress'],
+  write: ['create', 'update'],
+  edit: ['update'],
+  str_replace_editor: ['read', 'create', 'update'],
+  bash: ['exec'],
+}
+
+/** A tool's built-in classification in any harness, or null for none. */
 export function builtinEffects(tool: string): readonly EffectClass[] | null {
-  return declaredFor(BUILTIN, tool) ?? declaredFor(GEMINI_BUILTIN, tool) ?? null
+  return declaredFor(BUILTIN, tool) ?? declaredFor(GEMINI_BUILTIN, tool) ?? declaredFor(CODEX_BUILTIN, tool)
+    ?? declaredFor(KIMI_BUILTIN, tool) ?? declaredFor(DEEPSEEK_BUILTIN, tool) ?? null
 }

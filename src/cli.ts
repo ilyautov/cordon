@@ -6,6 +6,9 @@ import { fileURLToPath } from 'node:url'
 import { cordonHome, runHook as runClaudeCodeHook } from './adapters/claude-code/main.js'
 import { exitFor } from './adapters/claude-code/protocol.js'
 import { runHook as runGeminiHook } from './adapters/gemini-cli/main.js'
+import { runHook as runCodexHook } from './adapters/codex/main.js'
+import { runHook as runKimiHook } from './adapters/kimi/main.js'
+import { runHook as runDeepseekHook } from './adapters/deepseek/main.js'
 import { runGateway } from './adapters/mcp/gateway.js'
 import { humanSeesRendered, type SourceView } from './core/types.js'
 import { audit, CODES, type AuditFinding, type Severity } from './audit/audit.js'
@@ -23,7 +26,7 @@ import { ApprovalStore, MAX_SHOWN_ARGS, type ShownRequest } from './session/appr
 import { MemoryLedger } from './session/memory.js'
 
 const USAGE =
-  'usage: cordon scan <file|-> [--json] | cordon hook [--harness claude-code|gemini] | cordon mcp -- <server command...> | cordon mcp approve -- <server command...> | cordon doctor | cordon init [--profile locked|research|documents|coding|service] [--force] | cordon log [--last N] [--json] | cordon approve [id [--read] [--as name]] | cordon policy check|explain [file] | cordon policy apply <file> [--accept-warnings] [--as name] | cordon audit [dir] [--json|--sarif] [--fail-on high|medium|low]'
+  'usage: cordon scan <file|-> [--json] | cordon hook [--harness claude-code|gemini|codex|kimi|deepseek] | cordon mcp -- <server command...> | cordon mcp approve -- <server command...> | cordon doctor | cordon init [--profile locked|research|documents|coding|service] [--force] | cordon log [--last N] [--json] | cordon approve [id [--read] [--as name]] | cordon policy check|explain [file] | cordon policy apply <file> [--accept-warnings] [--as name] | cordon audit [dir] [--json|--sarif] [--fail-on high|medium|low]'
 
 /**
  * Event parsing depends on the harness, so the harness is named explicitly.
@@ -36,6 +39,9 @@ const USAGE =
 const HARNESSES: ReadonlyMap<string, (stdin: string) => string> = new Map([
   ['claude-code', runClaudeCodeHook],
   ['gemini', runGeminiHook],
+  ['codex', runCodexHook],
+  ['kimi', runKimiHook],
+  ['deepseek', runDeepseekHook],
 ])
 
 function readInput(path: string | undefined): string {
@@ -119,7 +125,7 @@ export function main(argv: string[]): number | Promise<number> {
  * would read as a promise.
  */
 export interface HarnessReport {
-  name: 'claude-code' | 'gemini-cli'
+  name: 'claude-code' | 'gemini-cli' | 'codex' | 'kimi' | 'deepseek'
   limits: string[]
 }
 
@@ -136,6 +142,39 @@ const HARNESS_LIMITS: readonly HarnessReport[] = [
       'there is nothing to replace a tool result with: a poisoned one is rejected whole, and the clean part of the page reaches the model wrapped in a refusal',
       'any hook failure ends in a pass, not just a timeout; there is no "this hook is mandatory" flag in the harness configuration at all',
       'the session identifier survives across processes only when the session is explicitly resumed: a conversation started afresh starts the data axis from a blank slate',
+    ],
+  },
+  // Measured on Codex CLI 0.157 and Kimi Code 2.0 (docs/harnesses.md).
+  {
+    name: 'codex',
+    limits: [
+      'in codex exec a question is put to no one (the call ran unasked; the TUI was not measured), so every question is a refusal naming a one-time approval: cordon approve <id>',
+      'arguments are changed only next to an explicit allow, which would override your own approval settings, so a call Cordon would cut is refused instead',
+      'a result is replaced only through a block: the model reads the cleaned result as a tool error',
+      'a hook that crashes, hangs or prints garbage lets the call through',
+    ],
+  },
+  {
+    name: 'kimi',
+    limits: [
+      'whether a question is put to anyone was not measured, so it is not relied on: every question is a refusal naming a one-time approval, cordon approve <id>',
+      'changed arguments are ignored, so a call Cordon would cut is refused instead',
+      'a subagent (Agent) is refused with an approval id; do not approve it, since whether its own calls reach the hook was not measured',
+      'the harness cannot replace a tool result: a hidden layer in something read rendered (a fetched page) reaches the model, and calls that act are held until your next message; in a file read as source text it is reported',
+      'a hook that crashes, hangs or prints garbage lets the call through',
+    ],
+  },
+  // Read from the source of @deepseek-ai/dsh-hooks-claude-code.
+  {
+    name: 'deepseek',
+    limits: [
+      'read from the bridge\'s source, not measured live',
+      'every question is a refusal naming a one-time approval (cordon approve <id>), and a call Cordon would cut is refused: the bridge ignores changed arguments',
+      'a result is replaced only through a block: the model reads the cleaned result as a tool error',
+      'the bridge sends harness notices as your message and carries no source, so no message counts as yours: nothing you write names a destination, and after an untrusted read every call that acts is refused with an approval id for the rest of the session',
+      'the bridge logs a hook\'s message to you and shows it to no one: what Cordon reports rather than cuts is only in the journal (cordon log)',
+      'the bridge hands the hook only the text blocks of a result; anything else in it reaches the model unscanned',
+      'a hook that crashes or fails to start lets the call through, and the bridge waits ten minutes for one that hangs unless the config sets a timeout',
     ],
   },
 ]
@@ -754,9 +793,11 @@ function hook(args: string[]): number {
   }
   const output = run(stdin)
   process.stdout.write(output + '\n')
-  // Only on Claude Code, where the docs and a live run agree on what exit 2
-  // does. Gemini CLI's own semantics were never run live.
-  if (named !== 'claude-code') return 0
+  // Only where exit 2 is known to block: Claude Code and Codex measured live,
+  // DeepSeek Harness read from its bridge's codec.
+  // Gemini CLI's own semantics were never run live, and on Kimi the JSON
+  // refusal is the form measured.
+  if (named !== 'claude-code' && named !== 'codex' && named !== 'deepseek') return 0
   const exit = exitFor(output)
   if (exit.stderr !== '') process.stderr.write(exit.stderr + '\n')
   return exit.code

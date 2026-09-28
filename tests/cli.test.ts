@@ -112,6 +112,33 @@ describe('cordon hook', () => {
     expect(JSON.parse(stdout)).toEqual({})
   })
 
+  it('codex: a refusal exits 2, which Codex blocks on too', () => {
+    const event = JSON.stringify({
+      session_id: 'cli', cwd: '/tmp', hook_event_name: 'PreToolUse',
+      tool_name: 'apply_patch', tool_input: { command: '*** Begin Patch\n*** Add File: /tmp/x\n+y\n*** End Patch' },
+    })
+    const { stdout, status } = run(['hook', '--harness', 'codex'], event, homeEnv())
+    expect(status).toBe(2)
+    expect(JSON.parse(stdout).hookSpecificOutput.permissionDecision).toBe('deny')
+  })
+
+  it('kimi: a refusal is printed as JSON, the form a live run confirmed', () => {
+    const event = JSON.stringify({
+      session_id: 'cli', hook_event_name: 'PreToolUse', tool_name: 'Write', tool_input: { path: '/tmp/x', content: 'y' },
+    })
+    const { stdout } = run(['hook', '--harness', 'kimi'], event, homeEnv())
+    expect(JSON.parse(stdout).hookSpecificOutput.permissionDecision).toBe('deny')
+  })
+
+  it('deepseek: a refusal exits 2, which the bridge reads as a block', () => {
+    const event = JSON.stringify({
+      session_id: 'cli', hook_event_name: 'PreToolUse', tool_name: 'write', tool_input: { file_path: '/tmp/x', content: 'y' },
+    })
+    const { stdout, status } = run(['hook', '--harness', 'deepseek'], event, homeEnv())
+    expect(status).toBe(2)
+    expect(JSON.parse(stdout).hookSpecificOutput.permissionDecision).toBe('deny')
+  })
+
   it('prints deny on empty stdin instead of staying silent', () => {
     const { stdout, status } = run(['hook'], '', homeEnv())
     expect(status).toBe(2)

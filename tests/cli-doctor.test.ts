@@ -247,11 +247,28 @@ describe('doctor: the default source view', () => {
     // Cordon does not give.
     const report = doctor(home())
 
-    expect(report.harnesses.map((h) => h.name).sort()).toEqual(['claude-code', 'gemini-cli'])
+    expect(report.harnesses.map((h) => h.name).sort()).toEqual(['claude-code', 'codex', 'deepseek', 'gemini-cli', 'kimi'])
 
     const gemini = report.harnesses.find((h) => h.name === 'gemini-cli')
     expect(gemini?.limits.join(' ')).toContain('tool result')
     expect(gemini?.limits.length).toBeGreaterThanOrEqual(3)
+  })
+
+  it('names what Codex and Kimi do not honour', () => {
+    // Measured on live runs (docs/harnesses.md): neither puts a question to
+    // anyone, neither applies a rewrite without an allow, and Kimi cannot
+    // replace a tool result at all.
+    const report = doctor(home())
+    const codex = report.harnesses.find((h) => h.name === 'codex')?.limits.join(' ') ?? ''
+    const kimi = report.harnesses.find((h) => h.name === 'kimi')?.limits.join(' ') ?? ''
+    expect(codex).toMatch(/cordon approve/)
+    expect(codex).toMatch(/refused/)
+    expect(kimi).toMatch(/cannot replace a tool result/)
+    // Kimi's ask was never measured; doctor must not say it was (Codex).
+    expect(kimi).toMatch(/not measured/)
+    const deepseek = report.harnesses.find((h) => h.name === 'deepseek')?.limits.join(' ') ?? ''
+    expect(deepseek).toMatch(/not measured live/)
+    expect(deepseek).toMatch(/no message counts as yours/)
   })
 
   it("doctor's output states the second harness's limits in words", () => {

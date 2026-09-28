@@ -4,8 +4,9 @@ import { join } from 'node:path'
 import { makeDirectory } from '../../core/mkdir.js'
 import { homeProblem, projectDir } from '../../policy/home.js'
 import { loadPolicy } from '../../policy/load.js'
-import { handle } from './handlers.js'
+import { handle, unscanned } from './handlers.js'
 import { parseEvent, silentOnFailure, type HookEvent, type HookOutput } from './protocol.js'
+import { CLAUDE_CODE, type Dialect } from './dialect.js'
 
 export function cordonHome(): string {
   const set = process.env.CORDON_HOME
@@ -32,10 +33,10 @@ export function cordonHome(): string {
  * and it will look like a defence that fired — exactly the quiet failure rule
  * 2 protects against.
  */
-export function runHook(stdin: string, home: string = cordonHome()): string {
+export function runHook(stdin: string, home: string = cordonHome(), dialect: Dialect = CLAUDE_CODE): string {
   let event: HookEvent
   try {
-    event = parseEvent(stdin)
+    event = parseEvent(stdin, dialect)
   } catch (error) {
     // Parsing must not throw at all. If it did throw anyway, the event's kind
     // is unknown, and the strictest possible assumption is what remains.
@@ -49,8 +50,9 @@ export function runHook(stdin: string, home: string = cordonHome()): string {
     if (problem !== null) throw new Error(problem)
     ensureUsableHome(home)
     const policy = loadPolicy(home)
-    return JSON.stringify(handle(event, { policy, cordonHome: home }))
+    return JSON.stringify(handle(event, { policy, cordonHome: home }, dialect))
   } catch (error) {
+    if (event.kind === 'PostToolUse') return JSON.stringify(unscanned(event, home, dialect, error as Error))
     return JSON.stringify(failure(event, `Cordon failure: ${(error as Error).message}`))
   }
 }
@@ -76,9 +78,9 @@ function ensureUsableHome(home: string): void {
 /**
  * A refusal in the form the event allows.
  *
- * On PostToolUse the tool has already run: there is nothing to forbid and
- * nothing to print — what remains is the absence of a substitution. This is
- * rule 3 in full, and it is the same one `handle` applies inside itself.
+ * PostToolUse never reaches here: the tool has already run, so there is
+ * nothing to forbid, and the result is answered by `unscanned`, which holds
+ * the session and tells the human.
  *
  * On MessageDisplay a refusal is forbidden for a different reason: the event
  * decides nothing, and an empty response makes the harness show the source

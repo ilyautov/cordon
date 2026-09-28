@@ -268,7 +268,7 @@ After an untrusted read, a call that reaches a resource the user never mentioned
 
 ### Agent configuration written after an untrusted read
 
-After an untrusted read, a write to a file that configures an agent escalates: `.vscode/settings.json`, `.vscode/tasks.json`, `.vscode/mcp.json`, `.vscode/launch.json`, `.mcp.json`, `.windsurf/mcp.json`, `.continue/config.json`, `.zed/settings.json`, `.zed/tasks.json` and `.devcontainer/devcontainer.json`, by a file tool or by a shell command that names the file. An injected write there turns confirmations off or adds an MCP server that runs a command on the next start (CVE-2025-53773, CVE-2025-54135). The harness directories `.claude`, `.cursor`, `.codex` and `.gemini` are not writable at all; see self-protection.
+After an untrusted read, a write to a file that configures an agent escalates: `.vscode/settings.json`, `.vscode/tasks.json`, `.vscode/mcp.json`, `.vscode/launch.json`, `.mcp.json`, `.windsurf/mcp.json`, `.continue/config.json`, `.zed/settings.json`, `.zed/tasks.json` and `.devcontainer/devcontainer.json`, by a file tool or by a shell command that names the file. An injected write there turns confirmations off or adds an MCP server that runs a command on the next start (CVE-2025-53773, CVE-2025-54135). The harness directories `.claude`, `.cursor`, `.codex`, `.gemini`, `.kimi-code`, `.kimi` and `.dsh` are not writable at all; see self-protection.
 
 ### Autonomous agents: declare what is a directory
 

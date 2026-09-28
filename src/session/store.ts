@@ -683,3 +683,19 @@ function mergeDirectives(a: EffectClass[] | null, b: EffectClass[] | null): Effe
   if (b === null) return a
   return a.filter((effect) => b.includes(effect))
 }
+
+/**
+ * A new read, as an id no other process can repeat: time first, so the kept
+ * tail is the newest, then randomness, so two processes reading at once add
+ * two ids and a merge keeps both. A counter merged by its maximum lost one
+ * of two concurrent reads, and an approval given between them survived the
+ * second (Codex).
+ */
+export function noteRead(ids: readonly string[]): string[] {
+  // Never earlier than the newest kept id: stamped by a clock that went back,
+  // the new read sorted below the tail and was cut off, and the ids, the
+  // context an approval is bound to, did not change (Codex).
+  const newest = ids.reduce((max, id) => Math.max(max, parseInt(id.split('-')[0] ?? '', 36) || 0), 0)
+  const id = `${Math.max(Date.now(), newest + 1).toString(36)}-${randomBytes(6).toString('hex')}`
+  return [...ids, id].sort().slice(-MAX_READ_IDS)
+}

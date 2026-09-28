@@ -1,4 +1,4 @@
-import { createHash, randomBytes } from 'node:crypto'
+import { createHash } from 'node:crypto'
 import { humanSeesRendered, type Certificate, type ExposureMark, type Decision, type EffectClass, type Source, type ToolCall } from './core/types.js'
 import { gate as decide } from './gate/gate.js'
 import { memoryTarget } from './gate/memory.js'
@@ -21,7 +21,7 @@ import { ApprovalStore, approvalId, canonical, type ApprovalContext } from './se
 import { PinStore } from './session/pins.js'
 import { BudgetStore } from './session/budgets.js'
 import { classify } from './scope/effects.js'
-import { MAX_LOOKUPS, MAX_READ_IDS, MAX_USER_ATOMS, SessionStore, type SessionState, type TurnNames } from './session/store.js'
+import { MAX_LOOKUPS, MAX_READ_IDS, MAX_USER_ATOMS, SessionStore, noteRead, type SessionState, type TurnNames } from './session/store.js'
 import { assignments } from './provenance/assignments.js'
 
 export interface Envelope {
@@ -57,6 +57,15 @@ export interface CordonOptions {
    * approvals included (Codex).
    */
   policyFile?: string
+  /**
+   * Whether the harness applies changed arguments. Codex, Kimi and DeepSeek
+   * Harness do not without an `allow` that would override the user's own
+   * approvals, so there a rewrite is decided as a refusal here, before it
+   * spends a budget or reaches the journal: decided in the adapter, the
+   * journal said the fragment was cut and the call ran while the harness
+   * was told to refuse it (Codex).
+   */
+  rewrites?: boolean
 }
 
 /**
@@ -121,10 +130,12 @@ export class Cordon {
   /** The state key on disk. It comes from the harness, that is, from outside. */
   readonly sessionId: string
   private readonly policyFile: string | null
+  private readonly rewrites: boolean
 
   constructor(options: CordonOptions) {
     this.policy = options.policy
     this.policyFile = options.policyFile ?? null
+    this.rewrites = options.rewrites ?? true
     this.cordonHome = options.cordonHome
     this.notifier = stamped(options.notifier ?? (options.policy.notify.file
       ? new FileNotifier(options.policy.notify.file)
@@ -404,8 +415,24 @@ export class Cordon {
     // harness applies the substituted arguments and the model's own account
     // of the turn is wrong about what landed on disk. Without this line the
     // only record of that is the file itself.
+    if (decision.kind === 'rewrite' && !this.rewrites) {
+      // The cut cannot be applied, and running the call uncut is the attack.
+      decision = {
+        kind: 'deny',
+        rule: decision.rule,
+        reason: `${decision.reason}; this harness cannot run a call with its arguments changed, so the call is refused ` +
+          `(arguments that carried it: ${decision.removed.length > 0 ? decision.removed.join(', ') : 'none'})`,
+        ...(decision.source === undefined ? {} : { source: decision.source }),
+      }
+    }
     if (askSpends || decision.kind !== 'ask') decision = this.spend(call, decision)
     this.recordMemory(call, decision)
+    // A call is let through only by a core that can still write. The mark a
+    // result left (unscanned, exposure) lives on disk, and a store that
+    // stopped taking writes lost it without a word: the next core read the
+    // older state and allowed (Codex, reviewing the connectors). Writing
+    // here throws on such a store, and the adapter turns that into a refusal.
+    if (decision.kind === 'allow' || decision.kind === 'rewrite') this.persist()
 
     if (decision.kind === 'deny' || decision.kind === 'ask' || decision.kind === 'rewrite') {
       this.notifier.notify({
@@ -498,6 +525,10 @@ export class Cordon {
       })
       return refusal
     }
+    // Written before the approval is spent, as before any allow (judge): a
+    // store that takes no write throws here, and the approval stays unspent
+    // for a core that can remember what it let through (Codex).
+    this.persist()
     const taken = approvals.take(id, binding)
     if (!taken.taken) {
       try {
@@ -919,14 +950,3 @@ function digest(text: string): string {
   return createHash('sha256').update(text, 'utf8').digest('hex')
 }
 
-/**
- * A new read, as an id no other process can repeat: time first, so the kept
- * tail is the newest, then randomness, so two processes reading at once add
- * two ids and a merge keeps both. A counter merged by its maximum lost one
- * of two concurrent reads, and an approval given between them survived the
- * second (Codex).
- */
-function noteRead(ids: readonly string[]): string[] {
-  const id = `${Date.now().toString(36)}-${randomBytes(6).toString('hex')}`
-  return [...ids, id].sort().slice(-MAX_READ_IDS)
-}

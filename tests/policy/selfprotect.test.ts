@@ -20,6 +20,15 @@ describe('touchesCordonItself', () => {
     expect(touchesCordonItself('/proj/.claude/hooks/pre-tool.sh', home)).toBe(true)
   })
 
+  it('catches the settings of every harness Cordon plugs into', () => {
+    // Codex, review of the Kimi adapter: the hook that wires Cordon into
+    // Kimi Code lives in ~/.kimi-code/config.toml, which was writable.
+    expect(touchesCordonItself('/home/u/.kimi-code/config.toml', home)).toBe(true)
+    expect(touchesCordonItself('/home/u/.kimi/config.toml', home)).toBe(true)
+    expect(touchesCordonItself('/home/u/.dsh/profiles/web/cordis.patch.yml', home)).toBe(true)
+    expect(touchesCordonItself('/home/u/.codex/hooks.json', home)).toBe(true)
+  })
+
   it('catches a bypass through a step upwards', () => {
     expect(touchesCordonItself('/home/u/.cordon/../.cordon/policy.yaml', home)).toBe(true)
   })
@@ -89,6 +98,18 @@ describe('touchesCordonItself: attempts to bypass the check', () => {
     // and a write through it would create the Cordon config.
     symlinkSync(join(realHome, 'policy.yaml'), bait)
     expect(touchesCordonItself(bait, realHome)).toBe(true)
+  })
+
+  it('a symbolic link followed by .. lands where the system takes it', () => {
+    // Codex, reviewing the connectors: resolving the path first dropped
+    // link/.. lexically, while the system follows the link and only then
+    // steps up, out of .cordon/sessions and into .cordon.
+    const box = mkdtempSync(join(tmpdir(), 'cordon-selfprotect-'))
+    const realHome = join(box, 'home', '.cordon')
+    mkdirSync(join(realHome, 'sessions'), { recursive: true })
+    mkdirSync(join(box, 'proj'), { recursive: true })
+    symlinkSync(join(realHome, 'sessions'), join(box, 'proj', 'link'))
+    expect(touchesCordonItself(`${box}/proj/link/../policy.yaml`, realHome)).toBe(true)
   })
 
   it('the harness directory itself, not a file inside it', () => {

@@ -4,7 +4,7 @@ import { makeDirectory } from '../../core/mkdir.js'
 import { homeProblem, projectDir } from '../../policy/home.js'
 import { loadPolicy } from '../../policy/load.js'
 import { cordonHome } from '../claude-code/main.js'
-import { handle, silentOnFailure } from './handlers.js'
+import { handle, silentOnFailure, unscanned } from './handlers.js'
 import { parseEvent, type HookEvent, type HookOutput } from './protocol.js'
 
 /**
@@ -28,6 +28,7 @@ export function runHook(stdin: string, home: string = cordonHome()): string {
     const policy = loadPolicy(home)
     return JSON.stringify(handle(event, { policy, cordonHome: home }))
   } catch (error) {
+    if (event.kind === 'AfterTool') return JSON.stringify(unscanned(event, home, error as Error))
     return JSON.stringify(failure(event, `Cordon failure: ${(error as Error).message}`))
   }
 }

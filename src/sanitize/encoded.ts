@@ -132,7 +132,7 @@ export function detectEncoded(input: string, depth = 0): Finding[] {
         findings.push({ kind: 'encoded', detail, sample: sample(decoded) })
       }
 
-      findings.push(...nested)
+      for (const finding of nested) findings.push(finding)
     }
   }
 

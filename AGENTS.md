@@ -29,6 +29,7 @@ src/session/      state between processes, and its expiry
 src/policy/       loading and defaults, plus protection of Cordon's own files
 src/notify/       the channel to the owner that the agent cannot reach
 src/adapters/     claude-code and gemini-cli: translate harness events, hold no security logic;
+                  codex, kimi and deepseek: the claude-code adapter with a dialect of what each harness honours;
                   mcp: a stdio JSON-RPC gateway in front of one upstream server, same rule;
                   langchain: a createAgent middleware, same rule — beforeModel feeds the user
                   turn, wrapToolCall carries the gate and the observation

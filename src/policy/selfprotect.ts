@@ -1,6 +1,6 @@
 import { readlinkSync, realpathSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { basename, dirname, join, resolve, sep } from 'node:path'
+import { basename, dirname, isAbsolute, join, resolve, sep } from 'node:path'
 
 /**
  * Paths that are never writable, whatever the certificate says.
@@ -9,7 +9,9 @@ import { basename, dirname, join, resolve, sep } from 'node:path'
  * switch the hook off", and there is nothing left to check. A defence that
  * can be talked into removing itself is not a defence.
  */
-const HARNESS_CONFIG = ['.claude', '.cursor', '.codex', '.gemini', '.config' + sep + 'cordon']
+// Kimi Code keeps its hooks in .kimi-code (.kimi before 2.0), DeepSeek
+// Harness in .dsh: each holds the line that wires Cordon in.
+const HARNESS_CONFIG = ['.claude', '.cursor', '.codex', '.gemini', '.kimi-code', '.kimi', '.dsh', '.config' + sep + 'cordon']
 
 const HARNESS_SEGMENTS: readonly (readonly string[])[] = HARNESS_CONFIG.map((marker) =>
   marker.split(sep).map(fold),
@@ -87,8 +89,42 @@ function hitsHarnessConfig(path: string): boolean {
  * caller decides.
  */
 export function canonicalForms(target: string): string[] {
-  const path = resolve(expandTilde(target))
-  return [...new Set([path, withoutSymlinks(path)])]
+  const expanded = expandTilde(target)
+  const path = resolve(expanded)
+  // On Windows the walk would start at the root and drop the drive letter,
+  // and a garbage form only over-refuses bounds (Kimi): it is skipped there.
+  const walked = sep === '/' ? [physical(expanded)] : []
+  return [...new Set([path, withoutSymlinks(path), ...walked])]
+}
+
+/**
+ * The path the way the system walks it: one segment at a time, following a
+ * link before the `..` after it is applied. `resolve` drops `link/..`
+ * lexically, so a link into .cordon/sessions followed by `../policy.yaml`
+ * read as a harmless file beside the link (Codex, reviewing the connectors).
+ */
+function physical(target: string, hops = 0): string {
+  let current = isAbsolute(target) ? sep : process.cwd()
+  for (const segment of target.split('/')) {
+    if (segment === '' || segment === '.') continue
+    if (segment === '..') {
+      current = dirname(current)
+      continue
+    }
+    const next = join(current, segment)
+    let link: string | null = null
+    try {
+      link = readlinkSync(next)
+    } catch {
+      // Not a link, or not there yet: the segment is taken as written.
+    }
+    // A link's own text is walked the same way, not joined: join would drop
+    // its `..` lexically too. Past a suspected cycle the lexical step is
+    // kept, and the other forms still stand beside this one.
+    current = link !== null && hops < 32 ? physical(isAbsolute(link) ? link : `${current}${sep}${link}`, hops + 1) : next
+    if (link !== null) hops += 1
+  }
+  return current
 }
 
 /**

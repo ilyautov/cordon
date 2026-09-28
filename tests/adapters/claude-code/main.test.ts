@@ -151,7 +151,9 @@ describe('the entry point: unfit input', () => {
       session_id: 'q', hook_event_name: 'PostToolUse', tool_name: 'WebFetch',
       tool_input: { url: 'https://example.com' }, tool_response: 'some text',
     }), dir))
-    expect(out).toEqual({})
+    // Not silence either: the human is told the result went unscanned.
+    expect(out.hookSpecificOutput).toBeUndefined()
+    expect(out.systemMessage).toMatch(/Cordon failure: .*was not scanned/s)
   })
 
   it('a broken state on PostToolUse neither substitutes the output nor makes a decision', () => {
@@ -167,6 +169,8 @@ describe('the entry point: unfit input', () => {
       session_id: 'p', hook_event_name: 'PostToolUse', tool_name: 'WebFetch',
       tool_input: { url: 'https://example.com' }, tool_response: 'some text',
     }), dir))
-    expect(out).toEqual({})
+    // Not silence either: the human is told the result went unscanned.
+    expect(out.hookSpecificOutput).toBeUndefined()
+    expect(out.systemMessage).toMatch(/Cordon failure: .*was not scanned/s)
   })
 })

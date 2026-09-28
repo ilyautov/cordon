@@ -4,6 +4,7 @@ import { renderFooter } from '../../output/footer.js'
 import { outboundAfterRead, renderOutbound } from '../../output/egress.js'
 import { SessionStore } from '../../session/store.js'
 import { sweep } from '../../session/sweep.js'
+import { holdSession } from '../../session/hold.js'
 import { humanReport, removingFindings } from '../../output/report.js'
 import type { Policy } from '../../policy/defaults.js'
 import { viewIsUnknown, type Source, type ToolCall } from '../../core/types.js'
@@ -12,11 +13,22 @@ import { classifySource } from '../../provenance/trust.js'
 import { extractText, replaceText } from './output.js'
 import { renderDecision, silentOnFailure, type HookEvent, type HookOutput } from './protocol.js'
 import { sourceLabel } from '../../core/argument-keys.js'
+import { CLAUDE_CODE, type Dialect } from './dialect.js'
 
 export interface AdapterEnv {
   policy: Policy
   cordonHome: string
 }
+
+/**
+ * The length limit for the cleaned text inside a block's reason, as on the
+ * Gemini CLI adapter: the reason is the whole of the hook's output, and a
+ * page of several megabytes there was never measured on Codex or on the
+ * DeepSeek bridge (Kimi, reviewing the connectors). A hook output the
+ * harness cannot take is a hook that failed, and a failed hook lets the
+ * original through. The cut is stated, so the model knows it holds a stump.
+ */
+const MAX_REASON_TEXT = 20_000
 
 /**
  * The harness event handler.
@@ -29,20 +41,24 @@ export interface AdapterEnv {
  * throws on broken session state deliberately, and the harness reads a
  * crashed hook as "let it through".
  */
-export function handle(event: HookEvent, env: AdapterEnv): HookOutput {
+export function handle(event: HookEvent, env: AdapterEnv, dialect: Dialect = CLAUDE_CODE): HookOutput {
   try {
-    return dispatch(event, env)
+    return dispatch(event, env, dialect)
   } catch (error) {
-    // On PostToolUse there is nothing to substitute with: the core never came
-    // up, the original goes to the model as-is, and the next call will run
-    // into the same failure and get a deny. On MessageDisplay a refusal is not
-    // what we want at all: see silentOnFailure.
+    if (event.kind === 'PostToolUse') return unscanned(event, env.cordonHome, dialect, error as Error)
+    // On MessageDisplay a refusal is not what we want at all: see
+    // silentOnFailure.
     if (silentOnFailure(event)) return {}
     return deny(`Cordon failure: ${(error as Error).message}`)
   }
 }
 
-function dispatch(event: HookEvent, env: AdapterEnv): HookOutput {
+function dispatch(event: HookEvent, given: AdapterEnv, dialect: Dialect): HookOutput {
+  // A harness's own built-in tools lie under the policy's declarations, the
+  // way Gemini's do: the owner's word on a tool wins.
+  const env: AdapterEnv = Object.keys(dialect.builtin).length === 0
+    ? given
+    : { ...given, policy: { ...given.policy, tools: { ...dialect.builtin, ...given.policy.tools } } }
   if (event.kind === 'ignored') return {}
   if (event.kind === 'unparsable') {
     if (event.silent === true) return {}
@@ -58,10 +74,11 @@ function dispatch(event: HookEvent, env: AdapterEnv): HookOutput {
     policy: env.policy,
     cordonHome: env.cordonHome,
     sessionId: event.sessionId,
+    rewrites: dialect.rewrites,
   })
 
   if (event.kind === 'UserPromptSubmit') {
-    cordon.onUserPrompt(event.prompt)
+    if (dialect.humanPrompts) cordon.onUserPrompt(event.prompt)
     // The sweep runs here and only here, and strictly AFTER the turn has been
     // written to disk. The order matters: walking a directory is the only
     // place where the hook may think for a long time, and a hook cut short by
@@ -72,12 +89,16 @@ function dispatch(event: HookEvent, env: AdapterEnv): HookOutput {
     return {}
   }
 
-  if (event.kind === 'PostToolUse') return observe(cordon, event, env)
+  if (event.kind === 'PostToolUse') return observe(cordon, event, env, dialect)
 
+  // A harness that puts no question to anyone gets the unattended gate: the
+  // question becomes a refusal naming a one-time approval. Printed as `ask`
+  // there, it would run the call unasked — measured on Codex.
+  const decision = dialect.asks ? cordon.gate(event.call) : cordon.gateUnattended(event.call)
   // The presence mode comes from the policy: it decides whether quarantine is
   // shown to the human. There is no heuristic here and there cannot be one,
   // this is an explicit setting.
-  return renderDecision(cordon.gate(event.call), env.policy.mode)
+  return renderDecision(decision, env.policy.mode)
 }
 
 /**
@@ -152,19 +173,52 @@ function display(
   }
 }
 
+/**
+ * A result the scan broke on. The tool has run, so there is nothing to
+ * refuse, but the model reads a result nobody looked at. An empty answer
+ * here assumed the next call would break the same way; a failure on the
+ * result alone (a page with 140 000 comments, Codex) left the core sound and
+ * the next call passed. So the session is held as for a result of unknown
+ * shape, the human is told, and where the harness lets a result be replaced
+ * by a block, the result is withheld.
+ */
+export function unscanned(
+  event: Extract<HookEvent, { kind: 'PostToolUse' }>,
+  cordonHome: string,
+  dialect: Dialect,
+  error: Error,
+): HookOutput {
+  const said = `Cordon failure: ${error.message}. The result of ${event.call.tool} was not scanned`
+  const held = holdSession(cordonHome, event.sessionId)
+  const after = held
+    ? 'calls that act are held until your next message'
+    : 'the hold on calls that act could not be recorded either, so it will not outlast this failure; stop the agent if the result matters'
+  // The reason is the one channel a block is known to deliver: DeepSeek's
+  // bridge drops systemMessage, and on Codex it was not measured (Codex).
+  if (dialect.replaces === 'block') {
+    return { decision: 'block', reason: `${said}, so it is withheld${held ? '' : `; ${after}`}.`, ...(held ? {} : { systemMessage: `${said}; ${after}.` }) }
+  }
+  return { systemMessage: `${said}; ${after}.` }
+}
+
 function observe(
   cordon: Cordon,
   event: Extract<HookEvent, { kind: 'PostToolUse' }>,
   env: AdapterEnv,
+  dialect: Dialect,
 ): HookOutput {
-  const extracted = extractText(event.call.tool, event.response)
+  const extracted = extractText(event.call.tool, event.response, dialect.textless(event.call))
 
   if (!extracted.known) {
     // We do not know the shape, so we cannot strip the layer, and the model
     // has already read it. Staying silent is not allowed: we mark the session,
     // and the gate decides from there.
     cordon.markUnredacted()
-    return {}
+    // Not silence either (Kimi, reviewing the connectors): where a block can
+    // withhold the result, it does; elsewhere the human is told.
+    const said = `Cordon: the result of ${event.call.tool} could not be read (its shape is unknown or too large), so a layer hidden in it could not be cut`
+    if (dialect.replaces === 'block') return { decision: 'block', reason: `${said}; it is withheld.` }
+    return { systemMessage: `${said}. Calls that act are held until your next message.` }
   }
 
   // The tool name is passed separately from the label: the source-view
@@ -182,7 +236,9 @@ function observe(
   const found: Finding[] = []
   const cleaned = extracted.parts.map((part) => {
     const envelope = cordon.observe(part.text, source, part.content ? 'content' : 'label')
-    found.push(...envelope.findings)
+    // Not spread: a page with 140 000 comments made a push with that many
+    // arguments, which throws (Codex, reviewing the connectors).
+    for (const finding of envelope.findings) found.push(finding)
     if (!envelope.substitute) substitute = false
     if (envelope.text !== part.text) changed = true
     return envelope.text
@@ -196,9 +252,31 @@ function observe(
   // read, and there will be no substitution. Provenance has already been
   // recorded by this point — that is a condition, not luck: refusing to hand
   // over the cleaned text does not undo the fact that the text was read.
-  if (!substitute) return report(cordon, event.call.tool, source, found)
+  if (!substitute) return report(cordon, event.call.tool, source, found, undefined, dialect.replaces !== 'none')
 
   if (!changed) return {}
+
+  if (dialect.replaces === 'none') {
+    // The harness hands the model the result whatever is printed, so the
+    // model read the layer: the session is marked the way an unreadable
+    // shape marks it, and the human and the journal are told.
+    cordon.markUnredacted()
+    return report(cordon, event.call.tool, source, found, dialect.name)
+  }
+
+  if (dialect.replaces === 'block') {
+    // The harness shows the model a block's reason in place of the result.
+    // The reason carries the cleaned pieces under Cordon's own heading.
+    const text = cleaned.join('\n')
+    const cut = text.length > MAX_REASON_TEXT
+    return {
+      decision: 'block',
+      reason:
+        `Cordon cut a layer hidden from the human out of the result of ${event.call.tool}; the cleaned result follows` +
+        (cut ? ', truncated: only its beginning is shown.' : '.') + '\n\n' +
+        (cut ? text.slice(0, MAX_REASON_TEXT) : text),
+    }
+  }
 
   const updated = replaceText(event.call.tool, event.response, cleaned)
   // replaceText refuses to substitute when the pieces did not match the
@@ -236,9 +314,27 @@ function observe(
  * where nobody reads the transcript, and it lies where the agent cannot
  * reach.
  */
-function report(cordon: Cordon, tool: string, source: Source, findings: readonly Finding[]): HookOutput {
+function report(
+  cordon: Cordon,
+  tool: string,
+  source: Source,
+  findings: readonly Finding[],
+  unreplaceable?: string,
+  cuts = true,
+): HookOutput {
   const removing = removingFindings(findings)
   if (removing.length === 0) return {}
+
+  if (unreplaceable !== undefined) {
+    const said = `a layer hidden from the human was found in the result of ${tool}, and ${unreplaceable} cannot replace a tool result: the model read it whole`
+    cordon.notice(tool, said, source)
+    return {
+      systemMessage: humanReport(
+        { lead: `Cordon: ${said}. Calls that act are held until your next message.`, label: source.label, note: 'The hidden content:' },
+        removing,
+      ),
+    }
+  }
 
   // The reason named is the one that actually holds. About a file that was
   // read we know the human sees it as source text; about an MCP tool's result
@@ -247,7 +343,10 @@ function report(cordon: Cordon, tool: string, source: Source, findings: readonly
   // printed for the sake of honesty.
   const unknown = viewIsUnknown(source)
   const why = unknown
-    ? `this source's view is not declared, and an MCP tool's result is treated as source by default. If ${tool} returns something rendered (a web page, a letter, a product card), declare it in the policy — toolsReturn: ${tool}: rendered — and the hidden layer will be cut out`
+    ? `this source's view is not declared, and an MCP tool's result is treated as source by default. If ${tool} returns something rendered (a web page, a letter, a product card), declare it in the policy — toolsReturn: ${tool}: rendered — and ${cuts
+      ? 'the hidden layer will be cut out'
+      // Kimi cannot replace a result, so the declaration buys a hold, not a cut (Codex).
+      : 'calls that act will be held after such a layer; this harness cannot cut it out of a result'}`
     : 'the human sees this source as source text, and cutting from it would mean corrupting their file'
 
   cordon.notice(
@@ -269,14 +368,22 @@ function report(cordon: Cordon, tool: string, source: Source, findings: readonly
   }
 }
 
+/** Built-in tools that fetch from the web, in every harness this adapter serves. */
+const WEB_TOOLS: ReadonlySet<string> = new Set(['WebFetch', 'WebSearch', 'FetchURL', 'web_fetch', 'web_search'])
+
+/** Built-in tools that read files. */
+const FILE_TOOLS: ReadonlySet<string> = new Set([
+  'Read', 'Glob', 'Grep', 'NotebookRead', 'ReadMediaFile', 'read', 'read_image', 'glob', 'grep', 'str_replace_editor',
+])
+
 /**
  * The source kind from the tool name. The trust label is not set from here:
  * the core computes it in classifySource, and only it does.
  */
 function sourceKind(tool: string): Source['kind'] {
-  if (tool === 'WebFetch' || tool === 'WebSearch') return 'web'
-  if (tool === 'Bash') return 'bash'
-  if (tool === 'Read' || tool === 'Glob' || tool === 'Grep' || tool === 'NotebookRead') return 'file'
+  if (WEB_TOOLS.has(tool)) return 'web'
+  if (tool === 'Bash' || tool === 'bash') return 'bash'
+  if (FILE_TOOLS.has(tool)) return 'file'
   return 'tool'
 }
 

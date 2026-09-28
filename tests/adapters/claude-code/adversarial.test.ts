@@ -146,7 +146,9 @@ describe('input from the harness: ten ways of deceiving the adapter', () => {
       tool_input: {},
       tool_response: deep,
     })
-    expect(out).toEqual({})
+    // No decision of another event's shape, and not silence either.
+    expect(out.hookSpecificOutput).toBeUndefined()
+    expect(out.systemMessage).toMatch(/could not be read/)
     expect(reply(env, 'a7').hookSpecificOutput?.permissionDecision).toBe('deny')
   })
 

@@ -1,4 +1,5 @@
 import { Cordon } from '../../cordon.js'
+import { holdSession } from '../../session/hold.js'
 import { viewIsUnknown, type Source, type ToolCall } from '../../core/types.js'
 import { attribute } from '../../output/attribute.js'
 import { renderFooter } from '../../output/footer.js'
@@ -32,10 +33,8 @@ const MAX_REASON_TEXT = 20_000
  *
  * The exception trap stands here rather than higher up, because the direction
  * of refusal depends on the event: on `BeforeTool` a failure is a `deny`, on
- * `AfterTool` and `AfterAgent` it is an empty response. An empty response on
- * `AfterTool` is not a hole: the next `BeforeTool` will meet the same failure
- * and end in a refusal, that is, the agent will not be able to act on the
- * unchecked text anyway.
+ * `AfterTool` the result is withheld and the session held (see unscanned),
+ * on `AfterAgent` it is an empty response.
  *
  * The trap's very presence is mandatory, and more so than on the first
  * adapter: there fail-open came from one event's timeout, here it comes from
@@ -46,9 +45,26 @@ export function handle(event: HookEvent, env: AdapterEnv): HookOutput {
   try {
     return dispatch(event, env)
   } catch (error) {
+    if (event.kind === 'AfterTool') return unscanned(event, env.cordonHome, error as Error)
     if (silentOnFailure(event)) return {}
     return { decision: 'deny', reason: `Cordon failure: ${(error as Error).message}` }
   }
+}
+
+/**
+ * A result the scan broke on. An empty answer assumed the next call would
+ * break the same way; a failure on the result alone left the core sound and
+ * the next call passed (Codex, reviewing the connectors). So the result is
+ * withheld, the session is held as for a result of unknown shape, and the
+ * human is told.
+ */
+export function unscanned(event: Extract<HookEvent, { kind: 'AfterTool' }>, cordonHome: string, error: Error): HookOutput {
+  const said = `Cordon failure: ${error.message}. The result of ${event.call.tool} was not scanned, so it is withheld`
+  const held = holdSession(cordonHome, event.sessionId)
+  const after = held
+    ? 'calls that act are held until your next message'
+    : 'the hold on calls that act could not be recorded either, so it will not outlast this failure; stop the agent if the result matters'
+  return { decision: 'deny', reason: `${said}.`, systemMessage: `${said}; ${after}.` }
 }
 
 /**

@@ -119,9 +119,12 @@ interface Scan {
  * the whole shape unknown: that is exactly the text the model will read
  * uncleaned.
  */
-export function extractText(tool: string, response: unknown): Extracted {
+export function extractText(tool: string, response: unknown, textless = false): Extracted {
+  // Before the string case: Kimi and Codex report a write as a plain string
+  // ("Wrote 1 bytes to notes.txt"), and read as content it marked the session
+  // as having read something untrusted after every edit the model made.
+  if (textless || TEXTLESS.has(tool)) return { known: true, parts: [] }
   if (typeof response === 'string') return { known: true, parts: [{ text: response, content: true }] }
-  if (TEXTLESS.has(tool)) return { known: true, parts: [] }
 
   const scan: Scan = { parts: [], known: true, nodes: 0, size: 0 }
   visit(response, '', 0, scan)
@@ -223,11 +226,17 @@ function rebuild(
 
 type Role = 'text' | 'label' | 'opaque' | 'unknown'
 
+const IDENTIFIER = /^[^\s<>\p{Cf}]*$/u
+
 function roleOf(key: string, value: string): Role {
   const folded = fold(key)
   if (TEXT_KEYS.has(folded)) return 'text'
   if (LABEL_KEYS.has(folded)) return 'label'
-  if (OPAQUE_KEYS.has(folded)) return 'opaque'
+  // By name alone an identifier field was skipped whatever it held, so
+  // markup or prose in `path` was neither cleaned nor counted as read (Codex,
+  // reviewing the connectors). An identifier has no space, no markup and no
+  // format character; anything else in such a field is read as text.
+  if (OPAQUE_KEYS.has(folded)) return IDENTIFIER.test(value) ? 'opaque' : 'text'
   if (value.length <= TOKEN_LIMIT && !/\s/u.test(value)) return 'label'
   return 'unknown'
 }

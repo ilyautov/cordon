@@ -3999,10 +3999,10 @@ var require_resolve_block_map = __commonJS({
       let offset = bm.offset;
       let commentEnd = null;
       for (const collItem of bm.items) {
-        const { start, key, sep: sep4, value } = collItem;
+        const { start, key, sep: sep5, value } = collItem;
         const keyProps = resolveProps.resolveProps(start, {
           indicator: "explicit-key-ind",
-          next: key ?? sep4?.[0],
+          next: key ?? sep5?.[0],
           offset,
           onError,
           parentIndent: bm.indent,
@@ -4016,7 +4016,7 @@ var require_resolve_block_map = __commonJS({
             else if ("indent" in key && key.indent !== bm.indent)
               onError(offset, "BAD_INDENT", startColMsg);
           }
-          if (!keyProps.anchor && !keyProps.tag && !sep4) {
+          if (!keyProps.anchor && !keyProps.tag && !sep5) {
             commentEnd = keyProps.end;
             if (keyProps.comment) {
               if (map.comment)
@@ -4040,7 +4040,7 @@ var require_resolve_block_map = __commonJS({
         ctx.atKey = false;
         if (utilMapIncludes.mapIncludes(ctx, map.items, keyNode))
           onError(keyStart, "DUPLICATE_KEY", "Map keys must be unique");
-        const valueProps = resolveProps.resolveProps(sep4 ?? [], {
+        const valueProps = resolveProps.resolveProps(sep5 ?? [], {
           indicator: "map-value-ind",
           next: value,
           offset: keyNode.range[2],
@@ -4056,7 +4056,7 @@ var require_resolve_block_map = __commonJS({
             if (ctx.options.strict && keyProps.start < valueProps.found.offset - 1024)
               onError(keyNode.range, "KEY_OVER_1024_CHARS", "The : indicator must be at most 1024 chars after the start of an implicit block mapping key");
           }
-          const valueNode = value ? composeNode(ctx, value, valueProps, onError) : composeEmptyNode(ctx, offset, sep4, null, valueProps, onError);
+          const valueNode = value ? composeNode(ctx, value, valueProps, onError) : composeEmptyNode(ctx, offset, sep5, null, valueProps, onError);
           if (ctx.schema.compat)
             utilFlowIndentCheck.flowIndentCheck(bm.indent, value, onError);
           offset = valueNode.range[2];
@@ -4147,7 +4147,7 @@ var require_resolve_end = __commonJS({
       let comment = "";
       if (end) {
         let hasSpace = false;
-        let sep4 = "";
+        let sep5 = "";
         for (const token of end) {
           const { source, type } = token;
           switch (type) {
@@ -4161,13 +4161,13 @@ var require_resolve_end = __commonJS({
               if (!comment)
                 comment = cb;
               else
-                comment += sep4 + cb;
-              sep4 = "";
+                comment += sep5 + cb;
+              sep5 = "";
               break;
             }
             case "newline":
               if (comment)
-                sep4 += source;
+                sep5 += source;
               hasSpace = true;
               break;
             default:
@@ -4210,18 +4210,18 @@ var require_resolve_flow_collection = __commonJS({
       let offset = fc.offset + fc.start.source.length;
       for (let i = 0; i < fc.items.length; ++i) {
         const collItem = fc.items[i];
-        const { start, key, sep: sep4, value } = collItem;
+        const { start, key, sep: sep5, value } = collItem;
         const props = resolveProps.resolveProps(start, {
           flow: fcName,
           indicator: "explicit-key-ind",
-          next: key ?? sep4?.[0],
+          next: key ?? sep5?.[0],
           offset,
           onError,
           parentIndent: fc.indent,
           startOnNewline: false
         });
         if (!props.found) {
-          if (!props.anchor && !props.tag && !sep4 && !value) {
+          if (!props.anchor && !props.tag && !sep5 && !value) {
             if (i === 0 && props.comma)
               onError(props.comma, "UNEXPECTED_TOKEN", `Unexpected , in ${fcName}`);
             else if (i < fc.items.length - 1)
@@ -4275,8 +4275,8 @@ var require_resolve_flow_collection = __commonJS({
             }
           }
         }
-        if (!isMap2 && !sep4 && !props.found) {
-          const valueNode = value ? composeNode(ctx, value, props, onError) : composeEmptyNode(ctx, props.end, sep4, null, props, onError);
+        if (!isMap2 && !sep5 && !props.found) {
+          const valueNode = value ? composeNode(ctx, value, props, onError) : composeEmptyNode(ctx, props.end, sep5, null, props, onError);
           coll.items.push(valueNode);
           offset = valueNode.range[2];
           if (isBlock(value))
@@ -4288,7 +4288,7 @@ var require_resolve_flow_collection = __commonJS({
           if (isBlock(key))
             onError(keyNode.range, "BLOCK_IN_FLOW", blockMsg);
           ctx.atKey = false;
-          const valueProps = resolveProps.resolveProps(sep4 ?? [], {
+          const valueProps = resolveProps.resolveProps(sep5 ?? [], {
             flow: fcName,
             indicator: "map-value-ind",
             next: value,
@@ -4299,8 +4299,8 @@ var require_resolve_flow_collection = __commonJS({
           });
           if (valueProps.found) {
             if (!isMap2 && !props.found && ctx.options.strict) {
-              if (sep4)
-                for (const st of sep4) {
+              if (sep5)
+                for (const st of sep5) {
                   if (st === valueProps.found)
                     break;
                   if (st.type === "newline") {
@@ -4317,7 +4317,7 @@ var require_resolve_flow_collection = __commonJS({
             else
               onError(valueProps.start, "MISSING_CHAR", `Missing , or : between ${fcName} items`);
           }
-          const valueNode = value ? composeNode(ctx, value, valueProps, onError) : valueProps.found ? composeEmptyNode(ctx, valueProps.end, sep4, null, valueProps, onError) : null;
+          const valueNode = value ? composeNode(ctx, value, valueProps, onError) : valueProps.found ? composeEmptyNode(ctx, valueProps.end, sep5, null, valueProps, onError) : null;
           if (valueNode) {
             if (isBlock(value))
               onError(valueNode.range, "BLOCK_IN_FLOW", blockMsg);
@@ -4497,7 +4497,7 @@ var require_resolve_block_scalar = __commonJS({
           chompStart = i + 1;
       }
       let value = "";
-      let sep4 = "";
+      let sep5 = "";
       let prevMoreIndented = false;
       for (let i = 0; i < contentStart; ++i)
         value += lines[i][0].slice(trimIndent) + "\n";
@@ -4514,24 +4514,24 @@ var require_resolve_block_scalar = __commonJS({
           indent = "";
         }
         if (type === Scalar.Scalar.BLOCK_LITERAL) {
-          value += sep4 + indent.slice(trimIndent) + content;
-          sep4 = "\n";
+          value += sep5 + indent.slice(trimIndent) + content;
+          sep5 = "\n";
         } else if (indent.length > trimIndent || content[0] === "	") {
-          if (sep4 === " ")
-            sep4 = "\n";
-          else if (!prevMoreIndented && sep4 === "\n")
-            sep4 = "\n\n";
-          value += sep4 + indent.slice(trimIndent) + content;
-          sep4 = "\n";
+          if (sep5 === " ")
+            sep5 = "\n";
+          else if (!prevMoreIndented && sep5 === "\n")
+            sep5 = "\n\n";
+          value += sep5 + indent.slice(trimIndent) + content;
+          sep5 = "\n";
           prevMoreIndented = true;
         } else if (content === "") {
-          if (sep4 === "\n")
+          if (sep5 === "\n")
             value += "\n";
           else
-            sep4 = "\n";
+            sep5 = "\n";
         } else {
-          value += sep4 + content;
-          sep4 = " ";
+          value += sep5 + content;
+          sep5 = " ";
           prevMoreIndented = false;
         }
       }
@@ -4714,25 +4714,25 @@ var require_resolve_flow_scalar = __commonJS({
         trimBoth = /^[ \t]+|[ \t]+$/g;
       }
       let res = match[1].replace(trimEnd, "");
-      let sep4 = " ";
+      let sep5 = " ";
       let pos = line.lastIndex;
       while (match = line.exec(source)) {
         const lm = match[1].replace(trimBoth, "");
         if (lm === "") {
-          if (sep4 === "\n")
-            res += sep4;
+          if (sep5 === "\n")
+            res += sep5;
           else
-            sep4 = "\n";
+            sep5 = "\n";
         } else {
-          res += sep4 + lm;
-          sep4 = " ";
+          res += sep5 + lm;
+          sep5 = " ";
         }
         pos = line.lastIndex;
       }
       const last = /[ \t]*(.*)/sy;
       last.lastIndex = pos;
       match = last.exec(source);
-      return res + sep4 + (match?.[1] ?? "");
+      return res + sep5 + (match?.[1] ?? "");
     }
     function doubleQuotedValue(source, onError) {
       let res = "";
@@ -5542,14 +5542,14 @@ var require_cst_stringify = __commonJS({
         }
       }
     }
-    function stringifyItem({ start, key, sep: sep4, value }) {
+    function stringifyItem({ start, key, sep: sep5, value }) {
       let res = "";
       for (const st of start)
         res += st.source;
       if (key)
         res += stringifyToken(key);
-      if (sep4)
-        for (const st of sep4)
+      if (sep5)
+        for (const st of sep5)
           res += st.source;
       if (value)
         res += stringifyToken(value);
@@ -6716,18 +6716,18 @@ var require_parser = __commonJS({
         if (this.type === "map-value-ind") {
           const prev = getPrevProps(this.peek(2));
           const start = getFirstKeyStartProps(prev);
-          let sep4;
+          let sep5;
           if (scalar.end) {
-            sep4 = scalar.end;
-            sep4.push(this.sourceToken);
+            sep5 = scalar.end;
+            sep5.push(this.sourceToken);
             delete scalar.end;
           } else
-            sep4 = [this.sourceToken];
+            sep5 = [this.sourceToken];
           const map = {
             type: "block-map",
             offset: scalar.offset,
             indent: scalar.indent,
-            items: [{ start, key: scalar, sep: sep4 }]
+            items: [{ start, key: scalar, sep: sep5 }]
           };
           this.onKeyLine = true;
           this.stack[this.stack.length - 1] = map;
@@ -6880,15 +6880,15 @@ var require_parser = __commonJS({
                 } else if (isFlowToken(it.key) && !includesToken(it.sep, "newline")) {
                   const start2 = getFirstKeyStartProps(it.start);
                   const key = it.key;
-                  const sep4 = it.sep;
-                  sep4.push(this.sourceToken);
+                  const sep5 = it.sep;
+                  sep5.push(this.sourceToken);
                   delete it.key;
                   delete it.sep;
                   this.stack.push({
                     type: "block-map",
                     offset: this.offset,
                     indent: this.indent,
-                    items: [{ start: start2, key, sep: sep4 }]
+                    items: [{ start: start2, key, sep: sep5 }]
                   });
                 } else if (start.length > 0) {
                   it.sep = it.sep.concat(start, this.sourceToken);
@@ -7082,13 +7082,13 @@ var require_parser = __commonJS({
             const prev = getPrevProps(parent);
             const start = getFirstKeyStartProps(prev);
             fixFlowSeqItems(fc);
-            const sep4 = fc.end.splice(1, fc.end.length);
-            sep4.push(this.sourceToken);
+            const sep5 = fc.end.splice(1, fc.end.length);
+            sep5.push(this.sourceToken);
             const map = {
               type: "block-map",
               offset: fc.offset,
               indent: fc.indent,
-              items: [{ start, key: fc, sep: sep4 }]
+              items: [{ start, key: fc, sep: sep5 }]
             };
             this.onKeyLine = true;
             this.stack[this.stack.length - 1] = map;
@@ -7748,7 +7748,7 @@ function asBudgets(value, where) {
 }
 
 // src/cordon.ts
-import { createHash as createHash6, randomBytes as randomBytes5 } from "node:crypto";
+import { createHash as createHash6 } from "node:crypto";
 
 // src/core/types.ts
 function humanSeesRendered(source) {
@@ -7922,8 +7922,8 @@ function sourceLabel(call) {
 // src/policy/selfprotect.ts
 import { readlinkSync, realpathSync as realpathSync2 } from "node:fs";
 import { homedir as homedir3 } from "node:os";
-import { basename, dirname as dirname2, join as join2, resolve as resolve2, sep as sep2 } from "node:path";
-var HARNESS_CONFIG = [".claude", ".cursor", ".codex", ".gemini", ".config" + sep2 + "cordon"];
+import { basename, dirname as dirname2, isAbsolute as isAbsolute3, join as join2, resolve as resolve2, sep as sep2 } from "node:path";
+var HARNESS_CONFIG = [".claude", ".cursor", ".codex", ".gemini", ".kimi-code", ".kimi", ".dsh", ".config" + sep2 + "cordon"];
 var HARNESS_SEGMENTS = HARNESS_CONFIG.map(
   (marker) => marker.split(sep2).map(fold2)
 );
@@ -7963,8 +7963,29 @@ function hitsHarnessConfig(path) {
   );
 }
 function canonicalForms(target) {
-  const path = resolve2(expandTilde(target));
-  return [.../* @__PURE__ */ new Set([path, withoutSymlinks(path)])];
+  const expanded = expandTilde(target);
+  const path = resolve2(expanded);
+  const walked = sep2 === "/" ? [physical(expanded)] : [];
+  return [.../* @__PURE__ */ new Set([path, withoutSymlinks(path), ...walked])];
+}
+function physical(target, hops = 0) {
+  let current = isAbsolute3(target) ? sep2 : process.cwd();
+  for (const segment of target.split("/")) {
+    if (segment === "" || segment === ".") continue;
+    if (segment === "..") {
+      current = dirname2(current);
+      continue;
+    }
+    const next = join2(current, segment);
+    let link = null;
+    try {
+      link = readlinkSync(next);
+    } catch {
+    }
+    current = link !== null && hops < 32 ? physical(isAbsolute3(link) ? link : `${current}${sep2}${link}`, hops + 1) : next;
+    if (link !== null) hops += 1;
+  }
+  return current;
 }
 function touchesCordonItself(target, cordonHome2) {
   const homes = canonicalForms(cordonHome2);
@@ -7976,6 +7997,58 @@ function touchesCordonItself(target, cordonHome2) {
     }
   }
   return false;
+}
+
+// src/scope/patch.ts
+var RUST_SPACE = "[\\t\\n\\v\\f\\r \\u0085\\u00A0\\u1680\\u2000-\\u200A\\u2028\\u2029\\u202F\\u205F\\u3000]";
+var LOOSE_SPACE = "[\\s\\u0085]";
+var trimmer = (space) => ({
+  leading: new RegExp(`^${space}+`, "u"),
+  trailing: new RegExp(`${space}+$`, "u")
+});
+var RUST = trimmer(RUST_SPACE);
+var LOOSE = trimmer(LOOSE_SPACE);
+var FILE = /^\*\*\*\s*(add|update|delete)\s+file\s*:\s*(.*)$/isu;
+var MOVE = /^\*\*\*\s*move\s+to\s*:\s*(.*)$/isu;
+var END = /^\*\*\*\s*end\s+patch$/iu;
+var MARKERS = ["*** Add File: ", "*** Update File: ", "*** Delete File: ", "*** Move to: "];
+function readPatch(text) {
+  const paths = [];
+  let deletes = false;
+  let updating = false;
+  const add = (exact2, loose) => {
+    for (const path of /* @__PURE__ */ new Set([exact2, loose])) if (path !== "") paths.push(path);
+  };
+  for (const raw of text.split("\n")) {
+    const line = raw.endsWith("\r") ? raw.slice(0, -1) : raw;
+    const cut2 = (space) => {
+      const end = line.replace(space.trailing, "");
+      return updating ? end : end.replace(space.leading, "");
+    };
+    const exact2 = cut2(RUST);
+    const header = cut2(LOOSE);
+    const written = exactPath(exact2);
+    const file = FILE.exec(header);
+    if (file !== null) {
+      const kind = file[1].toLowerCase();
+      add(written, file[2]);
+      if (kind === "delete") deletes = true;
+      updating = kind === "update";
+      continue;
+    }
+    const move = MOVE.exec(header);
+    if (updating && move !== null) {
+      add(written, move[1]);
+      deletes = true;
+      continue;
+    }
+    if (END.test(header)) updating = false;
+  }
+  return paths.length === 0 ? null : { paths, deletes };
+}
+function exactPath(line) {
+  const marker = MARKERS.find((m) => line.startsWith(m));
+  return marker === void 0 ? "" : line.slice(marker.length);
 }
 
 // src/scope/effects.ts
@@ -8018,7 +8091,13 @@ function classify(call, fromPolicy) {
       reason: `tool ${call.tool} is not declared in the policy`
     };
   }
-  return { effects: [...declared], classified: true, reason: "" };
+  const effects = [...declared];
+  if (call.tool === "apply_patch" && !effects.includes("delete")) {
+    const patch = call.args["patch"];
+    const read = typeof patch === "string" ? readPatch(patch) : null;
+    if (read === null || read.deletes) effects.push("delete");
+  }
+  return { effects, classified: true, reason: "" };
 }
 var GEMINI_BUILTIN = {
   read_file: ["read"],
@@ -8035,8 +8114,36 @@ var GEMINI_BUILTIN = {
   // it changes the behaviour of future turns. That is an edit, not a note.
   save_memory: ["create", "update"]
 };
+var CODEX_BUILTIN = {
+  apply_patch: ["create", "update"]
+};
+var KIMI_BUILTIN = {
+  FetchURL: ["read", "network-egress"],
+  ReadMediaFile: ["read"],
+  Skill: ["read"],
+  TodoList: ["read"],
+  TaskList: ["read"],
+  TaskOutput: ["read"],
+  WaitFor: ["read"],
+  GetGoal: ["read"],
+  AskUserQuestion: ["read"],
+  EnterPlanMode: ["read"],
+  ExitPlanMode: ["read"]
+};
+var DEEPSEEK_BUILTIN = {
+  read: ["read"],
+  read_image: ["read"],
+  glob: ["read"],
+  grep: ["read"],
+  web_fetch: ["read", "network-egress"],
+  web_search: ["read", "network-egress"],
+  write: ["create", "update"],
+  edit: ["update"],
+  str_replace_editor: ["read", "create", "update"],
+  bash: ["exec"]
+};
 function builtinEffects(tool) {
-  return declaredFor(BUILTIN, tool) ?? declaredFor(GEMINI_BUILTIN, tool) ?? null;
+  return declaredFor(BUILTIN, tool) ?? declaredFor(GEMINI_BUILTIN, tool) ?? declaredFor(CODEX_BUILTIN, tool) ?? declaredFor(KIMI_BUILTIN, tool) ?? declaredFor(DEEPSEEK_BUILTIN, tool) ?? null;
 }
 
 // src/gate/memory.ts
@@ -8068,8 +8175,8 @@ function memoryTarget(call, policy) {
   const verdict = classify(call, policy.tools);
   const extra = declaredFiles(policy);
   if (verdict.effects.includes("exec")) {
-    const named = namedInCommand(call, extra);
-    if (named !== null) return named;
+    const named2 = namedInCommand(call, extra);
+    if (named2 !== null) return named2;
   }
   if (!verdict.effects.some((effect) => effect === "create" || effect === "update")) return null;
   for (const { key, value } of fields(call.args ?? {})) {
@@ -8555,10 +8662,10 @@ function renderFooter(marks) {
     lines.push(`  - and ${hidden} more sources with verbatim matches, not listed here`);
   }
   for (const group of marks.kinship) {
-    const named = group.labels.map((label) => `"${safeLabel(label)}"`).join(", ");
+    const named2 = group.labels.map((label) => `"${safeLabel(label)}"`).join(", ");
     const excerpt = safeExcerpt(group.excerpt);
     const shown2 = excerpt === "" ? "" : `; shared fragment, bounds approximate: "${excerpt}"`;
-    lines.push(`  - the sources are not independent, their text matches verbatim: ${named}${shown2}`);
+    lines.push(`  - the sources are not independent, their text matches verbatim: ${named2}${shown2}`);
   }
   if (marks.truncated) {
     lines.push("  - the answer is long, not all of it was checked");
@@ -8723,8 +8830,9 @@ function selfProtection(parts, ctx) {
       if (APPROVES.test(value.replace(/["'\\]/gu, ""))) {
         return { kind: "deny", rule: "self-protection", reason: "self-protection: the command approves, writes a policy or speaks as the harness, which only the owner may do" };
       }
+      const lower = value.toLowerCase();
       for (const marker of selfMarkers(ctx.cordonHome)) {
-        if (value.includes(marker)) {
+        if (lower.includes(marker.toLowerCase())) {
           return { kind: "deny", rule: "self-protection", reason: `self-protection: the command mentions ${marker}` };
         }
       }
@@ -8795,7 +8903,7 @@ function asPaths(value) {
 }
 var APPROVES = /(?:\bcordon(?:@[\w.^~-]+)?|\bcli\.m?js)\s+(?:(?:mcp\s+)?approve|init|policy\s+apply|hook)\b/iu;
 function selfMarkers(cordonHome2) {
-  return [cordonHome2, ".cordon", ".claude/settings", ".claude/hooks", ".cursor", ".codex", ".gemini"];
+  return [cordonHome2, ".cordon", ".claude/settings", ".claude/hooks", ".cursor", ".codex", ".gemini", ".kimi", ".dsh"];
 }
 function escalate(ctx, rule, reason, source) {
   const kind = ctx.policy.mode === "interactive" ? "ask" : "deny";
@@ -8814,10 +8922,10 @@ function exposedCall(tool, effects, parts, ctx, bound) {
       if (!isDate(atom)) targets.add(atom);
     }
   }
-  const named = new Set(ctx.userAtoms ?? []);
+  const named2 = new Set(ctx.userAtoms ?? []);
   const mandate = ctx.policy.destinations ?? [];
   const mandateApplies = !effects.includes("exec");
-  const allNamed = [...targets].every((atom) => named.has(atom) || mandateApplies && inMandate(atom, mandate));
+  const allNamed = [...targets].every((atom) => named2.has(atom) || mandateApplies && inMandate(atom, mandate));
   if (targets.size > 0 && allNamed) return null;
   if (exposure.memory !== true && allNamed && !effects.includes("exec") && namesADestination(tool, parts, ctx.userNames ?? [], mandate, ctx.policy.arguments ?? {}, bound)) return null;
   if (exposure.memory === true) {
@@ -8927,7 +9035,7 @@ var IRREVERSIBLE = /* @__PURE__ */ new Set([
 var OUTWARD = /* @__PURE__ */ new Set(["network-egress", "export", "financial"]);
 var EXPOSURE_SENSITIVE = /* @__PURE__ */ new Set([...IRREVERSIBLE, "create"]);
 function scanTaint(parts, taint, userAtoms, bound = () => false) {
-  const named = new Set(userAtoms);
+  const named2 = new Set(userAtoms);
   const spans = {};
   const targets = /* @__PURE__ */ new Set();
   const sources = /* @__PURE__ */ new Map();
@@ -8936,7 +9044,7 @@ function scanTaint(parts, taint, userAtoms, bound = () => false) {
   for (const part of parts) {
     const { key, value, depth } = part;
     if (typeof value !== "string") continue;
-    if (named.has(value.trim().toLowerCase())) continue;
+    if (named2.has(value.trim().toLowerCase())) continue;
     if (bound(part)) continue;
     const match = taint.check(value);
     if (!match.tainted) continue;
@@ -9310,12 +9418,12 @@ function outboundAfterRead(answer, session, policy) {
   if (policy.exposure === false) return [];
   const exposed = session.exposure !== void 0 && session.exposure !== null || session.unredacted === true;
   if (!exposed) return [];
-  const named = new Set((session.userAtoms ?? []).map((atom) => atom.toLowerCase()));
-  const hosts = new Set([...named].map((atom) => hostOf(/^[a-z][a-z0-9+.-]*:\/\//iu.test(atom) ? atom : `https://${atom}`)));
+  const named2 = new Set((session.userAtoms ?? []).map((atom) => atom.toLowerCase()));
+  const hosts = new Set([...named2].map((atom) => hostOf(/^[a-z][a-z0-9+.-]*:\/\//iu.test(atom) ? atom : `https://${atom}`)));
   return outbound(answer, (url) => {
     const lowered = url.toLowerCase();
     const forms = [lowered, lowered.replace(/^https?:\/\//u, "")];
-    if (forms.some((form) => named.has(form))) return "user";
+    if (forms.some((form) => named2.has(form))) return "user";
     if (forms.some((form) => session.taint.holds(form))) return "source";
     return null;
   }, (host) => hosts.has(host));
@@ -11633,8 +11741,8 @@ function normalizeColor(raw) {
   const value = (raw ?? "").trim().toLowerCase();
   if (!value) return null;
   if (value === "transparent") return "transparent";
-  const named = NAMED_COLORS.get(value);
-  if (named) return named;
+  const named2 = NAMED_COLORS.get(value);
+  if (named2) return named2;
   const hex = /^#([0-9a-f]{3,8})$/.exec(value);
   if (hex) {
     const digits = hex[1] ?? "";
@@ -12032,7 +12140,7 @@ function detectEncoded(input, depth = 0) {
       if (looksLikeProse(decoded) || nested.length > 0 || depth > 0) {
         findings.push({ kind: "encoded", detail, sample: sample(decoded) });
       }
-      findings.push(...nested);
+      for (const finding of nested) findings.push(finding);
     }
   }
   return findings;
@@ -13352,6 +13460,11 @@ function mergeDirectives(a, b) {
   if (b === null) return a;
   return a.filter((effect) => b.includes(effect));
 }
+function noteRead(ids) {
+  const newest = ids.reduce((max, id2) => Math.max(max, parseInt(id2.split("-")[0] ?? "", 36) || 0), 0);
+  const id = `${Math.max(Date.now(), newest + 1).toString(36)}-${randomBytes4(6).toString("hex")}`;
+  return [...ids, id].sort().slice(-MAX_READ_IDS);
+}
 
 // src/provenance/assignments.ts
 var CONNECTOR = String.raw`\s*(?:=|:|→|\s(?:to|is|at|equals)\s)\s*`;
@@ -13442,9 +13555,11 @@ var Cordon = class {
   /** The state key on disk. It comes from the harness, that is, from outside. */
   sessionId;
   policyFile;
+  rewrites;
   constructor(options) {
     this.policy = options.policy;
     this.policyFile = options.policyFile ?? null;
+    this.rewrites = options.rewrites ?? true;
     this.cordonHome = options.cordonHome;
     this.notifier = stamped(options.notifier ?? (options.policy.notify.file ? new FileNotifier(options.policy.notify.file) : SILENT), policyHash(options.policy));
     this.sessionId = options.sessionId ?? "default";
@@ -13622,8 +13737,17 @@ var Cordon = class {
       assigned: new Set(this.turnNames.turn === this.turn ? this.turnNames.assigned ?? [] : []),
       heldTools: this.heldTools
     });
+    if (decision.kind === "rewrite" && !this.rewrites) {
+      decision = {
+        kind: "deny",
+        rule: decision.rule,
+        reason: `${decision.reason}; this harness cannot run a call with its arguments changed, so the call is refused (arguments that carried it: ${decision.removed.length > 0 ? decision.removed.join(", ") : "none"})`,
+        ...decision.source === void 0 ? {} : { source: decision.source }
+      };
+    }
     if (askSpends || decision.kind !== "ask") decision = this.spend(call, decision);
     this.recordMemory(call, decision);
+    if (decision.kind === "allow" || decision.kind === "rewrite") this.persist();
     if (decision.kind === "deny" || decision.kind === "ask" || decision.kind === "rewrite") {
       this.notifier.notify({
         at: (/* @__PURE__ */ new Date()).toISOString(),
@@ -13706,6 +13830,7 @@ var Cordon = class {
       });
       return refusal;
     }
+    this.persist();
     const taken = approvals.take(id, binding);
     if (!taken.taken) {
       try {
@@ -14082,10 +14207,6 @@ function changed(earlier, now) {
 function digest(text) {
   return createHash6("sha256").update(text, "utf8").digest("hex");
 }
-function noteRead(ids) {
-  const id = `${Date.now().toString(36)}-${randomBytes5(6).toString("hex")}`;
-  return [...ids, id].sort().slice(-MAX_READ_IDS);
-}
 
 // src/output/subject.ts
 var SYNDICATION = /* @__PURE__ */ new Set([
@@ -14316,6 +14437,18 @@ function sweepDir(dir, ttl, keep, now, ours = OURS) {
   }
 }
 
+// src/session/hold.ts
+function holdSession(cordonHome2, sessionId) {
+  try {
+    const store = new SessionStore(cordonHome2);
+    const state = store.load(sessionId);
+    store.save(sessionId, { ...state, unredacted: true, readIds: noteRead(state.readIds ?? []) });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 // src/output/report.ts
 var REMOVING = /* @__PURE__ */ new Set(["invisible", "hidden-html"]);
 function removingFindings(findings) {
@@ -14456,9 +14589,9 @@ var MAX_DEPTH3 = 12;
 var MAX_NODES = 2e4;
 var MAX_TEXT = 8e6;
 var TOKEN_LIMIT = 64;
-function extractText(tool, response) {
+function extractText(tool, response, textless = false) {
+  if (textless || TEXTLESS.has(tool)) return { known: true, parts: [] };
   if (typeof response === "string") return { known: true, parts: [{ text: response, content: true }] };
-  if (TEXTLESS.has(tool)) return { known: true, parts: [] };
   const scan = { parts: [], known: true, nodes: 0, size: 0 };
   visit2(response, "", 0, scan);
   return scan.known ? { known: true, parts: scan.parts } : { known: false, parts: [] };
@@ -14524,11 +14657,12 @@ function rebuild(node, key, depth, parts, cursor) {
   }
   return node;
 }
+var IDENTIFIER = /^[^\s<>\p{Cf}]*$/u;
 function roleOf2(key, value) {
   const folded = fold(key);
   if (TEXT_KEYS.has(folded)) return "text";
   if (LABEL_KEYS.has(folded)) return "label";
-  if (OPAQUE_KEYS.has(folded)) return "opaque";
+  if (OPAQUE_KEYS.has(folded)) return IDENTIFIER.test(value) ? "opaque" : "text";
   if (value.length <= TOKEN_LIMIT && !/\s/u.test(value)) return "label";
   return "unknown";
 }
@@ -14539,8 +14673,80 @@ function rewriteNotice(decision) {
   return `Cordon cut an untrusted fragment out of this call before it ran (${decision.reason}; arguments changed: ${removed}). What ran is not what you wrote: tell the user the result is incomplete rather than reporting it done in full.`;
 }
 
+// src/adapters/claude-code/dialect.ts
+import { isAbsolute as isAbsolute4, sep as sep4 } from "node:path";
+var asIs = (call) => call;
+var named = (...tools) => {
+  const set = new Set(tools);
+  return (call) => set.has(call.tool);
+};
+var EDITS = /* @__PURE__ */ new Set(["create", "str_replace", "insert"]);
+var CLAUDE_CODE = {
+  name: "claude-code",
+  asks: true,
+  rewrites: true,
+  replaces: "field",
+  humanPrompts: true,
+  resultField: "tool_response",
+  textless: named(),
+  builtin: {},
+  translate: asIs
+};
+var CODEX = {
+  name: "codex",
+  asks: false,
+  rewrites: false,
+  replaces: "block",
+  humanPrompts: true,
+  resultField: "tool_response",
+  textless: named("apply_patch"),
+  builtin: CODEX_BUILTIN,
+  translate: (call, cwd) => {
+    if (call.tool !== "apply_patch") return call;
+    const { command, ...rest } = call.args;
+    const read = typeof command === "string" ? readPatch(command) : null;
+    if (read === null) return { unreadable: "apply_patch carries no patch that names a file" };
+    if (cwd === null && read.paths.some((path) => !isAbsolute4(path))) {
+      return { unreadable: "apply_patch names a relative path and the event carries no working directory" };
+    }
+    const paths = read.paths.map((path) => cwd !== null && !isAbsolute4(path) ? `${cwd.replace(/[\\/]+$/u, "")}${sep4}${path}` : path);
+    return { tool: call.tool, args: { ...rest, patch: command, paths } };
+  }
+};
+var KIMI = {
+  name: "kimi",
+  asks: false,
+  rewrites: false,
+  replaces: "none",
+  humanPrompts: true,
+  resultField: "tool_output",
+  // AskUserQuestion is not here: its result is the human's answer, and
+  // reading it as untrusted costs a stricter decision, never a looser one.
+  // TaskList retells the model's own tasks and GetGoal the user's objective
+  // (Kimi, reviewing this dialect); TaskOutput and WaitFor stay content,
+  // since a subagent's output can carry what it fetched.
+  textless: named("TodoList", "TaskList", "GetGoal", "EnterPlanMode", "ExitPlanMode"),
+  builtin: KIMI_BUILTIN,
+  translate: asIs
+};
+var DEEPSEEK = {
+  name: "deepseek",
+  asks: false,
+  rewrites: false,
+  replaces: "block",
+  // The bridge sends every message that enters a step as UserPromptSubmit,
+  // a background job's completion notice included, whose label the model
+  // chose, and the payload carries no source (Codex, reviewing this dialect).
+  humanPrompts: false,
+  resultField: "tool_response",
+  // A command it does not name is read as content: the stricter reading.
+  textless: (call) => call.tool === "write" || call.tool === "edit" || call.tool === "str_replace_editor" && typeof call.args.command === "string" && EDITS.has(call.args.command),
+  builtin: DEEPSEEK_BUILTIN,
+  translate: asIs
+};
+
 // src/adapters/claude-code/protocol.ts
-function parseEvent(stdin) {
+function parseEvent(stdin, dialect = CLAUDE_CODE) {
   let raw;
   try {
     const parsed = JSON.parse(stdin);
@@ -14553,8 +14759,7 @@ function parseEvent(stdin) {
   const sessionId = typeof rawSession === "string" && rawSession !== "" ? rawSession : "default";
   const name = field(raw, "hook_event_name");
   if (name === "UserPromptSubmit") {
-    const prompt = field(raw, "prompt");
-    return { kind: "UserPromptSubmit", sessionId, prompt: typeof prompt === "string" ? prompt : "" };
+    return { kind: "UserPromptSubmit", sessionId, prompt: promptText(field(raw, "prompt")) };
   }
   if (name === "MessageDisplay") {
     const messageId = field(raw, "message_id");
@@ -14575,13 +14780,16 @@ function parseEvent(stdin) {
       if (input !== void 0 && !isRecord(input)) {
         return { kind: "unparsable", sessionId, reason: `the tool_input of the call ${tool} did not arrive as an object` };
       }
-      return { kind: "PreToolUse", sessionId, call: { tool, args: isRecord(input) ? input : {} } };
+      const cwd = field(raw, "cwd");
+      const call = dialect.translate({ tool, args: isRecord(input) ? input : {} }, typeof cwd === "string" && cwd !== "" ? cwd : null);
+      if ("unreadable" in call) return { kind: "unparsable", sessionId, reason: call.unreadable };
+      return { kind: "PreToolUse", sessionId, call };
     }
     return {
       kind: "PostToolUse",
       sessionId,
       call: { tool, args: isRecord(input) ? input : {} },
-      response: field(raw, "tool_response")
+      response: field(raw, dialect.resultField)
     };
   }
   return { kind: "ignored", sessionId };
@@ -14629,6 +14837,17 @@ function silentOnFailure(event) {
   if (event.kind === "PostToolUse" || event.kind === "MessageDisplay") return true;
   return event.kind === "unparsable" && event.silent === true;
 }
+function promptText(prompt) {
+  if (typeof prompt === "string") return prompt;
+  if (!Array.isArray(prompt)) return "";
+  const texts = [];
+  for (const block of prompt) {
+    if (isRecord(block) && field(block, "type") === "text" && typeof field(block, "text") === "string") {
+      texts.push(field(block, "text"));
+    }
+  }
+  return texts.join("\n");
+}
 function field(source, name) {
   return Object.hasOwn(source, name) ? source[name] : void 0;
 }
@@ -14649,15 +14868,18 @@ function exitFor(output) {
 }
 
 // src/adapters/claude-code/handlers.ts
-function handle(event, env) {
+var MAX_REASON_TEXT = 2e4;
+function handle(event, env, dialect = CLAUDE_CODE) {
   try {
-    return dispatch(event, env);
+    return dispatch(event, env, dialect);
   } catch (error) {
+    if (event.kind === "PostToolUse") return unscanned(event, env.cordonHome, dialect, error);
     if (silentOnFailure(event)) return {};
     return deny(`Cordon failure: ${error.message}`);
   }
 }
-function dispatch(event, env) {
+function dispatch(event, given, dialect) {
+  const env = Object.keys(dialect.builtin).length === 0 ? given : { ...given, policy: { ...given.policy, tools: { ...dialect.builtin, ...given.policy.tools } } };
   if (event.kind === "ignored") return {};
   if (event.kind === "unparsable") {
     if (event.silent === true) return {};
@@ -14667,15 +14889,17 @@ function dispatch(event, env) {
   const cordon = new Cordon({
     policy: env.policy,
     cordonHome: env.cordonHome,
-    sessionId: event.sessionId
+    sessionId: event.sessionId,
+    rewrites: dialect.rewrites
   });
   if (event.kind === "UserPromptSubmit") {
-    cordon.onUserPrompt(event.prompt);
+    if (dialect.humanPrompts) cordon.onUserPrompt(event.prompt);
     sweep(env.cordonHome, event.sessionId);
     return {};
   }
-  if (event.kind === "PostToolUse") return observe(cordon, event, env);
-  return renderDecision(cordon.gate(event.call), env.policy.mode);
+  if (event.kind === "PostToolUse") return observe(cordon, event, env, dialect);
+  const decision = dialect.asks ? cordon.gate(event.call) : cordon.gateUnattended(event.call);
+  return renderDecision(decision, env.policy.mode);
 }
 function display(event, env) {
   try {
@@ -14705,11 +14929,22 @@ function display(event, env) {
     return {};
   }
 }
-function observe(cordon, event, env) {
-  const extracted = extractText(event.call.tool, event.response);
+function unscanned(event, cordonHome2, dialect, error) {
+  const said = `Cordon failure: ${error.message}. The result of ${event.call.tool} was not scanned`;
+  const held = holdSession(cordonHome2, event.sessionId);
+  const after = held ? "calls that act are held until your next message" : "the hold on calls that act could not be recorded either, so it will not outlast this failure; stop the agent if the result matters";
+  if (dialect.replaces === "block") {
+    return { decision: "block", reason: `${said}, so it is withheld${held ? "" : `; ${after}`}.`, ...held ? {} : { systemMessage: `${said}; ${after}.` } };
+  }
+  return { systemMessage: `${said}; ${after}.` };
+}
+function observe(cordon, event, env, dialect) {
+  const extracted = extractText(event.call.tool, event.response, dialect.textless(event.call));
   if (!extracted.known) {
     cordon.markUnredacted();
-    return {};
+    const said = `Cordon: the result of ${event.call.tool} could not be read (its shape is unknown or too large), so a layer hidden in it could not be cut`;
+    if (dialect.replaces === "block") return { decision: "block", reason: `${said}; it is withheld.` };
+    return { systemMessage: `${said}. Calls that act are held until your next message.` };
   }
   const source = classifySource(
     { kind: sourceKind(event.call.tool), label: sourceLabel(event.call), tool: event.call.tool },
@@ -14720,14 +14955,26 @@ function observe(cordon, event, env) {
   const found2 = [];
   const cleaned = extracted.parts.map((part) => {
     const envelope = cordon.observe(part.text, source, part.content ? "content" : "label");
-    found2.push(...envelope.findings);
+    for (const finding of envelope.findings) found2.push(finding);
     if (!envelope.substitute) substitute = false;
     if (envelope.text !== part.text) changed2 = true;
     return envelope.text;
   });
   cordon.recordLookup(event.call, cleaned.filter((_, index) => extracted.parts[index].content));
-  if (!substitute) return report(cordon, event.call.tool, source, found2);
+  if (!substitute) return report(cordon, event.call.tool, source, found2, void 0, dialect.replaces !== "none");
   if (!changed2) return {};
+  if (dialect.replaces === "none") {
+    cordon.markUnredacted();
+    return report(cordon, event.call.tool, source, found2, dialect.name);
+  }
+  if (dialect.replaces === "block") {
+    const text = cleaned.join("\n");
+    const cut2 = text.length > MAX_REASON_TEXT;
+    return {
+      decision: "block",
+      reason: `Cordon cut a layer hidden from the human out of the result of ${event.call.tool}; the cleaned result follows` + (cut2 ? ", truncated: only its beginning is shown." : ".") + "\n\n" + (cut2 ? text.slice(0, MAX_REASON_TEXT) : text)
+    };
+  }
   const updated = replaceText(event.call.tool, event.response, cleaned);
   if (updated === event.response) {
     cordon.markUnredacted();
@@ -14740,11 +14987,21 @@ function observe(cordon, event, env) {
     }
   };
 }
-function report(cordon, tool, source, findings) {
+function report(cordon, tool, source, findings, unreplaceable, cuts = true) {
   const removing = removingFindings(findings);
   if (removing.length === 0) return {};
+  if (unreplaceable !== void 0) {
+    const said = `a layer hidden from the human was found in the result of ${tool}, and ${unreplaceable} cannot replace a tool result: the model read it whole`;
+    cordon.notice(tool, said, source);
+    return {
+      systemMessage: humanReport(
+        { lead: `Cordon: ${said}. Calls that act are held until your next message.`, label: source.label, note: "The hidden content:" },
+        removing
+      )
+    };
+  }
   const unknown = viewIsUnknown(source);
-  const why = unknown ? `this source's view is not declared, and an MCP tool's result is treated as source by default. If ${tool} returns something rendered (a web page, a letter, a product card), declare it in the policy \u2014 toolsReturn: ${tool}: rendered \u2014 and the hidden layer will be cut out` : "the human sees this source as source text, and cutting from it would mean corrupting their file";
+  const why = unknown ? `this source's view is not declared, and an MCP tool's result is treated as source by default. If ${tool} returns something rendered (a web page, a letter, a product card), declare it in the policy \u2014 toolsReturn: ${tool}: rendered \u2014 and ${cuts ? "the hidden layer will be cut out" : "calls that act will be held after such a layer; this harness cannot cut it out of a result"}` : "the human sees this source as source text, and cutting from it would mean corrupting their file";
   cordon.notice(
     tool,
     `a layer hidden from the human was found in the result of ${tool}; the result was not substituted` + (unknown ? "; the source view is not declared, the source default is in force" : ""),
@@ -14761,10 +15018,23 @@ function report(cordon, tool, source, findings) {
     )
   };
 }
+var WEB_TOOLS = /* @__PURE__ */ new Set(["WebFetch", "WebSearch", "FetchURL", "web_fetch", "web_search"]);
+var FILE_TOOLS = /* @__PURE__ */ new Set([
+  "Read",
+  "Glob",
+  "Grep",
+  "NotebookRead",
+  "ReadMediaFile",
+  "read",
+  "read_image",
+  "glob",
+  "grep",
+  "str_replace_editor"
+]);
 function sourceKind(tool) {
-  if (tool === "WebFetch" || tool === "WebSearch") return "web";
-  if (tool === "Bash") return "bash";
-  if (tool === "Read" || tool === "Glob" || tool === "Grep" || tool === "NotebookRead") return "file";
+  if (WEB_TOOLS.has(tool)) return "web";
+  if (tool === "Bash" || tool === "bash") return "bash";
+  if (FILE_TOOLS.has(tool)) return "file";
   return "tool";
 }
 function deny(reason) {
@@ -14784,10 +15054,10 @@ function cordonHome() {
   if (set === "~" || set.startsWith("~/")) return join10(homedir5(), set.slice(1));
   return set;
 }
-function runHook(stdin, home = cordonHome()) {
+function runHook(stdin, home = cordonHome(), dialect = CLAUDE_CODE) {
   let event;
   try {
-    event = parseEvent(stdin);
+    event = parseEvent(stdin, dialect);
   } catch (error) {
     return JSON.stringify(deny2(`Cordon failure: ${error.message}`));
   }
@@ -14796,8 +15066,9 @@ function runHook(stdin, home = cordonHome()) {
     if (problem !== null) throw new Error(problem);
     ensureUsableHome(home);
     const policy = loadPolicy(home);
-    return JSON.stringify(handle(event, { policy, cordonHome: home }));
+    return JSON.stringify(handle(event, { policy, cordonHome: home }, dialect));
   } catch (error) {
+    if (event.kind === "PostToolUse") return JSON.stringify(unscanned(event, home, dialect, error));
     return JSON.stringify(failure(event, `Cordon failure: ${error.message}`));
   }
 }
@@ -14933,14 +15204,21 @@ function isRecord2(value) {
 }
 
 // src/adapters/gemini-cli/handlers.ts
-var MAX_REASON_TEXT = 2e4;
+var MAX_REASON_TEXT2 = 2e4;
 function handle2(event, env) {
   try {
     return dispatch2(event, env);
   } catch (error) {
+    if (event.kind === "AfterTool") return unscanned2(event, env.cordonHome, error);
     if (silentOnFailure2(event)) return {};
     return { decision: "deny", reason: `Cordon failure: ${error.message}` };
   }
+}
+function unscanned2(event, cordonHome2, error) {
+  const said = `Cordon failure: ${error.message}. The result of ${event.call.tool} was not scanned, so it is withheld`;
+  const held = holdSession(cordonHome2, event.sessionId);
+  const after = held ? "calls that act are held until your next message" : "the hold on calls that act could not be recorded either, so it will not outlast this failure; stop the agent if the result matters";
+  return { decision: "deny", reason: `${said}.`, systemMessage: `${said}; ${after}.` };
 }
 function silentOnFailure2(event) {
   return event.kind === "AfterTool" || event.kind === "AfterAgent";
@@ -15032,8 +15310,8 @@ function observe2(cordon, event, env) {
   };
 }
 function modelReason(tool, clean) {
-  const cut2 = clean.length > MAX_REASON_TEXT;
-  const text = cut2 ? clean.slice(0, MAX_REASON_TEXT) : clean;
+  const cut2 = clean.length > MAX_REASON_TEXT2;
+  const text = cut2 ? clean.slice(0, MAX_REASON_TEXT2) : clean;
   return [
     `Cordon: the result of ${tool} contained a layer hidden from the human and was not passed on whole.`,
     "Below is the cleaned text of the same result; acting on it is allowed, but the original result must not be considered read.",
@@ -15049,10 +15327,10 @@ function sourceKind2(tool, mcpServer) {
   if (mcpServer !== void 0) return "tool";
   if (tool === "web_fetch" || tool === "google_web_search") return "web";
   if (tool === "run_shell_command") return "bash";
-  if (FILE_TOOLS.has(tool)) return "file";
+  if (FILE_TOOLS2.has(tool)) return "file";
   return "tool";
 }
-var FILE_TOOLS = /* @__PURE__ */ new Set([
+var FILE_TOOLS2 = /* @__PURE__ */ new Set([
   "read_file",
   "read_many_files",
   "list_directory",
@@ -15070,6 +15348,7 @@ function runHook2(stdin, home = cordonHome()) {
     const policy = loadPolicy(home);
     return JSON.stringify(handle2(event, { policy, cordonHome: home }));
   } catch (error) {
+    if (event.kind === "AfterTool") return JSON.stringify(unscanned2(event, home, error));
     return JSON.stringify(failure2(event, `Cordon failure: ${error.message}`));
   }
 }
@@ -15080,6 +15359,21 @@ function ensureUsableHome2(home) {
 }
 function failure2(event, reason) {
   return silentOnFailure2(event) ? {} : { decision: "deny", reason };
+}
+
+// src/adapters/codex/main.ts
+function runHook3(stdin, home = cordonHome()) {
+  return runHook(stdin, home, CODEX);
+}
+
+// src/adapters/kimi/main.ts
+function runHook4(stdin, home = cordonHome()) {
+  return runHook(stdin, home, KIMI);
+}
+
+// src/adapters/deepseek/main.ts
+function runHook5(stdin, home = cordonHome()) {
+  return runHook(stdin, home, DEEPSEEK);
 }
 
 // src/adapters/mcp/gateway.ts
@@ -15293,8 +15587,8 @@ function observeToolList(value, cordon, policy, command) {
   const result = asRecord(value["result"]);
   const listed = result?.["tools"];
   if (result === null || !Array.isArray(listed)) return value;
-  const named = listed.map((tool) => asRecord(tool)).filter((tool) => tool !== null && typeof tool["name"] === "string").map((tool) => ({ name: tool["name"], description: tool["description"], inputSchema: tool["inputSchema"] }));
-  const held = new Set(cordon.admitTools(command, named).map((tool) => tool.name));
+  const named2 = listed.map((tool) => asRecord(tool)).filter((tool) => tool !== null && typeof tool["name"] === "string").map((tool) => ({ name: tool["name"], description: tool["description"], inputSchema: tool["inputSchema"] }));
+  const held = new Set(cordon.admitTools(command, named2).map((tool) => tool.name));
   const tools = listed.filter((tool) => !held.has(String(asRecord(tool)?.["name"])));
   value = { ...value, result: { ...result, tools } };
   for (const tool of tools) {
@@ -16069,10 +16363,13 @@ notify:
 }
 
 // src/cli.ts
-var USAGE = "usage: cordon scan <file|-> [--json] | cordon hook [--harness claude-code|gemini] | cordon mcp -- <server command...> | cordon mcp approve -- <server command...> | cordon doctor | cordon init [--profile locked|research|documents|coding|service] [--force] | cordon log [--last N] [--json] | cordon approve [id [--read] [--as name]] | cordon policy check|explain [file] | cordon policy apply <file> [--accept-warnings] [--as name] | cordon audit [dir] [--json|--sarif] [--fail-on high|medium|low]";
+var USAGE = "usage: cordon scan <file|-> [--json] | cordon hook [--harness claude-code|gemini|codex|kimi|deepseek] | cordon mcp -- <server command...> | cordon mcp approve -- <server command...> | cordon doctor | cordon init [--profile locked|research|documents|coding|service] [--force] | cordon log [--last N] [--json] | cordon approve [id [--read] [--as name]] | cordon policy check|explain [file] | cordon policy apply <file> [--accept-warnings] [--as name] | cordon audit [dir] [--json|--sarif] [--fail-on high|medium|low]";
 var HARNESSES = /* @__PURE__ */ new Map([
   ["claude-code", runHook],
-  ["gemini", runHook2]
+  ["gemini", runHook2],
+  ["codex", runHook3],
+  ["kimi", runHook4],
+  ["deepseek", runHook5]
 ]);
 function readInput(path) {
   if (!path || path === "-") return readFileSync7(0, "utf8");
@@ -16136,6 +16433,39 @@ var HARNESS_LIMITS = [
       "there is nothing to replace a tool result with: a poisoned one is rejected whole, and the clean part of the page reaches the model wrapped in a refusal",
       'any hook failure ends in a pass, not just a timeout; there is no "this hook is mandatory" flag in the harness configuration at all',
       "the session identifier survives across processes only when the session is explicitly resumed: a conversation started afresh starts the data axis from a blank slate"
+    ]
+  },
+  // Measured on Codex CLI 0.157 and Kimi Code 2.0 (docs/harnesses.md).
+  {
+    name: "codex",
+    limits: [
+      "in codex exec a question is put to no one (the call ran unasked; the TUI was not measured), so every question is a refusal naming a one-time approval: cordon approve <id>",
+      "arguments are changed only next to an explicit allow, which would override your own approval settings, so a call Cordon would cut is refused instead",
+      "a result is replaced only through a block: the model reads the cleaned result as a tool error",
+      "a hook that crashes, hangs or prints garbage lets the call through"
+    ]
+  },
+  {
+    name: "kimi",
+    limits: [
+      "whether a question is put to anyone was not measured, so it is not relied on: every question is a refusal naming a one-time approval, cordon approve <id>",
+      "changed arguments are ignored, so a call Cordon would cut is refused instead",
+      "a subagent (Agent) is refused with an approval id; do not approve it, since whether its own calls reach the hook was not measured",
+      "the harness cannot replace a tool result: a hidden layer in something read rendered (a fetched page) reaches the model, and calls that act are held until your next message; in a file read as source text it is reported",
+      "a hook that crashes, hangs or prints garbage lets the call through"
+    ]
+  },
+  // Read from the source of @deepseek-ai/dsh-hooks-claude-code.
+  {
+    name: "deepseek",
+    limits: [
+      "read from the bridge's source, not measured live",
+      "every question is a refusal naming a one-time approval (cordon approve <id>), and a call Cordon would cut is refused: the bridge ignores changed arguments",
+      "a result is replaced only through a block: the model reads the cleaned result as a tool error",
+      "the bridge sends harness notices as your message and carries no source, so no message counts as yours: nothing you write names a destination, and after an untrusted read every call that acts is refused with an approval id for the rest of the session",
+      "the bridge logs a hook's message to you and shows it to no one: what Cordon reports rather than cuts is only in the journal (cordon log)",
+      "the bridge hands the hook only the text blocks of a result; anything else in it reaches the model unscanned",
+      "a hook that crashes or fails to start lets the call through, and the bridge waits ten minutes for one that hangs unless the config sets a timeout"
     ]
   }
 ];
@@ -16536,10 +16866,10 @@ ${USAGE}
 }
 function hook(args) {
   const at = args.indexOf("--harness");
-  const named = at === -1 ? "claude-code" : args[at + 1];
-  const run = named === void 0 ? void 0 : HARNESSES.get(named);
+  const named2 = at === -1 ? "claude-code" : args[at + 1];
+  const run = named2 === void 0 ? void 0 : HARNESSES.get(named2);
   if (!run) {
-    process.stderr.write(`unknown harness: ${named ?? "(no value given)"}
+    process.stderr.write(`unknown harness: ${named2 ?? "(no value given)"}
 ${USAGE}
 `);
     return 2;
@@ -16552,7 +16882,7 @@ ${USAGE}
   }
   const output = run(stdin);
   process.stdout.write(output + "\n");
-  if (named !== "claude-code") return 0;
+  if (named2 !== "claude-code" && named2 !== "codex" && named2 !== "deepseek") return 0;
   const exit = exitFor(output);
   if (exit.stderr !== "") process.stderr.write(exit.stderr + "\n");
   return exit.code;

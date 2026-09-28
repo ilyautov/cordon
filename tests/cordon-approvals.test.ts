@@ -1,11 +1,12 @@
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Cordon, changed } from '../src/cordon.js'
 import { DEFAULT_POLICY, type Policy } from '../src/policy/defaults.js'
 import { loadPolicyFile } from '../src/policy/load.js'
 import { ApprovalStore } from '../src/session/approvals.js'
+import { SessionStore } from '../src/session/store.js'
 
 function make(mode: Policy['mode']) {
   const home = mkdtempSync(join(tmpdir(), 'cordon-home-'))
@@ -25,6 +26,8 @@ function idIn(reason: string): string {
   if (match === null) throw new Error(`no approval id in: ${reason}`)
   return match[1]!
 }
+
+afterEach(() => vi.restoreAllMocks())
 
 describe('Cordon.gateUnattended: a question with nobody to ask it', () => {
   it('becomes a refusal that names the one-time approval', () => {
@@ -49,6 +52,17 @@ describe('Cordon.gateUnattended: a question with nobody to ask it', () => {
     expect(new ApprovalStore(home).approve(id)).not.toBeNull()
     expect(cordon.gateUnattended(SEND).kind).toBe('allow')
     expect(cordon.gateUnattended(SEND).kind).toBe('deny')
+  })
+
+  it('an approval is not spent by a core that cannot write its state', () => {
+    // Codex, reviewing the connectors: every other allow is given only by a
+    // core that could write, and a mark lost to a full disk let the approved
+    // call through after a new untrusted read.
+    const { cordon, home } = make('interactive')
+    const first = cordon.gateUnattended(SEND)
+    new ApprovalStore(home).approve(idIn(first.kind === 'deny' ? first.reason : ''))
+    vi.spyOn(SessionStore.prototype, 'save').mockImplementation(() => { throw new Error('ENOSPC') })
+    expect(() => cordon.gateUnattended(SEND)).toThrow(/ENOSPC/)
   })
 
   it('the approval does not carry over to a changed call', () => {
