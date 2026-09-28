@@ -287,11 +287,10 @@ describe('handle: what is cleaned and what is remembered', () => {
     expect(updated).not.toContain('not visible')
   })
 
-  it('free text in a payload field taints nothing, and that is the declared price', () => {
-    // `data` also carries the base64 of an image block. Recording it would
-    // grow the store by megabytes of something nobody will quote back, so the
-    // field is cleaned and not remembered. The miss is named here rather than
-    // left for somebody to discover.
+  it('free text in a payload field is remembered; only base64 is not', () => {
+    // `data` also carries the base64 of an image block, which is kept out of
+    // the store. Prose there used to be kept out with it, and the read left
+    // no mark at all (Codex, reviewing the connectors).
     const shared = env()
     handle(
       { kind: 'PostToolUse', sessionId: 'd2', call: { tool: 'mcp__wb__reviews', args: {} },
@@ -302,7 +301,7 @@ describe('handle: what is cleaned and what is remembered', () => {
       { kind: 'PreToolUse', sessionId: 'd2', call: { tool: 'wb_reply', args: { text: `at our shop ${ID}` } } },
       shared,
     )
-    expect(out).toEqual({})
+    expect(out.hookSpecificOutput?.permissionDecision).toBe('deny')
   })
 
   it('the same text in a content field still taints', () => {

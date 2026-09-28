@@ -56,7 +56,9 @@ const TEXT_KEYS: ReadonlySet<string> = new Set([
  * recorded, which is where an MCP server puts its payload — a way through both
  * axes at once. It is cleaned now. It stays out of provenance because the same
  * field carries the base64 of an image block, and recording those would grow
- * the store by megabytes of something nobody will ever quote back.
+ * the store by megabytes of something nobody will ever quote back. Only that
+ * is kept out: a `data` that is not base64 is read as text (Codex, reviewing
+ * the connectors: `{data: "<instruction>"}` left no mark).
  */
 const LABEL_KEYS: ReadonlySet<string> = new Set([
   'title', 'label', 'name', 'query', 'command', 'activeform', 'data', 'code',
@@ -117,7 +119,7 @@ interface Scan {
  * (`image`, `audio`, a resource's `blob`), Gemini (`inlineData`, `fileData`)
  * and the OpenAI shapes Codex relays (`input_image`, `image_url`).
  */
-const MEDIA_TYPES: ReadonlySet<string> = new Set(['image', 'audio', 'input_image', 'input_audio', 'image_url'])
+const MEDIA_TYPES: ReadonlySet<string> = new Set(['image', 'audio', 'video', 'document', 'input_image', 'input_audio', 'image_url'])
 const MEDIA_KEYS: ReadonlySet<string> = new Set(['blob', 'inlinedata', 'filedata', 'imageurl'])
 
 /**
@@ -248,10 +250,12 @@ function rebuild(
 type Role = 'text' | 'label' | 'opaque' | 'unknown'
 
 const IDENTIFIER = /^[^\s<>\p{Cf}]*$/u
+const BASE64 = /^[A-Za-z0-9+/=_-]*$/u
 
 function roleOf(key: string, value: string): Role {
   const folded = fold(key)
   if (TEXT_KEYS.has(folded)) return 'text'
+  if (folded === 'data') return BASE64.test(value.replace(/\r?\n/gu, '')) ? 'label' : 'text'
   if (LABEL_KEYS.has(folded)) return 'label'
   // By name alone an identifier field was skipped whatever it held, so
   // markup or prose in `path` was neither cleaned nor counted as read (Codex,

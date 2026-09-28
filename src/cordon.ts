@@ -69,10 +69,6 @@ export interface CordonOptions {
 }
 
 /**
- * The core's facade. Exactly three entries, matching the adapter contract of
- * three: trusted input, observing a tool result, deciding on a call.
- */
-/**
  * What a piece of a tool's result is: something the source wrote, or something
  * it merely labelled. Only the first goes into provenance.
  */
@@ -85,6 +81,10 @@ export type PieceRole = 'content' | 'label'
  */
 const INERT = /^(?:|"?(?:none|null|undefined|true|false|ok|success)"?|\{\}|\[\]|-?\d+(?:\.\d+)?)$/iu
 
+/**
+ * The core's facade. Exactly three entries, matching the adapter contract of
+ * three: trusted input, observing a tool result, deciding on a call.
+ */
 export class Cordon {
   private readonly policy: Policy
   private readonly cordonHome: string
@@ -606,15 +606,6 @@ export class Cordon {
   }
 
   /**
-   * Marks that the hidden layer could not be stripped from a tool result.
-   *
-   * Called by the adapter when the output's shape is unfamiliar: substituting
-   * it is not allowed, because the harness would discard a substitution of the
-   * wrong shape and show the model the original. Staying silent is not allowed
-   * either — the model has already read it. Hence the mark: the next call
-   * beyond reading is escalated.
-   */
-  /**
    * Marks the fact of a read whose content Cordon did not see: an image in
    * a result, or a harness that hands the hook only the text of what the
    * model got. The inert exemption in `observe` rests on having seen the
@@ -629,6 +620,15 @@ export class Cordon {
     this.persist()
   }
 
+  /**
+   * Marks that the hidden layer could not be stripped from a tool result.
+   *
+   * Called by the adapter when the output's shape is unfamiliar: substituting
+   * it is not allowed, because the harness would discard a substitution of the
+   * wrong shape and show the model the original. Staying silent is not allowed
+   * either — the model has already read it. Hence the mark: the next call
+   * beyond reading is escalated.
+   */
   markUnredacted(): void {
     this.unredacted = true
     this.readIds = noteRead(this.readIds)

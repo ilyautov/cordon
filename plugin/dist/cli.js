@@ -13898,15 +13898,6 @@ var Cordon = class {
     this.persist();
   }
   /**
-   * Marks that the hidden layer could not be stripped from a tool result.
-   *
-   * Called by the adapter when the output's shape is unfamiliar: substituting
-   * it is not allowed, because the harness would discard a substitution of the
-   * wrong shape and show the model the original. Staying silent is not allowed
-   * either — the model has already read it. Hence the mark: the next call
-   * beyond reading is escalated.
-   */
-  /**
    * Marks the fact of a read whose content Cordon did not see: an image in
    * a result, or a harness that hands the hook only the text of what the
    * model got. The inert exemption in `observe` rests on having seen the
@@ -13920,6 +13911,15 @@ var Cordon = class {
     this.readIds = noteRead(this.readIds);
     this.persist();
   }
+  /**
+   * Marks that the hidden layer could not be stripped from a tool result.
+   *
+   * Called by the adapter when the output's shape is unfamiliar: substituting
+   * it is not allowed, because the harness would discard a substitution of the
+   * wrong shape and show the model the original. Staying silent is not allowed
+   * either — the model has already read it. Hence the mark: the next call
+   * beyond reading is escalated.
+   */
   markUnredacted() {
     this.unredacted = true;
     this.readIds = noteRead(this.readIds);
@@ -14603,7 +14603,7 @@ var MAX_DEPTH3 = 12;
 var MAX_NODES = 2e4;
 var MAX_TEXT = 8e6;
 var TOKEN_LIMIT = 64;
-var MEDIA_TYPES = /* @__PURE__ */ new Set(["image", "audio", "input_image", "input_audio", "image_url"]);
+var MEDIA_TYPES = /* @__PURE__ */ new Set(["image", "audio", "video", "document", "input_image", "input_audio", "image_url"]);
 var MEDIA_KEYS = /* @__PURE__ */ new Set(["blob", "inlinedata", "filedata", "imageurl"]);
 function extractText(tool, response, textless = false) {
   if (textless || TEXTLESS.has(tool)) return { known: true, parts: [], unseen: false };
@@ -14679,9 +14679,11 @@ function rebuild(node, key, depth, parts, cursor) {
   return node;
 }
 var IDENTIFIER = /^[^\s<>\p{Cf}]*$/u;
+var BASE642 = /^[A-Za-z0-9+/=_-]*$/u;
 function roleOf2(key, value) {
   const folded = fold(key);
   if (TEXT_KEYS.has(folded)) return "text";
+  if (folded === "data") return BASE642.test(value.replace(/\r?\n/gu, "")) ? "label" : "text";
   if (LABEL_KEYS.has(folded)) return "label";
   if (OPAQUE_KEYS.has(folded)) return IDENTIFIER.test(value) ? "opaque" : "text";
   if (value.length <= TOKEN_LIMIT && !/\s/u.test(value)) return "label";
