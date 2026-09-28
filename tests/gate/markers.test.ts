@@ -51,6 +51,8 @@ describe('folding cost', () => {
     const started = Date.now()
     foldCommand(command, true)
     foldCommand('.'.repeat(10_000_000) + '\\', true)
-    expect(Date.now() - started).toBeLessThan(1500)
+    // Two folds against a 5 s hook timeout, with room for a loaded machine:
+    // a full parallel run pushed them past 1.5 s.
+    expect(Date.now() - started).toBeLessThan(3000)
   })
 })

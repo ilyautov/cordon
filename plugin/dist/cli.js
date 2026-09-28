@@ -16534,7 +16534,7 @@ var HARNESS_LIMITS = [
   {
     name: "codex",
     limits: [
-      "in codex exec a question is put to no one (the call ran unasked; the TUI was not measured), so every question is a refusal naming a one-time approval: cordon approve <id>",
+      "Codex puts a question to no one, in codex exec or the TUI (the call ran unasked), so every question is a refusal naming a one-time approval: cordon approve <id>",
       "arguments are changed only next to an explicit allow, which would override your own approval settings, so a call Cordon would cut is refused instead",
       "a result is replaced only through a block: the model reads the cleaned result as a tool error",
       "a hook that crashes, hangs or prints garbage lets the call through"

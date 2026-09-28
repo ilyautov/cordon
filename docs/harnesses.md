@@ -8,7 +8,7 @@ Measured on 2026-09-28 with Codex CLI 0.157.0 (`codex exec`) and Kimi Code 2.0.0
 |---|---|---|---|
 | `permissionDecision: deny` | refused | refused | refused |
 | exit 2 | refused | refused | not measured (documented as a block) |
-| `permissionDecision: ask` | the human is asked | **the call ran**, nobody was asked | not measured |
+| `permissionDecision: ask` | the human is asked | **the call ran**, nobody was asked, in `codex exec` and in the TUI | not measured |
 | `updatedInput` alone | applied | **ignored** | **ignored** |
 | `updatedInput` with `allow` | applied | applied, Bash and MCP | ignored |
 | `updatedToolOutput` on PostToolUse | the model reads it | **ignored** | ignored |
@@ -47,9 +47,10 @@ With the built `plugin/dist/cli.js`:
 - Codex: an MCP result with a hidden `display:none` block reached the model without it; `apply_patch` into `~/.cordon/policy.yaml` was refused by self-protection and the file stayed as it was; a patch outside a read-only profile was refused with a `cordon approve` id, and the journal holds the question.
 - Kimi: a `Write` into Cordon's policy was refused; after `FetchURL`, a write to a file the user did not name was refused by the exposure rule.
 
+In Codex's interactive TUI (0.157, measured 2026-09-28) an `ask` is reported as `unsupported permissionDecision: ask`, the hook counts as failed, and the call runs: the same as in `codex exec`.
+
 ## Not measured
 
-- Codex's interactive TUI: whether `ask` is put to the human there. Cordon does not rely on it either way.
 - Whether Codex's own `web_search` and `update_plan` pass through the hooks. If they do, both are unclassified and refused with an approval id. In the probes only `Bash`, `apply_patch` and MCP tools did.
 - Kimi's `ask` and exit 2.
 - Whether Codex shows a PostToolUse `systemMessage` to the human. Where Cordon reports rather than cuts (a hidden layer in a file read as source text), the journal holds the report either way: `cordon log`.

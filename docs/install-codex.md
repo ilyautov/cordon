@@ -35,7 +35,7 @@ Then, in a scratch directory, ask the agent to read https://example.com and save
 
 ## How it differs from Claude Code
 
-- **No questions.** In `codex exec`, measured, Codex puts a hook's `ask` to no one; the interactive TUI was not measured, and Cordon does not rely on it either way. Every call Cordon would ask about is refused with a one-time approval: run `cordon approve <id>`, and the same call, retried in the same session, goes through once.
+- **No questions.** Measured in `codex exec` and in the interactive TUI: Codex reports a hook's `ask` as unsupported and runs the call, asking no one. Every call Cordon would ask about is refused with a one-time approval: run `cordon approve <id>`, and the same call, retried in the same session, goes through once.
 - **No silent cut.** A call Cordon would run with an untrusted fragment cut out is refused instead, because Codex applies changed arguments only next to an explicit `allow`, which would override your own approval settings.
 - **A cleaned result looks like a tool error.** A result the model reads rendered (a fetched page, an MCP result declared `toolsReturn: rendered`) with a hidden layer is replaced through Codex's block channel: the model reads the cleaned text under Cordon's heading. A file or command output the human sees as source text is not cut; the layer is reported, as in Claude Code.
 - **A crashed or hung hook lets the call through.** Same as Claude Code, which is why the hook is synchronous and its bundle ships prebuilt.
