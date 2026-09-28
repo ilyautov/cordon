@@ -14501,15 +14501,19 @@ function sweepDir(dir, ttl, keep, now, ours = OURS) {
 
 // src/session/hold.ts
 function holdSession(cordonHome2, sessionId) {
-  try {
-    const store = new SessionStore(cordonHome2);
-    const state = store.load(sessionId);
-    store.save(sessionId, { ...state, unredacted: true, readIds: noteRead(state.readIds ?? []) });
-    return true;
-  } catch {
-    return false;
+  for (const pause of RETRY_PAUSES_MS) {
+    if (pause > 0) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, pause);
+    try {
+      const store = new SessionStore(cordonHome2);
+      const state = store.load(sessionId);
+      store.save(sessionId, { ...state, unredacted: true, readIds: noteRead(state.readIds ?? []) });
+      return true;
+    } catch {
+    }
   }
+  return false;
 }
+var RETRY_PAUSES_MS = [0, 50, 150, 400];
 
 // src/output/report.ts
 var REMOVING = /* @__PURE__ */ new Set(["invisible", "hidden-html"]);

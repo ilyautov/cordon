@@ -1,7 +1,7 @@
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { holdSession } from '../../src/session/hold.js'
 import { MAX_READ_IDS, SessionStore, noteRead } from '../../src/session/store.js'
 
@@ -17,6 +17,37 @@ describe('holdSession', () => {
     expect(holdSession(home, 's')).toBe(true)
     const second = new SessionStore(home).load('s')
     expect(second.readIds!.length).toBe(first.readIds!.length + 1)
+  })
+})
+
+describe('holdSession: a write that fails for a moment', () => {
+  afterEach(() => vi.restoreAllMocks())
+
+  it('is retried, so a lock that clears keeps the hold', () => {
+    // A hold lost to a transient failure could not be recovered: one attempt,
+    // and a file locked for a moment (an antivirus on Windows, EBUSY) meant
+    // no hold once the lock cleared.
+    const home = mkdtempSync(join(tmpdir(), 'cordon-hold-'))
+    const save = SessionStore.prototype.save
+    let failures = 2
+    vi.spyOn(SessionStore.prototype, 'save').mockImplementation(function (this: SessionStore, id, state) {
+      if (failures-- > 0) throw Object.assign(new Error('EBUSY: resource busy or locked'), { code: 'EBUSY' })
+      return save.call(this, id, state)
+    })
+    expect(holdSession(home, 's')).toBe(true)
+    vi.restoreAllMocks()
+    expect(new SessionStore(home).load('s').unredacted).toBe(true)
+  })
+
+  it('a failure that lasts is still reported, not promised', () => {
+    const home = mkdtempSync(join(tmpdir(), 'cordon-hold-'))
+    vi.spyOn(SessionStore.prototype, 'save').mockImplementation(() => {
+      throw Object.assign(new Error('EIO: i/o error'), { code: 'EIO' })
+    })
+    const started = Date.now()
+    expect(holdSession(home, 's')).toBe(false)
+    // Retrying must not run into the hook's timeout: a hung hook passes.
+    expect(Date.now() - started).toBeLessThan(2000)
   })
 })
 
