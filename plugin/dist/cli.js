@@ -8832,7 +8832,7 @@ function selfProtection(parts, ctx) {
       }
       const lower = value.toLowerCase();
       for (const marker of selfMarkers(ctx.cordonHome)) {
-        if (lower.includes(marker.toLowerCase())) {
+        if (mentions(lower, marker.toLowerCase())) {
           return { kind: "deny", rule: "self-protection", reason: `self-protection: the command mentions ${marker}` };
         }
       }
@@ -8902,6 +8902,13 @@ function asPaths(value) {
   return null;
 }
 var APPROVES = /(?:\bcordon(?:@[\w.^~-]+)?|\bcli\.m?js)\s+(?:(?:mcp\s+)?approve|init|policy\s+apply|hook)\b/iu;
+function mentions(command, marker) {
+  if (marker.includes("/")) return command.includes(marker);
+  for (let at = command.indexOf(marker); at !== -1; at = command.indexOf(marker, at + 1)) {
+    if (!/^[\p{L}\p{N}._]/u.test(command.slice(at + marker.length, at + marker.length + 1))) return true;
+  }
+  return false;
+}
 function selfMarkers(cordonHome2) {
   return [cordonHome2, ".cordon", ".claude/settings", ".claude/hooks", ".cursor", ".codex", ".gemini", ".kimi", ".dsh"];
 }

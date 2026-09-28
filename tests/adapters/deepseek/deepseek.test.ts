@@ -113,6 +113,22 @@ describe('deepseek: results', () => {
       expect(out.hookSpecificOutput.permissionDecisionReason, command).toMatch(/^self-protection/)
     }
   })
+
+  it('a host that shares a marker\'s letters is not the directory', () => {
+    // Kimi, review of this change: `.kimi` as a substring refused any command
+    // with www.kimi.com in it, the harness's own site.
+    for (const command of ['curl -s https://www.kimi.com/', 'curl -s https://api.codex.io/v1', 'ls backup.dsh_old']) {
+      const out = run(home('read, exec'), pre('bash', { command }))
+      expect(out.hookSpecificOutput?.permissionDecisionReason ?? '', command).not.toMatch(/^self-protection/)
+    }
+  })
+
+  it('the directory is still found however the command reaches it', () => {
+    for (const command of ['cat ~/.kimi/config.toml', 'cd ~/.kimi && cat config.toml', 'cat ~/.kimi*/config.toml', "cat '/home/u/.dsh'", 'cat ~/.claude/settings.json', 'cat ~/.kimi-code/config.toml']) {
+      const out = run(home('read, exec'), pre('bash', { command }))
+      expect(out.hookSpecificOutput.permissionDecisionReason, command).toMatch(/^self-protection/)
+    }
+  })
 })
 
 describe('deepseek: what the bridge sends as a prompt', () => {

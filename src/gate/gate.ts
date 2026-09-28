@@ -349,7 +349,7 @@ function selfProtection(parts: readonly Field[], ctx: GateContext): Decision | n
       // the Kimi and DeepSeek connectors).
       const lower = value.toLowerCase()
       for (const marker of selfMarkers(ctx.cordonHome)) {
-        if (lower.includes(marker.toLowerCase())) {
+        if (mentions(lower, marker.toLowerCase())) {
           return { kind: 'deny', rule: 'self-protection', reason: `self-protection: the command mentions ${marker}` }
         }
       }
@@ -447,6 +447,22 @@ function asPaths(value: unknown): string[] | null {
  * hook itself, never through the agent's shell.
  */
 const APPROVES = /(?:\bcordon(?:@[\w.^~-]+)?|\bcli\.m?js)\s+(?:(?:mcp\s+)?approve|init|policy\s+apply|hook)\b/iu
+
+/**
+ * Whether the command names the marker. A bare directory name followed by a
+ * letter, a digit, `.` or `_` is part of another name: `.kimi` in
+ * www.kimi.com is the harness's site, and the substring refused every command
+ * that fetched it (Kimi, reviewing the connectors). `-` still counts, so
+ * `.kimi` covers `.kimi-code`; a glob character counts too. A marker with a
+ * `/` in it is a path prefix and matches as one: `.claude/settings.json`.
+ */
+function mentions(command: string, marker: string): boolean {
+  if (marker.includes('/')) return command.includes(marker)
+  for (let at = command.indexOf(marker); at !== -1; at = command.indexOf(marker, at + 1)) {
+    if (!/^[\p{L}\p{N}._]/u.test(command.slice(at + marker.length, at + marker.length + 1))) return true
+  }
+  return false
+}
 
 function selfMarkers(cordonHome: string): string[] {
   // '.kimi' covers '.kimi-code' too. The file tools read HARNESS_CONFIG in
