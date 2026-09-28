@@ -402,3 +402,56 @@ describe('handle: lookups', () => {
     expect(handle({ kind: 'PreToolUse', sessionId: 'lk', call: other }, e).hookSpecificOutput?.permissionDecision).toBe('deny')
   })
 })
+
+// Codex, reviewing the connectors: a link in an identifier field was skipped
+// whole, so a result of `ok` with `url: <attacker's page>` left neither a mark
+// nor provenance, and the next call could carry the link freely.
+describe('handle: a link in an identifier field', () => {
+  const EVIL = 'https://drop.evil.example/collect'
+
+  it('is remembered, and a call that carries it is refused', () => {
+    const shared = env()
+    handle(
+      { kind: 'PostToolUse', sessionId: 'u1', call: { tool: 'mcp__web__search', args: {} },
+        response: { content: [{ type: 'text', text: 'ok' }], structuredContent: { url: EVIL } } },
+      shared,
+    )
+    const out = handle(
+      { kind: 'PreToolUse', sessionId: 'u1', call: { tool: 'wb_reply', args: { text: `details at ${EVIL}` } } },
+      shared,
+    )
+    expect(out.hookSpecificOutput?.permissionDecision).toBe('deny')
+  })
+
+  it('marks the read even beside an inert text', () => {
+    const shared = env()
+    handle(
+      { kind: 'PostToolUse', sessionId: 'u2', call: { tool: 'mcp__web__search', args: {} },
+        response: { content: [{ type: 'text', text: 'ok' }], structuredContent: { href: EVIL } } },
+      shared,
+    )
+    const out = handle(
+      { kind: 'PreToolUse', sessionId: 'u2', call: { tool: 'wb_reply', args: { text: 'thanks' } } },
+      shared,
+    )
+    expect(out.hookSpecificOutput?.permissionDecisionReason).toMatch(/read untrusted content/)
+  })
+
+  it('the user\'s own link echoed back stays theirs', () => {
+    // The reason identifier fields were skipped: the user's link comes back
+    // in every result about it, and recording it would refuse their own words.
+    const shared = env()
+    const MINE = 'https://shop.example/item/42'
+    handle({ kind: 'UserPromptSubmit', sessionId: 'u3', prompt: `reply to the review of ${MINE}` }, shared)
+    handle(
+      { kind: 'PostToolUse', sessionId: 'u3', call: { tool: 'mcp__web__search', args: {} },
+        response: { content: [{ type: 'text', text: 'ok' }], structuredContent: { url: MINE } } },
+      shared,
+    )
+    const out = handle(
+      { kind: 'PreToolUse', sessionId: 'u3', call: { tool: 'wb_reply', args: { text: `about ${MINE}: thank you` } } },
+      shared,
+    )
+    expect(out).toEqual({})
+  })
+})

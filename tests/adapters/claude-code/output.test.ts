@@ -4,7 +4,7 @@ import { extractText, replaceText } from '../../../src/adapters/claude-code/outp
 describe('extractText', () => {
   it('a string output is one piece', () => {
     expect(extractText('Read', 'the file contents'))
-      .toEqual({ known: true, parts: [{ text: 'the file contents', content: true }], unseen: false })
+      .toEqual({ known: true, parts: [{ text: 'the file contents', content: true }], unseen: false, links: [] })
   })
 
   it('a Bash output is two streams', () => {
@@ -118,8 +118,8 @@ describe('extractText: the shapes the plan got wrong', () => {
   })
 
   it('an empty result is a known shape', () => {
-    expect(extractText('mcp__x__y', undefined)).toEqual({ known: true, parts: [], unseen: false })
-    expect(extractText('mcp__x__y', null)).toEqual({ known: true, parts: [], unseen: false })
+    expect(extractText('mcp__x__y', undefined)).toEqual({ known: true, parts: [], unseen: false, links: [] })
+    expect(extractText('mcp__x__y', null)).toEqual({ known: true, parts: [], unseen: false, links: [] })
   })
 
   it('a content block without a text field is not passed off as known', () => {
@@ -254,5 +254,13 @@ describe('extractText: round ten', () => {
     // Kimi, reviewing the connectors: the Anthropic shape for a PDF.
     expect(extractText('mcp__x__y', { content: [{ type: 'text', text: 'ok' }, { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: 'JVBERi0=' } }] }).unseen).toBe(true)
     expect(extractText('mcp__x__y', { content: [{ type: 'video', data: 'AAAA' }] }).unseen).toBe(true)
+  })
+})
+
+describe('extractText: links in identifier fields', () => {
+  it('are handed over, not cleaned: a link or a path is not text', () => {
+    const found = extractText('mcp__x__y', { structuredContent: { url: 'https://a.example/x', path: '/tmp/a', id: 'abc' }, content: [{ type: 'text', text: 'ok' }] })
+    expect(found.links).toEqual(['https://a.example/x'])
+    expect(found.parts).toEqual([{ text: 'ok', content: true }])
   })
 })

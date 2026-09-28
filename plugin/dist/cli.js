@@ -13924,6 +13924,28 @@ var Cordon = class {
     this.persist();
   }
   /**
+   * Links a result carried in identifier fields, which the adapter does not
+   * clean. A link the user named is theirs coming back and changes nothing;
+   * any other from an untrusted source is the source's, so it goes into
+   * provenance and marks the read, whatever the rest of the result said
+   * (Codex, reviewing the connectors: `ok` with `url: <attacker's page>`).
+   */
+  observeLinks(links, source) {
+    if (source.trust !== "untrusted") return;
+    let foreign = false;
+    for (const link of links) {
+      const found2 = atoms(link);
+      if (found2.length === 0 || found2.every((atom) => this.userAtoms.includes(atom))) continue;
+      this.taint.record(link, source);
+      foreign = true;
+    }
+    if (!foreign) return;
+    this.exposure = { at: this.turn, source: source.label };
+    if (source.kind !== "mcp-description") this.lastSource = source;
+    this.readIds = noteRead(this.readIds);
+    this.persist();
+  }
+  /**
    * Marks the fact of a read whose content Cordon did not see: an image in
    * a result, or a harness that hands the hook only the text of what the
    * model got. The inert exemption in `observe` rests on having seen the
@@ -14629,14 +14651,15 @@ var MAX_DEPTH3 = 12;
 var MAX_NODES = 2e4;
 var MAX_TEXT = 8e6;
 var TOKEN_LIMIT = 64;
+var LINK_KEYS = /* @__PURE__ */ new Set(["uri", "url", "urls", "href", "link", "links"]);
 var MEDIA_TYPES = /* @__PURE__ */ new Set(["image", "audio", "video", "document", "input_image", "input_audio", "image_url"]);
 var MEDIA_KEYS = /* @__PURE__ */ new Set(["blob", "inlinedata", "filedata", "imageurl"]);
 function extractText(tool, response, textless = false) {
-  if (textless || TEXTLESS.has(tool)) return { known: true, parts: [], unseen: false };
-  if (typeof response === "string") return { known: true, parts: [{ text: response, content: true }], unseen: false };
-  const scan = { parts: [], known: true, nodes: 0, size: 0, unseen: false };
+  if (textless || TEXTLESS.has(tool)) return { known: true, parts: [], unseen: false, links: [] };
+  if (typeof response === "string") return { known: true, parts: [{ text: response, content: true }], unseen: false, links: [] };
+  const scan = { parts: [], known: true, nodes: 0, size: 0, unseen: false, links: [] };
   visit2(response, "", 0, scan);
-  return scan.known ? { known: true, parts: scan.parts, unseen: scan.unseen } : { known: false, parts: [], unseen: false };
+  return scan.known ? { known: true, parts: scan.parts, unseen: scan.unseen, links: scan.links } : { known: false, parts: [], unseen: false, links: [] };
 }
 function replaceText(tool, response, parts) {
   const found2 = extractText(tool, response);
@@ -14657,6 +14680,7 @@ function visit2(node, key, depth, scan, media = false) {
       scan.known = false;
       return;
     }
+    if (role === "opaque" && node !== "" && LINK_KEYS.has(fold(key))) scan.links.push(node);
     if (role === "text" || role === "label") {
       scan.size += node.length;
       if (scan.size > MAX_TEXT) {
@@ -15024,6 +15048,7 @@ function observe(cordon, event, env, dialect) {
     if (envelope.text !== part.text) changed2 = true;
     return envelope.text;
   });
+  cordon.observeLinks(extracted.links, source);
   if (extracted.unseen) cordon.markUnredacted();
   else if (dialect.partialResults && !dialect.textless(event.call)) cordon.observeUnseen(source);
   cordon.recordLookup(event.call, cleaned.filter((_, index) => extracted.parts[index].content));

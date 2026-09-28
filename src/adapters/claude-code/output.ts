@@ -25,6 +25,12 @@ export interface Extracted {
    * (Codex, reviewing the connectors: "ok" plus an image).
    */
   unseen: boolean
+  /**
+   * Links in identifier fields (`url`, `href`, `uri`): not cleaned, since
+   * rewriting a link breaks it, but handed to the core, which decides whether
+   * the source put them there or the user's own link came back.
+   */
+  links: string[]
 }
 
 /**
@@ -113,7 +119,11 @@ interface Scan {
   nodes: number
   size: number
   unseen: boolean
+  links: string[]
 }
+
+/** Identifier fields that hold a link rather than a path or an id. */
+const LINK_KEYS: ReadonlySet<string> = new Set(['uri', 'url', 'urls', 'href', 'link', 'links'])
 
 /**
  * Block types and fields that carry media rather than text, across MCP
@@ -142,12 +152,14 @@ export function extractText(tool: string, response: unknown, textless = false): 
   // Before the string case: Kimi and Codex report a write as a plain string
   // ("Wrote 1 bytes to notes.txt"), and read as content it marked the session
   // as having read something untrusted after every edit the model made.
-  if (textless || TEXTLESS.has(tool)) return { known: true, parts: [], unseen: false }
-  if (typeof response === 'string') return { known: true, parts: [{ text: response, content: true }], unseen: false }
+  if (textless || TEXTLESS.has(tool)) return { known: true, parts: [], unseen: false, links: [] }
+  if (typeof response === 'string') return { known: true, parts: [{ text: response, content: true }], unseen: false, links: [] }
 
-  const scan: Scan = { parts: [], known: true, nodes: 0, size: 0, unseen: false }
+  const scan: Scan = { parts: [], known: true, nodes: 0, size: 0, unseen: false, links: [] }
   visit(response, '', 0, scan)
-  return scan.known ? { known: true, parts: scan.parts, unseen: scan.unseen } : { known: false, parts: [], unseen: false }
+  return scan.known
+    ? { known: true, parts: scan.parts, unseen: scan.unseen, links: scan.links }
+    : { known: false, parts: [], unseen: false, links: [] }
 }
 
 /**
@@ -180,6 +192,7 @@ function visit(node: unknown, key: string, depth: number, scan: Scan, media = fa
       scan.known = false
       return
     }
+    if (role === 'opaque' && node !== '' && LINK_KEYS.has(fold(key))) scan.links.push(node)
     if (role === 'text' || role === 'label') {
       scan.size += node.length
       if (scan.size > MAX_TEXT) {

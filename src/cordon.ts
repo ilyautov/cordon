@@ -606,6 +606,29 @@ export class Cordon {
   }
 
   /**
+   * Links a result carried in identifier fields, which the adapter does not
+   * clean. A link the user named is theirs coming back and changes nothing;
+   * any other from an untrusted source is the source's, so it goes into
+   * provenance and marks the read, whatever the rest of the result said
+   * (Codex, reviewing the connectors: `ok` with `url: <attacker's page>`).
+   */
+  observeLinks(links: readonly string[], source: Source): void {
+    if (source.trust !== 'untrusted') return
+    let foreign = false
+    for (const link of links) {
+      const found = atoms(link)
+      if (found.length === 0 || found.every((atom) => this.userAtoms.includes(atom))) continue
+      this.taint.record(link, source)
+      foreign = true
+    }
+    if (!foreign) return
+    this.exposure = { at: this.turn, source: source.label }
+    if (source.kind !== 'mcp-description') this.lastSource = source
+    this.readIds = noteRead(this.readIds)
+    this.persist()
+  }
+
+  /**
    * Marks the fact of a read whose content Cordon did not see: an image in
    * a result, or a harness that hands the hook only the text of what the
    * model got. The inert exemption in `observe` rests on having seen the
