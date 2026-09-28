@@ -7454,6 +7454,7 @@ var DEFAULT_POLICY = {
   memory: { files: [], tools: [] },
   mcp: { pin: true },
   budgets: [],
+  refusals: 3,
   output: { footer: true }
 };
 
@@ -7544,6 +7545,13 @@ function validate(parsed, path) {
   if (Object.hasOwn(input, "budgets")) {
     policy.budgets = asBudgets(input["budgets"], `${path}: budgets`);
   }
+  if (Object.hasOwn(input, "refusals")) {
+    const refusals = input["refusals"];
+    if (typeof refusals !== "number" || !Number.isInteger(refusals) || refusals < 0) {
+      throw new Error(`${path}: refusals must be a whole number, 0 to turn the hold off`);
+    }
+    policy.refusals = refusals;
+  }
   if ("destinations" in input) {
     policy.destinations = asStrings(input.destinations, `${path}: destinations`).map(destinationPattern);
     for (const entry of policy.destinations) {
@@ -7623,6 +7631,7 @@ var TOP_LEVEL = [
   "destinations",
   "lookups",
   "budgets",
+  "refusals",
   "notify",
   "exposure",
   "task",
@@ -8725,6 +8734,17 @@ function decide(call, ctx) {
       );
     }
   }
+  const limit = ctx.policy.refusals ?? 0;
+  if (limit > 0 && (ctx.refusals ?? 0) >= limit) {
+    const reads = verdict.classified && verdict.effects.every((effect) => effect === "read" || effect === "summarize");
+    if (!reads) {
+      return escalate(
+        ctx,
+        "refusals",
+        `${ctx.refusals} calls were refused since your last message, so every call that acts waits for you; the agent should stop and say what it was trying to do rather than look for another way`
+      );
+    }
+  }
   if (!verdict.classified) {
     return escalate(ctx, "unclassified", verdict.reason);
   }
@@ -9375,7 +9395,8 @@ var RULES = {
   "memory-carry": { class: "memory-poisoning", tier: "suspicion" },
   "memory-write": { class: "memory-poisoning", tier: "evidence" },
   provenance: { class: "untrusted-payload", tier: "evidence" },
-  budget: { class: "flooding", tier: "precaution" }
+  budget: { class: "flooding", tier: "precaution" },
+  refusals: { class: "drift", tier: "precaution" }
 };
 
 // src/notify/notifier.ts
@@ -13135,6 +13156,8 @@ function merge(spans) {
 // src/session/store.ts
 var MAX_READ_IDS = 256;
 var READ_ID = /^[0-9a-z]{1,12}-[0-9a-f]{12}$/u;
+var MAX_REFUSAL_IDS = 64;
+var REFUSAL_ID = /^[0-9]{1,9}-[0-9a-f]{12}$/u;
 var MAX_LOOKUPS = 500;
 var MAX_USER_ATOMS = 500;
 var EFFECTS2 = /* @__PURE__ */ new Set([
@@ -13244,6 +13267,7 @@ var SessionStore = class {
     const taint = Object.hasOwn(data, "taint") ? data["taint"] : void 0;
     const unredacted = Object.hasOwn(data, "unredacted") ? data["unredacted"] : void 0;
     const readIds = Object.hasOwn(data, "readIds") ? data["readIds"] : void 0;
+    const refusalIds = Object.hasOwn(data, "refusalIds") ? data["refusalIds"] : void 0;
     const directive = Object.hasOwn(data, "directive") ? data["directive"] : void 0;
     const exposure = Object.hasOwn(data, "exposure") ? data["exposure"] : void 0;
     const userAtoms = Object.hasOwn(data, "userAtoms") ? data["userAtoms"] : void 0;
@@ -13259,6 +13283,9 @@ var SessionStore = class {
       throw new Error(`the session state ${shown(sessionId)} is incompatible`);
     }
     if (readIds !== void 0 && (!Array.isArray(readIds) || readIds.some((id) => typeof id !== "string" || !READ_ID.test(id)))) {
+      throw new Error(`the session state ${shown(sessionId)} is incompatible`);
+    }
+    if (refusalIds !== void 0 && (!Array.isArray(refusalIds) || refusalIds.some((id) => typeof id !== "string" || !REFUSAL_ID.test(id)))) {
       throw new Error(`the session state ${shown(sessionId)} is incompatible`);
     }
     if (directive !== void 0 && directive !== null && (!Array.isArray(directive) || directive.some((item) => typeof item !== "string" || !EFFECTS2.has(item)))) {
@@ -13290,6 +13317,7 @@ var SessionStore = class {
       taint: TaintStore.fromJSON(taint),
       unredacted: unredacted === true,
       readIds: Array.isArray(readIds) ? readIds.slice(-MAX_READ_IDS) : [],
+      refusalIds: Array.isArray(refusalIds) ? refusalIds.slice(-MAX_REFUSAL_IDS) : [],
       directive: Array.isArray(directive) ? directive : null,
       exposure: isExposure(exposure) ? exposure : null,
       userAtoms: Array.isArray(userAtoms) ? userAtoms.slice(-MAX_USER_ATOMS) : [],
@@ -13309,6 +13337,7 @@ var SessionStore = class {
       taint: state.taint.toJSON(),
       unredacted: state.unredacted === true,
       readIds: (state.readIds ?? []).slice(-MAX_READ_IDS),
+      refusalIds: (state.refusalIds ?? []).slice(-MAX_REFUSAL_IDS),
       directive: state.directive ?? null,
       exposure: state.exposure ?? null,
       userAtoms: (state.userAtoms ?? []).slice(-MAX_USER_ATOMS),
@@ -13421,6 +13450,7 @@ function mergeStates(into, other) {
     taint: into.taint,
     unredacted: into.unredacted === true || other.unredacted === true,
     readIds: [.../* @__PURE__ */ new Set([...into.readIds ?? [], ...other.readIds ?? []])].sort().slice(-MAX_READ_IDS),
+    refusalIds: [.../* @__PURE__ */ new Set([...into.refusalIds ?? [], ...other.refusalIds ?? []])].slice(-MAX_REFUSAL_IDS),
     directive: mergeDirectives(into.directive ?? null, other.directive ?? null),
     exposure: into.exposure ?? other.exposure ?? null,
     userAtoms: mergeUserAtoms(into.userAtoms ?? [], other.userAtoms ?? []),
@@ -13491,6 +13521,13 @@ function noteRead(ids) {
   const id = `${Math.max(Date.now(), newest + 1).toString(36)}-${randomBytes4(6).toString("hex")}`;
   return [...ids, id].sort().slice(-MAX_READ_IDS);
 }
+function refusalId(turn) {
+  return `${turn}-${randomBytes4(6).toString("hex")}`;
+}
+function refusalsIn(ids, turn) {
+  const prefix = `${turn}-`;
+  return ids.filter((id) => id.startsWith(prefix)).length;
+}
 
 // src/provenance/assignments.ts
 var CONNECTOR = String.raw`\s*(?:=|:|→|\s(?:to|is|at|equals)\s)\s*`;
@@ -13537,6 +13574,7 @@ function escape(text) {
 
 // src/cordon.ts
 var INERT = /^(?:|"?(?:none|null|undefined|true|false|ok|success)"?|\{\}|\[\]|-?\d+(?:\.\d+)?)$/iu;
+var STOP = "Do not try another way to the same end; tell the user what was refused and why, and let them decide";
 function canonicalLink(link) {
   return link.trim().toLowerCase().replace(/\/+$/u, "");
 }
@@ -13560,6 +13598,8 @@ var Cordon = class {
   unredacted = false;
   /** One id per untrusted result read in this session; see SessionState.readIds. */
   readIds = [];
+  /** One id per call refused to the agent; see SessionState.refusalIds. */
+  refusalIds = [];
   directive = null;
   lastSource = null;
   /**
@@ -13611,6 +13651,7 @@ var Cordon = class {
     this.taint = restored.taint;
     this.unredacted = restored.unredacted === true;
     this.readIds = restored.readIds ?? [];
+    this.refusalIds = restored.refusalIds ?? [];
     this.exposure = restored.exposure ?? null;
     this.userAtoms = restored.userAtoms ?? [];
     this.userNames = restored.userNames ?? [];
@@ -13751,7 +13792,30 @@ var Cordon = class {
     return new PinStore(cordonHome2).forget(command);
   }
   gate(call) {
-    return this.judge(call, true);
+    return this.counted(this.judge(call, true));
+  }
+  /**
+   * Counts a refusal the agent meets. A question is not one: a human answers
+   * it. The count is written like any mark, and a store that cannot take it
+   * throws, which the adapter answers with a refusal anyway.
+   */
+  counted(decision) {
+    if (decision.kind !== "deny") return decision;
+    const told = { ...decision, reason: `${decision.reason.replace(/\.+$/u, "")}. ${STOP}` };
+    this.refusalIds = [...this.refusalIds, refusalId(this.turn)].slice(-MAX_REFUSAL_IDS);
+    this.persist();
+    const limit = this.policy.refusals ?? 0;
+    if (limit > 0 && refusalsIn(this.refusalIds, this.turn) === limit) {
+      this.notifier.notify({
+        at: (/* @__PURE__ */ new Date()).toISOString(),
+        decision: "refusals-hold",
+        tool: "",
+        reason: `${limit} calls were refused to the agent since your last message; every call that acts now waits for you until you write again`,
+        source: this.lastSource?.label ?? null,
+        ...labelled("refusals")
+      });
+    }
+    return told;
   }
   /**
    * The decision, spent against the budgets. A question spends when a human
@@ -13761,6 +13825,7 @@ var Cordon = class {
   judge(call, askSpends) {
     let decision = gate(call, {
       policy: this.policy,
+      refusals: refusalsIn(this.refusalIds, this.turn),
       cert: this.cert,
       taint: this.taint,
       cordonHome: this.cordonHome,
@@ -13815,6 +13880,9 @@ var Cordon = class {
    * there the policy is what should change, in the open.
    */
   gateUnattended(call) {
+    return this.counted(this.unattended(call));
+  }
+  unattended(call) {
     const moved = this.policyMoved();
     if (moved !== null) {
       this.notifier.notify({ at: (/* @__PURE__ */ new Date()).toISOString(), decision: "deny", tool: call.tool, reason: moved, source: null, ...labelled("failure") });
@@ -14181,6 +14249,7 @@ var Cordon = class {
       taint: this.taint,
       unredacted: this.unredacted,
       readIds: this.readIds,
+      refusalIds: this.refusalIds,
       directive: this.directive,
       exposure: this.exposure,
       userAtoms: this.userAtoms,
@@ -16462,7 +16531,11 @@ ${profile.budgets.map((budget) => `  - { effect: ${budget.effect}, limit: ${budg
 # task: answer customer tickets for acme.example
 # destinations: ['*@acme.example']
 
-`}# Every refusal, question and rewrite is appended here as JSON Lines.
+`}# After this many calls refused to the agent since your last message, every
+# call that acts waits for you until you write again. 0 turns it off.
+# refusals: 3
+
+# Every refusal, question and rewrite is appended here as JSON Lines.
 notify:
   file: ${join14(cordonHome2, "events.jsonl")}
 `;

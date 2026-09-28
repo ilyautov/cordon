@@ -18,6 +18,8 @@ import { safeLabel } from '../output/footer.js'
 
 export interface GateContext {
   policy: Policy
+  /** Calls refused to the agent since the user's last message. */
+  refusals?: number
   cert: Certificate
   taint: TaintStore
   cordonHome: string
@@ -138,6 +140,23 @@ function decide(call: ToolCall, ctx: GateContext): Decision {
         ctx.unredacted === true
           ? 'a hidden layer in a tool result could not be stripped'
           : 'provenance is full: this session read more than the store holds, and stopped remembering',
+      )
+    }
+  }
+
+  // An agent refused again and again in one turn is where drift begins: it
+  // goes looking for another way to the same end (NVIDIA, on agents that
+  // left their test environments). Reading on is harmless; acting goes back
+  // to the human, as a question or a one-time approval, never a dead end.
+  const limit = ctx.policy.refusals ?? 0
+  if (limit > 0 && (ctx.refusals ?? 0) >= limit) {
+    const reads = verdict.classified && verdict.effects.every((effect) => effect === 'read' || effect === 'summarize')
+    if (!reads) {
+      return escalate(
+        ctx,
+        'refusals',
+        `${ctx.refusals} calls were refused since your last message, so every call that acts waits for you; ` +
+          'the agent should stop and say what it was trying to do rather than look for another way',
       )
     }
   }

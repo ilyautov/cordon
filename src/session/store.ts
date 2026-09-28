@@ -11,6 +11,10 @@ export const MAX_READ_IDS = 256
 
 const READ_ID = /^[0-9a-z]{1,12}-[0-9a-f]{12}$/u
 
+/** The newest refusal ids kept; more than any sane limit on refusals in a turn. */
+export const MAX_REFUSAL_IDS = 64
+const REFUSAL_ID = /^[0-9]{1,9}-[0-9a-f]{12}$/u
+
 export interface SessionState {
   turn: number
   taint: TaintStore
@@ -27,6 +31,14 @@ export interface SessionState {
    * MAX_READ_IDS are kept. An absent field means none were recorded.
    */
   readIds?: string[]
+  /**
+   * One id per call refused to the agent, `<turn>-<random>`. Only the ids of
+   * the current turn count, so the human's next message resets the count
+   * without a write. A list merged as a union, like readIds, because two
+   * hooks refusing at once each add one, and a counter merged by maximum
+   * would lose one of them.
+   */
+  refusalIds?: string[]
   /**
    * The narrowing requested by the user with a `cordon: scope` directive.
    *
@@ -276,6 +288,7 @@ export class SessionStore {
     const taint = Object.hasOwn(data, 'taint') ? data['taint'] : undefined
     const unredacted = Object.hasOwn(data, 'unredacted') ? data['unredacted'] : undefined
     const readIds = Object.hasOwn(data, 'readIds') ? data['readIds'] : undefined
+    const refusalIds = Object.hasOwn(data, 'refusalIds') ? data['refusalIds'] : undefined
     const directive = Object.hasOwn(data, 'directive') ? data['directive'] : undefined
     const exposure = Object.hasOwn(data, 'exposure') ? data['exposure'] : undefined
     const userAtoms = Object.hasOwn(data, 'userAtoms') ? data['userAtoms'] : undefined
@@ -298,6 +311,10 @@ export class SessionStore {
     }
     // Filtered, the list would revive an approval given before a read.
     if (readIds !== undefined && (!Array.isArray(readIds) || readIds.some((id) => typeof id !== 'string' || !READ_ID.test(id)))) {
+      throw new Error(`the session state ${shown(sessionId)} is incompatible`)
+    }
+    // Filtered, the list would forget refusals, which lifts the hold on them.
+    if (refusalIds !== undefined && (!Array.isArray(refusalIds) || refusalIds.some((id) => typeof id !== 'string' || !REFUSAL_ID.test(id)))) {
       throw new Error(`the session state ${shown(sessionId)} is incompatible`)
     }
     // The directive's shape is validated rather than filtered. Filtering
@@ -359,6 +376,7 @@ export class SessionStore {
       taint: TaintStore.fromJSON(taint),
       unredacted: unredacted === true,
       readIds: Array.isArray(readIds) ? (readIds as string[]).slice(-MAX_READ_IDS) : [],
+      refusalIds: Array.isArray(refusalIds) ? (refusalIds as string[]).slice(-MAX_REFUSAL_IDS) : [],
       directive: Array.isArray(directive) ? (directive as EffectClass[]) : null,
       exposure: isExposure(exposure) ? exposure : null,
       userAtoms: Array.isArray(userAtoms) ? (userAtoms as string[]).slice(-MAX_USER_ATOMS) : [],
@@ -379,6 +397,7 @@ export class SessionStore {
       taint: state.taint.toJSON(),
       unredacted: state.unredacted === true,
       readIds: (state.readIds ?? []).slice(-MAX_READ_IDS),
+      refusalIds: (state.refusalIds ?? []).slice(-MAX_REFUSAL_IDS),
       directive: state.directive ?? null,
       exposure: state.exposure ?? null,
       userAtoms: (state.userAtoms ?? []).slice(-MAX_USER_ATOMS),
@@ -583,6 +602,7 @@ function mergeStates(into: SessionState, other: SessionState): SessionState {
     taint: into.taint,
     unredacted: into.unredacted === true || other.unredacted === true,
     readIds: [...new Set([...(into.readIds ?? []), ...(other.readIds ?? [])])].sort().slice(-MAX_READ_IDS),
+    refusalIds: [...new Set([...(into.refusalIds ?? []), ...(other.refusalIds ?? [])])].slice(-MAX_REFUSAL_IDS),
     directive: mergeDirectives(into.directive ?? null, other.directive ?? null),
     exposure: into.exposure ?? other.exposure ?? null,
     userAtoms: mergeUserAtoms(into.userAtoms ?? [], other.userAtoms ?? []),
@@ -698,4 +718,15 @@ export function noteRead(ids: readonly string[]): string[] {
   const newest = ids.reduce((max, id) => Math.max(max, parseInt(id.split('-')[0] ?? '', 36) || 0), 0)
   const id = `${Math.max(Date.now(), newest + 1).toString(36)}-${randomBytes(6).toString('hex')}`
   return [...ids, id].sort().slice(-MAX_READ_IDS)
+}
+
+/** A refusal id for this turn; see SessionState.refusalIds. */
+export function refusalId(turn: number): string {
+  return `${turn}-${randomBytes(6).toString('hex')}`
+}
+
+/** How many of the ids were refused in this turn. */
+export function refusalsIn(ids: readonly string[], turn: number): number {
+  const prefix = `${turn}-`
+  return ids.filter((id) => id.startsWith(prefix)).length
 }

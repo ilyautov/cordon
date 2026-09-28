@@ -117,6 +117,9 @@ describe('budgets', () => {
       tools: { post_note: ['create' as const], post_and_ping: ['network-egress' as const, 'create' as const], ping: ['network-egress' as const] },
       profile: { effects: ['read' as const, 'create' as const, 'network-egress' as const], resources: { paths: [], hosts: [] } },
       budgets: [{ effect: 'network-egress' as const, limit: 2, per: 'hour' as const }, { effect: 'create' as const, limit: 1, per: 'hour' as const }],
+      // Three refusals in a row here are the budget's, and what is measured
+      // is the budget's accounting, not the hold that follows refusals.
+      refusals: 0,
     }
     const cordon = make(home, both)
     const PING = { tool: 'ping', args: { text: 'ok' } }

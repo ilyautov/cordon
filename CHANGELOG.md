@@ -4,7 +4,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versions follo
 
 ## [Unreleased]
 
-The plugin's hook command quotes `${CLAUDE_PLUGIN_ROOT}`. Unquoted, a plugin root with a space in it (a home directory named `John Smith`) split the path, `node` was handed half of it, and every hook crashed, which Claude Code reads as "let it through". The plugin now carries its own README, a display name, a category and keywords for the Claude plugin directory, and the marketplace a description; `claude plugin validate` passes on both with no warning.
+An agent that keeps meeting refusals is held. After `refusals` calls (3 by default, 0 turns it off) refused to the agent since the user's last message, every call that acts goes back to the human, as a question in interactive mode or a refusal naming `cordon approve <id>` where nobody is asked, and reading goes on; the user's next message lifts it, and the journal records `refusals-hold` when it begins. NVIDIA's account of agents that left their test environments puts drift where an agent is blocked and goes looking for another way to the same end, and a refused call is that point. The count is kept in the session state as ids stamped with the turn, merged as a union, so two hooks refusing at once both count. Every refusal the agent meets now also tells it not to try another way to the same end but to tell the user what was refused; the journal keeps the reason as the gate gave it.
 
 ## [0.12.1] - 2026-09-28
 

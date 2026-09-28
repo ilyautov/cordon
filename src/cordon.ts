@@ -21,7 +21,7 @@ import { ApprovalStore, approvalId, canonical, type ApprovalContext } from './se
 import { PinStore } from './session/pins.js'
 import { BudgetStore } from './session/budgets.js'
 import { classify } from './scope/effects.js'
-import { MAX_LOOKUPS, MAX_READ_IDS, MAX_USER_ATOMS, SessionStore, noteRead, type SessionState, type TurnNames } from './session/store.js'
+import { MAX_LOOKUPS, MAX_READ_IDS, MAX_REFUSAL_IDS, MAX_USER_ATOMS, SessionStore, noteRead, refusalId, refusalsIn, type SessionState, type TurnNames } from './session/store.js'
 import { assignments } from './provenance/assignments.js'
 
 export interface Envelope {
@@ -81,6 +81,9 @@ export type PieceRole = 'content' | 'label'
  */
 const INERT = /^(?:|"?(?:none|null|undefined|true|false|ok|success)"?|\{\}|\[\]|-?\d+(?:\.\d+)?)$/iu
 
+/** What every refusal tells the agent to do instead of routing around it. */
+const STOP = 'Do not try another way to the same end; tell the user what was refused and why, and let them decide'
+
 /** A link in one spelling: lower case, no trailing slash. */
 function canonicalLink(link: string): string {
   return link.trim().toLowerCase().replace(/\/+$/u, '')
@@ -117,6 +120,8 @@ export class Cordon {
   private unredacted = false
   /** One id per untrusted result read in this session; see SessionState.readIds. */
   private readIds: string[] = []
+  /** One id per call refused to the agent; see SessionState.refusalIds. */
+  private refusalIds: string[] = []
   private directive: EffectClass[] | null = null
   private lastSource: Source | null = null
   /**
@@ -181,6 +186,7 @@ export class Cordon {
     this.taint = restored.taint
     this.unredacted = restored.unredacted === true
     this.readIds = restored.readIds ?? []
+    this.refusalIds = restored.refusalIds ?? []
     this.exposure = restored.exposure ?? null
     this.userAtoms = restored.userAtoms ?? []
     this.userNames = restored.userNames ?? []
@@ -400,7 +406,35 @@ export class Cordon {
   }
 
   gate(call: ToolCall): Decision {
-    return this.judge(call, true)
+    return this.counted(this.judge(call, true))
+  }
+
+  /**
+   * Counts a refusal the agent meets. A question is not one: a human answers
+   * it. The count is written like any mark, and a store that cannot take it
+   * throws, which the adapter answers with a refusal anyway.
+   */
+  private counted(decision: Decision): Decision {
+    if (decision.kind !== 'deny') return decision
+    // A refusal that only explains invites the agent to route around it,
+    // and drift starts there (NVIDIA). It says what to do instead. Added
+    // here, where the refusal reaches the agent, so every harness says it
+    // and the owner's journal keeps the reason as the gate gave it.
+    const told: Decision = { ...decision, reason: `${decision.reason.replace(/\.+$/u, '')}. ${STOP}` }
+    this.refusalIds = [...this.refusalIds, refusalId(this.turn)].slice(-MAX_REFUSAL_IDS)
+    this.persist()
+    const limit = this.policy.refusals ?? 0
+    if (limit > 0 && refusalsIn(this.refusalIds, this.turn) === limit) {
+      this.notifier.notify({
+        at: new Date().toISOString(),
+        decision: 'refusals-hold',
+        tool: '',
+        reason: `${limit} calls were refused to the agent since your last message; every call that acts now waits for you until you write again`,
+        source: this.lastSource?.label ?? null,
+        ...labelled('refusals'),
+      })
+    }
+    return told
   }
 
   /**
@@ -411,6 +445,7 @@ export class Cordon {
   private judge(call: ToolCall, askSpends: boolean): Decision {
     let decision = decide(call, {
       policy: this.policy,
+      refusals: refusalsIn(this.refusalIds, this.turn),
       cert: this.cert,
       taint: this.taint,
       cordonHome: this.cordonHome,
@@ -486,6 +521,10 @@ export class Cordon {
    * there the policy is what should change, in the open.
    */
   gateUnattended(call: ToolCall): Decision {
+    return this.counted(this.unattended(call))
+  }
+
+  private unattended(call: ToolCall): Decision {
     const moved = this.policyMoved()
     if (moved !== null) {
       this.notifier.notify({ at: new Date().toISOString(), decision: 'deny', tool: call.tool, reason: moved, source: null, ...labelled('failure') })
@@ -901,6 +940,7 @@ export class Cordon {
       taint: this.taint,
       unredacted: this.unredacted,
       readIds: this.readIds,
+      refusalIds: this.refusalIds,
       directive: this.directive,
       exposure: this.exposure,
       userAtoms: this.userAtoms,
