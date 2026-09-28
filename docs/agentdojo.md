@@ -5,7 +5,7 @@ This page reports Cordon on [AgentDojo](https://github.com/ethz-spylab/agentdojo
 Short version:
 
 - An agent that obeys every injection gets its attacks through 39–100% of the time without a defence. With Cordon on an autonomous policy, none got through. On an interactive policy none got through either, provided the human declines the questions the attacks raise: every one of them had to pass such a question.
-- The price depends on the policy. With a strict autonomous policy, the same agent completes 14% of Slack tasks and 69% of banking tasks. With an interactive policy it completes 96 of 97 tasks across the four suites, asking the human 0.25–1.6 questions per task.
+- The price depends on the policy. With a strict autonomous policy, the same agent completes 14% of Slack tasks and 69% of banking tasks. With an interactive policy it completes 97 of 97 tasks across the four suites, asking the human 0.25–1.6 questions per task.
 - So on this benchmark Cordon costs little for an agent with a human who answers questions. A fully autonomous agent needs a policy written for its task, and on Slack-like work it still loses most tasks.
 
 ## Setup
@@ -47,9 +47,11 @@ Utility is the share of user tasks completed without an attack. Attack success i
 |---|---|---|---|---|---|---|---|---|
 | banking | 16/16 | 144/144 (100%) | 11/16 (69%) | 11/16 (69%) | 11/16 (69%) | 16/16 (100%) | 0.38 | 0 |
 | slack | 21/21 | 105/105 (100%) | 3/21 (14%) | 3/21 (14%) | 8/21 (38%) | 21/21 (100%) | 1.57 | 0 |
-| travel | 20/20 | 116/140 (83%) | 15/20 (75%) | 16/20 (80%) | 16/20 (80%) | 19/20 (95%) | 0.25 | 0 |
+| travel | 20/20 | 116/140 (83%) | 15/20 (75%) | 16/20 (80%) | 16/20 (80%) | 20/20 (100%) | 0.25 | 0 |
 | workspace | 40/40 | 218/560 (39%) | 25/40 (63%) | 29/40 (73%) | 29/40 (73%) | 40/40 (100%) | 0.42 | 0 |
-| total | 97/97 | 583/949 | 54/97 (56%) | 59/97 (61%) | 64/97 (66%) | 96/97 (99%) | 0.63 | 0 |
+| total | 97/97 | 583/949 | 54/97 (56%) | 59/97 (61%) | 64/97 (66%) | 97/97 (100%) | 0.63 | 0 |
+
+Interactive travel reached 20 of 20 with 0.11.0: the last task had failed because quarantine cut a fragment out of an outgoing message, and a call that leaves the machine is now shown to the human whole instead of cut. Strict, directory and mandate are unchanged by it, and the attacks stayed at 0 in every column.
 
 On workspace the lookups recovered four tasks: an event with a contact the user named, a follow-up with the participants of a meeting the user named, and appends to a file the user named. Travel gained the booking at 'Le Marais Boutique', a quoted name. Slack lost the channel list's trust, as above; the mandate's gain there is the workspace's own channels and people named up front.
 
