@@ -41,7 +41,7 @@ const TEXTLESS: ReadonlySet<string> = new Set(['Write', 'Edit', 'NotebookEdit', 
  */
 const TEXT_KEYS: ReadonlySet<string> = new Set([
   'text', 'stdout', 'stderr', 'content', 'result', 'output',
-  'message', 'description', 'body', 'error',
+  'message', 'description', 'body', 'error', 'data',
 ])
 
 /**
@@ -57,11 +57,12 @@ const TEXT_KEYS: ReadonlySet<string> = new Set([
  * axes at once. It is cleaned now. It stays out of provenance because the same
  * field carries the base64 of an image block, and recording those would grow
  * the store by megabytes of something nobody will ever quote back. Only that
- * is kept out: a `data` that is not base64 is read as text (Codex, reviewing
- * the connectors: `{data: "<instruction>"}` left no mark).
+ * is kept out, and only inside a media block, whose presence marks the read
+ * on its own (`unseen`). Anywhere else `data` is text: `{data: "<instruction>"}`
+ * left no mark, with or without spaces (Codex, reviewing the connectors).
  */
 const LABEL_KEYS: ReadonlySet<string> = new Set([
-  'title', 'label', 'name', 'query', 'command', 'activeform', 'data', 'code',
+  'title', 'label', 'name', 'query', 'command', 'activeform', 'code',
 ])
 
 /**
@@ -166,7 +167,7 @@ export function replaceText(tool: string, response: unknown, parts: string[]): u
   return rebuild(response, '', 0, parts, { at: 0 })
 }
 
-function visit(node: unknown, key: string, depth: number, scan: Scan): void {
+function visit(node: unknown, key: string, depth: number, scan: Scan, media = false): void {
   if (!scan.known) return
   if (depth > MAX_DEPTH || ++scan.nodes > MAX_NODES) {
     scan.known = false
@@ -174,7 +175,7 @@ function visit(node: unknown, key: string, depth: number, scan: Scan): void {
   }
 
   if (typeof node === 'string') {
-    const role = roleOf(key, node)
+    const role = media && fold(key) === 'data' ? 'label' : roleOf(key, node)
     if (role === 'unknown') {
       scan.known = false
       return
@@ -193,16 +194,18 @@ function visit(node: unknown, key: string, depth: number, scan: Scan): void {
   if (Array.isArray(node)) {
     // An array element inherits its field's name: `content: ['review']` is
     // the same review as `content: 'review'`.
-    for (const item of node) visit(item, key, depth + 1, scan)
+    for (const item of node) visit(item, key, depth + 1, scan, media)
     return
   }
 
   if (typeof node === 'object' && node !== null) {
     const type = (node as { type?: unknown }).type
-    if (typeof type === 'string' && MEDIA_TYPES.has(type.toLowerCase())) scan.unseen = true
+    const block = media || (typeof type === 'string' && MEDIA_TYPES.has(type.toLowerCase()))
+    if (block) scan.unseen = true
     for (const [name, value] of Object.entries(node)) {
-      if (MEDIA_KEYS.has(fold(name))) scan.unseen = true
-      visit(value, name, depth + 1, scan)
+      const keyed = MEDIA_KEYS.has(fold(name))
+      if (keyed) scan.unseen = true
+      visit(value, name, depth + 1, scan, block || keyed)
     }
   }
 
@@ -250,12 +253,10 @@ function rebuild(
 type Role = 'text' | 'label' | 'opaque' | 'unknown'
 
 const IDENTIFIER = /^[^\s<>\p{Cf}]*$/u
-const BASE64 = /^[A-Za-z0-9+/=_-]*$/u
 
 function roleOf(key: string, value: string): Role {
   const folded = fold(key)
   if (TEXT_KEYS.has(folded)) return 'text'
-  if (folded === 'data') return BASE64.test(value.replace(/\r?\n/gu, '')) ? 'label' : 'text'
   if (LABEL_KEYS.has(folded)) return 'label'
   // By name alone an identifier field was skipped whatever it held, so
   // markup or prose in `path` was neither cleaned nor counted as read (Codex,

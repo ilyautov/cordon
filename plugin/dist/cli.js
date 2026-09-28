@@ -14536,7 +14536,8 @@ var TEXT_KEYS = /* @__PURE__ */ new Set([
   "message",
   "description",
   "body",
-  "error"
+  "error",
+  "data"
 ]);
 var LABEL_KEYS = /* @__PURE__ */ new Set([
   "title",
@@ -14545,7 +14546,6 @@ var LABEL_KEYS = /* @__PURE__ */ new Set([
   "query",
   "command",
   "activeform",
-  "data",
   "code"
 ]);
 var OPAQUE_KEYS = /* @__PURE__ */ new Set([
@@ -14619,14 +14619,14 @@ function replaceText(tool, response, parts) {
   if (TEXTLESS.has(tool)) return response;
   return rebuild(response, "", 0, parts, { at: 0 });
 }
-function visit2(node, key, depth, scan) {
+function visit2(node, key, depth, scan, media = false) {
   if (!scan.known) return;
   if (depth > MAX_DEPTH3 || ++scan.nodes > MAX_NODES) {
     scan.known = false;
     return;
   }
   if (typeof node === "string") {
-    const role = roleOf2(key, node);
+    const role = media && fold(key) === "data" ? "label" : roleOf2(key, node);
     if (role === "unknown") {
       scan.known = false;
       return;
@@ -14642,15 +14642,17 @@ function visit2(node, key, depth, scan) {
     return;
   }
   if (Array.isArray(node)) {
-    for (const item of node) visit2(item, key, depth + 1, scan);
+    for (const item of node) visit2(item, key, depth + 1, scan, media);
     return;
   }
   if (typeof node === "object" && node !== null) {
     const type = node.type;
-    if (typeof type === "string" && MEDIA_TYPES.has(type.toLowerCase())) scan.unseen = true;
+    const block = media || typeof type === "string" && MEDIA_TYPES.has(type.toLowerCase());
+    if (block) scan.unseen = true;
     for (const [name, value] of Object.entries(node)) {
-      if (MEDIA_KEYS.has(fold(name))) scan.unseen = true;
-      visit2(value, name, depth + 1, scan);
+      const keyed = MEDIA_KEYS.has(fold(name));
+      if (keyed) scan.unseen = true;
+      visit2(value, name, depth + 1, scan, block || keyed);
     }
   }
 }
@@ -14679,11 +14681,9 @@ function rebuild(node, key, depth, parts, cursor) {
   return node;
 }
 var IDENTIFIER = /^[^\s<>\p{Cf}]*$/u;
-var BASE642 = /^[A-Za-z0-9+/=_-]*$/u;
 function roleOf2(key, value) {
   const folded = fold(key);
   if (TEXT_KEYS.has(folded)) return "text";
-  if (folded === "data") return BASE642.test(value.replace(/\r?\n/gu, "")) ? "label" : "text";
   if (LABEL_KEYS.has(folded)) return "label";
   if (OPAQUE_KEYS.has(folded)) return IDENTIFIER.test(value) ? "opaque" : "text";
   if (value.length <= TOKEN_LIMIT && !/\s/u.test(value)) return "label";
