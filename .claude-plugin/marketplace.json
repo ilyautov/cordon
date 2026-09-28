@@ -9,7 +9,7 @@
       "name": "cordon",
       "source": "./plugin",
       "description": "Prompt-injection firewall for AI agents: reads anything, takes orders only from you",
-      "version": "0.11.0"
+      "version": "0.12.0"
     }
   ]
 }

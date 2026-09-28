@@ -1,6 +1,6 @@
 {
   "name": "cordon",
-  "version": "0.11.0",
+  "version": "0.12.0",
   "description": "Prompt-injection firewall for AI agents: reads anything, takes orders only from you",
   "author": {
     "name": "Ilya Utov"
