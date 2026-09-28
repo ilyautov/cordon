@@ -8902,7 +8902,9 @@ function asPaths(value) {
   return null;
 }
 var APPROVES = /(?:\bcordon(?:@[\w.^~-]+)?|\bcli\.m?js)\s+(?:(?:mcp\s+)?approve|init|policy\s+apply|hook)\b/iu;
-function mentions(command, marker) {
+function mentions(raw, rawMarker) {
+  const command = raw.replace(/[\\/]+/gu, "/").replace(/\/(?:\.\/)+/gu, "/");
+  const marker = rawMarker.replace(/[\\/]+/gu, "/");
   if (marker.includes("/")) return command.includes(marker);
   for (let at = command.indexOf(marker); at !== -1; at = command.indexOf(marker, at + 1)) {
     if (!/^\.*[\p{L}\p{N}_]/u.test(command.slice(at + marker.length))) return true;

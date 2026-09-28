@@ -51,7 +51,9 @@ export interface Dialect {
   /**
    * Whether every result event carries that field, so its absence means the
    * harness changed rather than the tool returned nothing. Claude Code's
-   * empty result without the field is pinned as legitimate work.
+   * empty result without the field is pinned as legitimate work. Codex and
+   * Kimi sent it on every live run; DeepSeek's bridge sets it to the text of
+   * the result, an empty string included (read from its source).
    */
   resultAlways: boolean
   /**

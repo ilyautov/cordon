@@ -454,9 +454,16 @@ const APPROVES = /(?:\bcordon(?:@[\w.^~-]+)?|\bcli\.m?js)\s+(?:(?:mcp\s+)?approv
  * www.kimi.com is the harness's site, and the substring refused every command
  * that fetched it (Kimi, reviewing the connectors). `-` still counts, so
  * `.kimi` covers `.kimi-code`; a glob character counts too. A marker with a
- * `/` in it is a path prefix and matches as one: `.claude/settings.json`.
+ * separator in it is a path prefix and matches as one, in either spelling:
+ * `.claude/settings.json`, `.claude\settings.json`.
  */
-function mentions(command: string, marker: string): boolean {
+function mentions(raw: string, rawMarker: string): boolean {
+  // Separators are folded first: `\` is how every Windows path is spelled,
+  // and `.claude\hooks` went past a marker written with `/` (Kimi, reviewing
+  // the connectors). A doubled separator and a `./` segment name the same
+  // directory.
+  const command = raw.replace(/[\\/]+/gu, '/').replace(/\/(?:\.\/)+/gu, '/')
+  const marker = rawMarker.replace(/[\\/]+/gu, '/')
   if (marker.includes('/')) return command.includes(marker)
   for (let at = command.indexOf(marker); at !== -1; at = command.indexOf(marker, at + 1)) {
     // Dots are skipped before looking: Windows drops trailing dots from a
