@@ -335,8 +335,12 @@ function selfProtection(parts: readonly Field[], ctx: GateContext): Decision | n
     // argument: `echo "mode: off" > ~/.cordon/policy.yaml`. Parsing the shell
     // command here is not an option, every shell parser can be worked around.
     // So the check is crude, by substring, and declared incomplete: assembly
-    // from variables gets around it. It closes the direct case; full closure
-    // comes only from the absence of `exec` in the certificate.
+    // from variables, brace expansion, `..` segments, and quotes, globs or a
+    // POSIX backslash escape placed inside a marker (`.claude\/settings`) get
+    // around it. Resolving escapes would refuse sed idioms that only carry the
+    // text (Codex and Kimi, reviewing the connectors). It closes the direct
+    // case; full closure comes only from the absence of `exec` in the
+    // certificate.
     if (COMMAND_KEYS.has(folded) && typeof value === 'string') {
       // An approval is the owner's word, and a shell can say it for them:
       // a pending call approved, a changed MCP server re-pinned. The same
