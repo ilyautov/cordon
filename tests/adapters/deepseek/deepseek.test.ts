@@ -124,7 +124,10 @@ describe('deepseek: results', () => {
   })
 
   it('the directory is still found however the command reaches it', () => {
-    for (const command of ['cat ~/.kimi/config.toml', 'cd ~/.kimi && cat config.toml', 'cat ~/.kimi*/config.toml', "cat '/home/u/.dsh'", 'cat ~/.claude/settings.json', 'cat ~/.kimi-code/config.toml']) {
+    for (const command of ['cat ~/.kimi/config.toml', 'cd ~/.kimi && cat config.toml', 'cat ~/.kimi*/config.toml', "cat '/home/u/.dsh'", 'cat ~/.claude/settings.json', 'cat ~/.kimi-code/config.toml',
+      // Codex, round twelve: Windows drops trailing dots from a segment, so
+      // .dsh. opens .dsh.
+      'type C:\\Users\\u\\.dsh.\\profiles\\web\\cordis.patch.yml', 'type C:\\Users\\u\\.kimi..\\config.toml', 'cat ~/.codex.']) {
       const out = run(home('read, exec'), pre('bash', { command }))
       expect(out.hookSpecificOutput.permissionDecisionReason, command).toMatch(/^self-protection/)
     }

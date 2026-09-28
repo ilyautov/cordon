@@ -450,7 +450,7 @@ const APPROVES = /(?:\bcordon(?:@[\w.^~-]+)?|\bcli\.m?js)\s+(?:(?:mcp\s+)?approv
 
 /**
  * Whether the command names the marker. A bare directory name followed by a
- * letter, a digit, `.` or `_` is part of another name: `.kimi` in
+ * letter, a digit or `_`, after any dots, is part of another name: `.kimi` in
  * www.kimi.com is the harness's site, and the substring refused every command
  * that fetched it (Kimi, reviewing the connectors). `-` still counts, so
  * `.kimi` covers `.kimi-code`; a glob character counts too. A marker with a
@@ -459,7 +459,10 @@ const APPROVES = /(?:\bcordon(?:@[\w.^~-]+)?|\bcli\.m?js)\s+(?:(?:mcp\s+)?approv
 function mentions(command: string, marker: string): boolean {
   if (marker.includes('/')) return command.includes(marker)
   for (let at = command.indexOf(marker); at !== -1; at = command.indexOf(marker, at + 1)) {
-    if (!/^[\p{L}\p{N}._]/u.test(command.slice(at + marker.length, at + marker.length + 1))) return true
+    // Dots are skipped before looking: Windows drops trailing dots from a
+    // segment, so `.dsh.\profiles` opens `.dsh` (Codex, reviewing the
+    // connectors). Only a name character after them makes another name.
+    if (!/^\.*[\p{L}\p{N}_]/u.test(command.slice(at + marker.length))) return true
   }
   return false
 }
