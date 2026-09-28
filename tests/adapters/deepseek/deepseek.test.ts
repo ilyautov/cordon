@@ -134,3 +134,14 @@ describe('deepseek: what the bridge sends as a prompt', () => {
     expect(run(dir, pre('write', { file_path: '/w/out.txt', content: 'x' })).hookSpecificOutput.permissionDecisionReason).toMatch(/read untrusted content/)
   })
 })
+
+describe('deepseek: a result the bridge flattened', () => {
+  it('an inert text does not clear it: the bridge drops what is not text', () => {
+    // Codex, review of this change: the bridge hands the hook only the text
+    // blocks, so "ok" may have come with an image the model saw.
+    const dir = home('read, network-egress, create, update', 'autonomous')
+    run(dir, { hook_event_name: 'PostToolUse', tool_name: 'mcp__web__open', tool_input: {}, tool_response: 'ok' })
+    expect(run(dir, pre('write', { file_path: '/w/unrequested.txt', content: 'x' })).hookSpecificOutput?.permissionDecisionReason).toMatch(/read untrusted content/)
+  })
+})
+

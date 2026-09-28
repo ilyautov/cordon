@@ -40,6 +40,12 @@ export interface Dialect {
    * and none lifts the hold an untrusted read put on the session.
    */
   humanPrompts: boolean
+  /**
+   * Whether the hook may be handed less of a result than the model reads.
+   * DeepSeek's bridge flattens a result to its text blocks, so an inert
+   * "ok" there says nothing about what came with it.
+   */
+  partialResults: boolean
   /** The field of PostToolUse that holds the result. */
   resultField: 'tool_response' | 'tool_output'
   /**
@@ -72,6 +78,7 @@ export const CLAUDE_CODE: Dialect = {
   rewrites: true,
   replaces: 'field',
   humanPrompts: true,
+  partialResults: false,
   resultField: 'tool_response',
   textless: named(),
   builtin: {},
@@ -84,6 +91,7 @@ export const CODEX: Dialect = {
   rewrites: false,
   replaces: 'block',
   humanPrompts: true,
+  partialResults: false,
   resultField: 'tool_response',
   textless: named('apply_patch'),
   builtin: CODEX_BUILTIN,
@@ -114,6 +122,7 @@ export const KIMI: Dialect = {
   rewrites: false,
   replaces: 'none',
   humanPrompts: true,
+  partialResults: false,
   resultField: 'tool_output',
   // AskUserQuestion is not here: its result is the human's answer, and
   // reading it as untrusted costs a stricter decision, never a looser one.
@@ -141,6 +150,8 @@ export const DEEPSEEK: Dialect = {
   // a background job's completion notice included, whose label the model
   // chose, and the payload carries no source (Codex, reviewing this dialect).
   humanPrompts: false,
+  // The bridge flattens a result to its text blocks (read from its source).
+  partialResults: true,
   resultField: 'tool_response',
   // A command it does not name is read as content: the stricter reading.
   textless: (call) => call.tool === 'write' || call.tool === 'edit'

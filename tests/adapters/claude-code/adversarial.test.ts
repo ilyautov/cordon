@@ -114,8 +114,9 @@ describe('input from the harness: ten ways of deceiving the adapter', () => {
       tool_response: { content: [{ type: 'text' }, { type: 'image', data: 'xx' }] },
     })
     expect(out).toEqual({})
-    // There is nothing to substitute, and there must be no mark either: there is no text here at all.
-    expect(reply(env, 'a5')).toEqual({})
+    // There is nothing to substitute, but the image is read by the model and
+    // not by Cordon, so the session is marked (Codex, reviewing the connectors).
+    expect(reply(env, 'a5').hookSpecificOutput?.permissionDecision).toBe('deny')
   })
 
   it('6. a very large output', () => {

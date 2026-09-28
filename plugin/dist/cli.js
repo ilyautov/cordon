@@ -13906,6 +13906,20 @@ var Cordon = class {
    * either — the model has already read it. Hence the mark: the next call
    * beyond reading is escalated.
    */
+  /**
+   * Marks the fact of a read whose content Cordon did not see: an image in
+   * a result, or a harness that hands the hook only the text of what the
+   * model got. The inert exemption in `observe` rests on having seen the
+   * whole result, so it cannot apply here; an untrusted source marks the
+   * session whatever its text said.
+   */
+  observeUnseen(source) {
+    if (source.trust !== "untrusted") return;
+    this.exposure = { at: this.turn, source: source.label };
+    if (source.kind !== "mcp-description") this.lastSource = source;
+    this.readIds = noteRead(this.readIds);
+    this.persist();
+  }
   markUnredacted() {
     this.unredacted = true;
     this.readIds = noteRead(this.readIds);
@@ -14589,12 +14603,14 @@ var MAX_DEPTH3 = 12;
 var MAX_NODES = 2e4;
 var MAX_TEXT = 8e6;
 var TOKEN_LIMIT = 64;
+var MEDIA_TYPES = /* @__PURE__ */ new Set(["image", "audio", "input_image", "input_audio", "image_url"]);
+var MEDIA_KEYS = /* @__PURE__ */ new Set(["blob", "inlinedata", "filedata", "imageurl"]);
 function extractText(tool, response, textless = false) {
-  if (textless || TEXTLESS.has(tool)) return { known: true, parts: [] };
-  if (typeof response === "string") return { known: true, parts: [{ text: response, content: true }] };
-  const scan = { parts: [], known: true, nodes: 0, size: 0 };
+  if (textless || TEXTLESS.has(tool)) return { known: true, parts: [], unseen: false };
+  if (typeof response === "string") return { known: true, parts: [{ text: response, content: true }], unseen: false };
+  const scan = { parts: [], known: true, nodes: 0, size: 0, unseen: false };
   visit2(response, "", 0, scan);
-  return scan.known ? { known: true, parts: scan.parts } : { known: false, parts: [] };
+  return scan.known ? { known: true, parts: scan.parts, unseen: scan.unseen } : { known: false, parts: [], unseen: false };
 }
 function replaceText(tool, response, parts) {
   const found2 = extractText(tool, response);
@@ -14630,7 +14646,12 @@ function visit2(node, key, depth, scan) {
     return;
   }
   if (typeof node === "object" && node !== null) {
-    for (const [name, value] of Object.entries(node)) visit2(value, name, depth + 1, scan);
+    const type = node.type;
+    if (typeof type === "string" && MEDIA_TYPES.has(type.toLowerCase())) scan.unseen = true;
+    for (const [name, value] of Object.entries(node)) {
+      if (MEDIA_KEYS.has(fold(name))) scan.unseen = true;
+      visit2(value, name, depth + 1, scan);
+    }
   }
 }
 function rebuild(node, key, depth, parts, cursor) {
@@ -14687,6 +14708,7 @@ var CLAUDE_CODE = {
   rewrites: true,
   replaces: "field",
   humanPrompts: true,
+  partialResults: false,
   resultField: "tool_response",
   textless: named(),
   builtin: {},
@@ -14698,6 +14720,7 @@ var CODEX = {
   rewrites: false,
   replaces: "block",
   humanPrompts: true,
+  partialResults: false,
   resultField: "tool_response",
   textless: named("apply_patch"),
   builtin: CODEX_BUILTIN,
@@ -14719,6 +14742,7 @@ var KIMI = {
   rewrites: false,
   replaces: "none",
   humanPrompts: true,
+  partialResults: false,
   resultField: "tool_output",
   // AskUserQuestion is not here: its result is the human's answer, and
   // reading it as untrusted costs a stricter decision, never a looser one.
@@ -14738,6 +14762,8 @@ var DEEPSEEK = {
   // a background job's completion notice included, whose label the model
   // chose, and the payload carries no source (Codex, reviewing this dialect).
   humanPrompts: false,
+  // The bridge flattens a result to its text blocks (read from its source).
+  partialResults: true,
   resultField: "tool_response",
   // A command it does not name is read as content: the stricter reading.
   textless: (call) => call.tool === "write" || call.tool === "edit" || call.tool === "str_replace_editor" && typeof call.args.command === "string" && EDITS.has(call.args.command),
@@ -14960,6 +14986,8 @@ function observe(cordon, event, env, dialect) {
     if (envelope.text !== part.text) changed2 = true;
     return envelope.text;
   });
+  if (extracted.unseen) cordon.markUnredacted();
+  else if (dialect.partialResults && !dialect.textless(event.call)) cordon.observeUnseen(source);
   cordon.recordLookup(event.call, cleaned.filter((_, index) => extracted.parts[index].content));
   if (!substitute) return report(cordon, event.call.tool, source, found2, void 0, dialect.replaces !== "none");
   if (!changed2) return {};

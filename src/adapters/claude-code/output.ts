@@ -18,6 +18,13 @@ export interface Extracted {
   /** Whether the shape is known. An unknown one must not be substituted. */
   known: boolean
   parts: Piece[]
+  /**
+   * Whether the result carries a part that is not text: an image, audio, a
+   * binary resource. The model may read an instruction off it that no string
+   * here holds, so an inert text beside it does not make the result inert
+   * (Codex, reviewing the connectors: "ok" plus an image).
+   */
+  unseen: boolean
 }
 
 /**
@@ -102,7 +109,16 @@ interface Scan {
   known: boolean
   nodes: number
   size: number
+  unseen: boolean
 }
+
+/**
+ * Block types and fields that carry media rather than text, across MCP
+ * (`image`, `audio`, a resource's `blob`), Gemini (`inlineData`, `fileData`)
+ * and the OpenAI shapes Codex relays (`input_image`, `image_url`).
+ */
+const MEDIA_TYPES: ReadonlySet<string> = new Set(['image', 'audio', 'input_image', 'input_audio', 'image_url'])
+const MEDIA_KEYS: ReadonlySet<string> = new Set(['blob', 'inlinedata', 'filedata', 'imageurl'])
 
 /**
  * Pulls the text pieces out of a tool's output, remembering the shape.
@@ -123,12 +139,12 @@ export function extractText(tool: string, response: unknown, textless = false): 
   // Before the string case: Kimi and Codex report a write as a plain string
   // ("Wrote 1 bytes to notes.txt"), and read as content it marked the session
   // as having read something untrusted after every edit the model made.
-  if (textless || TEXTLESS.has(tool)) return { known: true, parts: [] }
-  if (typeof response === 'string') return { known: true, parts: [{ text: response, content: true }] }
+  if (textless || TEXTLESS.has(tool)) return { known: true, parts: [], unseen: false }
+  if (typeof response === 'string') return { known: true, parts: [{ text: response, content: true }], unseen: false }
 
-  const scan: Scan = { parts: [], known: true, nodes: 0, size: 0 }
+  const scan: Scan = { parts: [], known: true, nodes: 0, size: 0, unseen: false }
   visit(response, '', 0, scan)
-  return scan.known ? { known: true, parts: scan.parts } : { known: false, parts: [] }
+  return scan.known ? { known: true, parts: scan.parts, unseen: scan.unseen } : { known: false, parts: [], unseen: false }
 }
 
 /**
@@ -180,7 +196,12 @@ function visit(node: unknown, key: string, depth: number, scan: Scan): void {
   }
 
   if (typeof node === 'object' && node !== null) {
-    for (const [name, value] of Object.entries(node)) visit(value, name, depth + 1, scan)
+    const type = (node as { type?: unknown }).type
+    if (typeof type === 'string' && MEDIA_TYPES.has(type.toLowerCase())) scan.unseen = true
+    for (const [name, value] of Object.entries(node)) {
+      if (MEDIA_KEYS.has(fold(name))) scan.unseen = true
+      visit(value, name, depth + 1, scan)
+    }
   }
 
   // A number, a boolean, null and an absent value carry no text and cannot

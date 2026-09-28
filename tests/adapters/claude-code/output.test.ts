@@ -4,7 +4,7 @@ import { extractText, replaceText } from '../../../src/adapters/claude-code/outp
 describe('extractText', () => {
   it('a string output is one piece', () => {
     expect(extractText('Read', 'the file contents'))
-      .toEqual({ known: true, parts: [{ text: 'the file contents', content: true }] })
+      .toEqual({ known: true, parts: [{ text: 'the file contents', content: true }], unseen: false })
   })
 
   it('a Bash output is two streams', () => {
@@ -118,8 +118,8 @@ describe('extractText: the shapes the plan got wrong', () => {
   })
 
   it('an empty result is a known shape', () => {
-    expect(extractText('mcp__x__y', undefined)).toEqual({ known: true, parts: [] })
-    expect(extractText('mcp__x__y', null)).toEqual({ known: true, parts: [] })
+    expect(extractText('mcp__x__y', undefined)).toEqual({ known: true, parts: [], unseen: false })
+    expect(extractText('mcp__x__y', null)).toEqual({ known: true, parts: [], unseen: false })
   })
 
   it('a content block without a text field is not passed off as known', () => {
@@ -208,5 +208,17 @@ describe('extractText: cleaning is not the same question as provenance', () => {
     const result = extractText('WebFetch', { url: 'https://a.example/x', path: '/tmp/a.md' })
     expect(result.known).toBe(true)
     expect(result.parts).toEqual([])
+  })
+})
+
+describe('extractText: parts that are not text', () => {
+  it('an image, audio or a binary resource is reported as unseen', () => {
+    expect(extractText('mcp__x__y', { content: [{ type: 'text', text: 'ok' }, { type: 'image', data: 'AAAA', mimeType: 'image/png' }] }).unseen).toBe(true)
+    expect(extractText('mcp__x__y', { content: [{ type: 'audio', data: 'AAAA', mimeType: 'audio/wav' }] }).unseen).toBe(true)
+    expect(extractText('mcp__x__y', { content: [{ type: 'resource', resource: { uri: 'file:///a.bin', blob: 'AAAA' } }] }).unseen).toBe(true)
+  })
+
+  it('text alone is not', () => {
+    expect(extractText('mcp__x__y', { content: [{ type: 'text', text: 'a photograph of an image' }] }).unseen).toBe(false)
   })
 })

@@ -614,6 +614,21 @@ export class Cordon {
    * either — the model has already read it. Hence the mark: the next call
    * beyond reading is escalated.
    */
+  /**
+   * Marks the fact of a read whose content Cordon did not see: an image in
+   * a result, or a harness that hands the hook only the text of what the
+   * model got. The inert exemption in `observe` rests on having seen the
+   * whole result, so it cannot apply here; an untrusted source marks the
+   * session whatever its text said.
+   */
+  observeUnseen(source: Source): void {
+    if (source.trust !== 'untrusted') return
+    this.exposure = { at: this.turn, source: source.label }
+    if (source.kind !== 'mcp-description') this.lastSource = source
+    this.readIds = noteRead(this.readIds)
+    this.persist()
+  }
+
   markUnredacted(): void {
     this.unredacted = true
     this.readIds = noteRead(this.readIds)

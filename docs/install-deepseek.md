@@ -50,6 +50,6 @@ Then, in a scratch directory, ask the agent to read https://example.com and save
 - **No silent cut.** The bridge logs changed arguments and ignores them, so a call Cordon would cut is refused.
 - **A cleaned result looks like a tool error.** A rendered result with a hidden layer (a fetched page, an MCP result declared `rendered`) is replaced through the bridge's block, which the harness turns into an error result carrying the cleaned text.
 - **Nothing reaches you in the session.** The bridge logs a hook's `systemMessage` and shows it to no one. What Cordon found in a file that was read, which it reports rather than cuts, is only in the journal: `cordon log`.
-- **Only text reaches the hook.** The bridge flattens a result to its text blocks. Anything else in it reaches the model without Cordon seeing it.
+- **Only text reaches the hook.** The bridge flattens a result to its text blocks, so anything else in it reaches the model without Cordon seeing it. Cordon therefore counts every untrusted result as read, even a bare `ok`, which elsewhere leaves the session unmarked.
 - **A hook that fails lets the call through**, as in every harness measured.
 - `str_replace_editor` views, creates and edits through one tool, so it is classed as read, create and update together: a read-only profile refuses its `view`, and `read` does the same job.

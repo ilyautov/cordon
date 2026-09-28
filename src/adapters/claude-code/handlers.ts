@@ -243,6 +243,13 @@ function observe(
     if (envelope.text !== part.text) changed = true
     return envelope.text
   })
+  // Part of what the model read never reached the strings above. The core
+  // decides what that means; the adapter only says it happened. An image is
+  // answered as in the other adapters: content that could not be cleaned.
+  // A bridge that flattens results is not known to have dropped anything, so
+  // it only loses the inert exemption.
+  if (extracted.unseen) cordon.markUnredacted()
+  else if (dialect.partialResults && !dialect.textless(event.call)) cordon.observeUnseen(source)
   // A lookup the policy declares binds names to values for the gate. The
   // core decides what that means; the adapter only hands over the text.
   cordon.recordLookup(event.call, cleaned.filter((_, index) => extracted.parts[index]!.content))

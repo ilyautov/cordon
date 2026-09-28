@@ -191,3 +191,19 @@ describe('codex: an identifier field that carries prose', () => {
   })
 })
 
+describe('codex: a result with a part Cordon cannot read', () => {
+  it('an image beside an inert text holds the session, as in the other adapters', () => {
+    // Codex, review of this change: "ok" plus an image read as an inert
+    // result, and the image may carry the instruction.
+    const dir = home('read, create, update', 'autonomous')
+    run(dir, { hook_event_name: 'UserPromptSubmit', prompt: 'look up this item' })
+    run(dir, {
+      hook_event_name: 'PostToolUse', tool_name: 'mcp__web__open', tool_input: {},
+      tool_response: { content: [{ type: 'text', text: 'ok' }, { type: 'image', data: 'iVBORw0KGgo=', mimeType: 'image/png' }] },
+    })
+    const out = run(dir, pre('apply_patch', patch('*** Add File: /w/unrequested.txt', '+x')))
+    expect(out.hookSpecificOutput?.permissionDecision).toBe('deny')
+    expect(out.hookSpecificOutput?.permissionDecisionReason).toMatch(/could not be stripped/)
+  })
+})
+
