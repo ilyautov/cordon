@@ -78,12 +78,39 @@ export interface GateContext {
 
 export function gate(call: ToolCall, ctx: GateContext): Decision {
   try {
-    return decide(call, ctx)
+    return held(call, ctx, decide(call, ctx))
   } catch (error) {
     // A core error is a deny. The only exception handler in the
     // whole module, and everything leads here.
     return { kind: 'deny', rule: 'failure', reason: `Cordon failure: ${(error as Error).message}` }
   }
+}
+
+/**
+ * An agent refused again and again in one turn is where drift begins: it
+ * goes looking for another way to the same end (NVIDIA, on agents that left
+ * their test environments). So past the policy's count, a call that acts
+ * goes back to the human, as a question or a one-time approval, never a dead
+ * end; reading goes on.
+ *
+ * Asked of the whole decision, after every rule: the hold only ever turns
+ * what would have gone through into a question. Run before them, it filed a
+ * call provenance or the exposure rule would have caught under its own
+ * precaution tier with no source, and the agent was never told why (review
+ * of this rule).
+ */
+function held(call: ToolCall, ctx: GateContext, decision: Decision): Decision {
+  if (decision.kind !== 'allow' && decision.kind !== 'rewrite') return decision
+  const limit = ctx.policy.refusals ?? 0
+  if (limit === 0 || (ctx.refusals ?? 0) < limit) return decision
+  const verdict = classify(call, ctx.policy.tools)
+  if (verdict.classified && verdict.effects.every((effect) => effect === 'read' || effect === 'summarize')) return decision
+  return escalate(
+    ctx,
+    'refusals',
+    `${ctx.refusals} calls were refused since your last message, so every call that acts waits for you; ` +
+      'the agent should stop and say what it was trying to do rather than look for another way',
+  )
 }
 
 function decide(call: ToolCall, ctx: GateContext): Decision {
@@ -140,23 +167,6 @@ function decide(call: ToolCall, ctx: GateContext): Decision {
         ctx.unredacted === true
           ? 'a hidden layer in a tool result could not be stripped'
           : 'provenance is full: this session read more than the store holds, and stopped remembering',
-      )
-    }
-  }
-
-  // An agent refused again and again in one turn is where drift begins: it
-  // goes looking for another way to the same end (NVIDIA, on agents that
-  // left their test environments). Reading on is harmless; acting goes back
-  // to the human, as a question or a one-time approval, never a dead end.
-  const limit = ctx.policy.refusals ?? 0
-  if (limit > 0 && (ctx.refusals ?? 0) >= limit) {
-    const reads = verdict.classified && verdict.effects.every((effect) => effect === 'read' || effect === 'summarize')
-    if (!reads) {
-      return escalate(
-        ctx,
-        'refusals',
-        `${ctx.refusals} calls were refused since your last message, so every call that acts waits for you; ` +
-          'the agent should stop and say what it was trying to do rather than look for another way',
       )
     }
   }

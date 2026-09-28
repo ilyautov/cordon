@@ -135,3 +135,44 @@ describe('what a refusal tells the agent', () => {
     expect(readFileSync(log, 'utf8')).not.toMatch(/another way to the same end/i)
   })
 })
+
+describe('the hold never weakens a more specific refusal', () => {
+  // Review of 746c535: the hold ran before every other rule, so a call the
+  // certificate or provenance would have refused was filed under refusals,
+  // with a precaution tier and no source, and the agent was never told why.
+  it('a call outside the certificate keeps its own rule under the hold', () => {
+    const { open } = make('autonomous')
+    const cordon = open()
+    cordon.onUserPrompt('tidy up the notes')
+    for (let i = 0; i < 3; i++) cordon.gate(DELETE)
+    const again = cordon.gate(DELETE)
+    expect(again.kind === 'deny' && again.rule).toBe('certificate')
+  })
+})
+
+describe('the owner hears when the hold begins, however the count got there', () => {
+  it('three hooks that each saw a count of one: the next one to look sends the alert', () => {
+    const { open, log } = make('autonomous')
+    open().onUserPrompt('tidy up the notes')
+    const parallel = [open(), open(), open()]
+    // Each writes its piece without having seen the others.
+    for (const cordon of parallel) cordon.gate(DELETE)
+    const events = () => readFileSync(log, 'utf8').trim().split('\n').map((line) => JSON.parse(line))
+    open().gate(DELETE)
+    expect(events().filter((event) => event.decision === 'refusals-hold')).toHaveLength(1)
+    open().gate(DELETE)
+    expect(events().filter((event) => event.decision === 'refusals-hold')).toHaveLength(1)
+  })
+
+  it('refusals written by parallel hooks still raise the alert once the count crosses the limit', () => {
+    // Review of 746c535: three hooks refusing at once each saw a count of
+    // one, and the next saw four; an alert on exactly three never fired.
+    const { open, log } = make('autonomous')
+    open().onUserPrompt('tidy up the notes')
+    const parallel = [open(), open(), open()]
+    for (const cordon of parallel) cordon.gate(DELETE)
+    open().gate(DELETE)
+    const events = readFileSync(log, 'utf8').trim().split('\n').map((line) => JSON.parse(line))
+    expect(events.filter((event) => event.decision === 'refusals-hold').length).toBeGreaterThanOrEqual(1)
+  })
+})

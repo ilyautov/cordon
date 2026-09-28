@@ -8691,10 +8691,22 @@ function renderFooter(marks) {
 // src/gate/gate.ts
 function gate(call, ctx) {
   try {
-    return decide(call, ctx);
+    return held(call, ctx, decide(call, ctx));
   } catch (error) {
     return { kind: "deny", rule: "failure", reason: `Cordon failure: ${error.message}` };
   }
+}
+function held(call, ctx, decision) {
+  if (decision.kind !== "allow" && decision.kind !== "rewrite") return decision;
+  const limit = ctx.policy.refusals ?? 0;
+  if (limit === 0 || (ctx.refusals ?? 0) < limit) return decision;
+  const verdict = classify(call, ctx.policy.tools);
+  if (verdict.classified && verdict.effects.every((effect) => effect === "read" || effect === "summarize")) return decision;
+  return escalate(
+    ctx,
+    "refusals",
+    `${ctx.refusals} calls were refused since your last message, so every call that acts waits for you; the agent should stop and say what it was trying to do rather than look for another way`
+  );
 }
 function decide(call, ctx) {
   if (typeof call?.tool !== "string" || call.tool === "") {
@@ -8705,19 +8717,19 @@ function decide(call, ctx) {
     return { kind: "deny", rule: "malformed", reason: `the arguments of call ${call.tool} did not arrive as an object` };
   }
   const own2 = args;
-  const held = ctx.heldTools?.get(call.tool);
-  if (held !== void 0 && held.why === "shadow") {
+  const held2 = ctx.heldTools?.get(call.tool);
+  if (held2 !== void 0 && held2.why === "shadow") {
     return {
       kind: "deny",
       rule: "pin",
-      reason: `the MCP tool ${call.tool} imitates ${held.imitates ?? "another server's tool"} with lookalike characters (${held.server}); approving the server does not release it, remove the server or ask its author to rename the tool`
+      reason: `the MCP tool ${call.tool} imitates ${held2.imitates ?? "another server's tool"} with lookalike characters (${held2.server}); approving the server does not release it, remove the server or ask its author to rename the tool`
     };
   }
-  if (held !== void 0) {
+  if (held2 !== void 0) {
     return {
       kind: "deny",
       rule: "pin",
-      reason: `the MCP tool ${call.tool} ${held.why === "new" ? "appeared" : "changed"} after the server was approved (${held.server}); review the server, then run "cordon mcp approve -- ${held.server}"`
+      reason: `the MCP tool ${call.tool} ${held2.why === "new" ? "appeared" : "changed"} after the server was approved (${held2.server}); review the server, then run "cordon mcp approve -- ${held2.server}"`
     };
   }
   const parts = fields(own2);
@@ -8731,17 +8743,6 @@ function decide(call, ctx) {
         ctx,
         ctx.unredacted === true ? "unscanned" : "saturation",
         ctx.unredacted === true ? "a hidden layer in a tool result could not be stripped" : "provenance is full: this session read more than the store holds, and stopped remembering"
-      );
-    }
-  }
-  const limit = ctx.policy.refusals ?? 0;
-  if (limit > 0 && (ctx.refusals ?? 0) >= limit) {
-    const reads = verdict.classified && verdict.effects.every((effect) => effect === "read" || effect === "summarize");
-    if (!reads) {
-      return escalate(
-        ctx,
-        "refusals",
-        `${ctx.refusals} calls were refused since your last message, so every call that acts waits for you; the agent should stop and say what it was trying to do rather than look for another way`
       );
     }
   }
@@ -9253,13 +9254,13 @@ function comparePins(pinned2, listed) {
     for (const tool of listed) pins[tool.name] = fingerprint(tool);
     return { pins, held: [], firstSight: true };
   }
-  const held = [];
+  const held2 = [];
   for (const tool of listed) {
     const approved = Object.hasOwn(pinned2, tool.name) ? pinned2[tool.name] : void 0;
-    if (approved === void 0) held.push({ name: tool.name, why: "new" });
-    else if (approved !== fingerprint(tool)) held.push({ name: tool.name, why: "changed" });
+    if (approved === void 0) held2.push({ name: tool.name, why: "new" });
+    else if (approved !== fingerprint(tool)) held2.push({ name: tool.name, why: "changed" });
   }
-  return { pins: pinned2, held, firstSight: false };
+  return { pins: pinned2, held: held2, firstSight: false };
 }
 function stable(value) {
   if (Array.isArray(value)) return `[${value.map(stable).join(",")}]`;
@@ -13268,6 +13269,7 @@ var SessionStore = class {
     const unredacted = Object.hasOwn(data, "unredacted") ? data["unredacted"] : void 0;
     const readIds = Object.hasOwn(data, "readIds") ? data["readIds"] : void 0;
     const refusalIds = Object.hasOwn(data, "refusalIds") ? data["refusalIds"] : void 0;
+    const refusalAlert = Object.hasOwn(data, "refusalAlert") ? data["refusalAlert"] : void 0;
     const directive = Object.hasOwn(data, "directive") ? data["directive"] : void 0;
     const exposure = Object.hasOwn(data, "exposure") ? data["exposure"] : void 0;
     const userAtoms = Object.hasOwn(data, "userAtoms") ? data["userAtoms"] : void 0;
@@ -13283,6 +13285,9 @@ var SessionStore = class {
       throw new Error(`the session state ${shown(sessionId)} is incompatible`);
     }
     if (readIds !== void 0 && (!Array.isArray(readIds) || readIds.some((id) => typeof id !== "string" || !READ_ID.test(id)))) {
+      throw new Error(`the session state ${shown(sessionId)} is incompatible`);
+    }
+    if (refusalAlert !== void 0 && refusalAlert !== null && (typeof refusalAlert !== "number" || !Number.isInteger(refusalAlert) || refusalAlert < 0)) {
       throw new Error(`the session state ${shown(sessionId)} is incompatible`);
     }
     if (refusalIds !== void 0 && (!Array.isArray(refusalIds) || refusalIds.some((id) => typeof id !== "string" || !REFUSAL_ID.test(id)))) {
@@ -13318,6 +13323,7 @@ var SessionStore = class {
       unredacted: unredacted === true,
       readIds: Array.isArray(readIds) ? readIds.slice(-MAX_READ_IDS) : [],
       refusalIds: Array.isArray(refusalIds) ? refusalIds.slice(-MAX_REFUSAL_IDS) : [],
+      refusalAlert: typeof refusalAlert === "number" ? refusalAlert : null,
       directive: Array.isArray(directive) ? directive : null,
       exposure: isExposure(exposure) ? exposure : null,
       userAtoms: Array.isArray(userAtoms) ? userAtoms.slice(-MAX_USER_ATOMS) : [],
@@ -13338,6 +13344,7 @@ var SessionStore = class {
       unredacted: state.unredacted === true,
       readIds: (state.readIds ?? []).slice(-MAX_READ_IDS),
       refusalIds: (state.refusalIds ?? []).slice(-MAX_REFUSAL_IDS),
+      refusalAlert: state.refusalAlert ?? null,
       directive: state.directive ?? null,
       exposure: state.exposure ?? null,
       userAtoms: (state.userAtoms ?? []).slice(-MAX_USER_ATOMS),
@@ -13451,6 +13458,7 @@ function mergeStates(into, other) {
     unredacted: into.unredacted === true || other.unredacted === true,
     readIds: [.../* @__PURE__ */ new Set([...into.readIds ?? [], ...other.readIds ?? []])].sort().slice(-MAX_READ_IDS),
     refusalIds: [.../* @__PURE__ */ new Set([...into.refusalIds ?? [], ...other.refusalIds ?? []])].slice(-MAX_REFUSAL_IDS),
+    refusalAlert: Math.max(into.refusalAlert ?? -1, other.refusalAlert ?? -1) < 0 ? null : Math.max(into.refusalAlert ?? -1, other.refusalAlert ?? -1),
     directive: mergeDirectives(into.directive ?? null, other.directive ?? null),
     exposure: into.exposure ?? other.exposure ?? null,
     userAtoms: mergeUserAtoms(into.userAtoms ?? [], other.userAtoms ?? []),
@@ -13600,6 +13608,8 @@ var Cordon = class {
   readIds = [];
   /** One id per call refused to the agent; see SessionState.refusalIds. */
   refusalIds = [];
+  /** The turn whose refusals-hold alert was sent; see SessionState.refusalAlert. */
+  refusalAlert = null;
   directive = null;
   lastSource = null;
   /**
@@ -13652,6 +13662,7 @@ var Cordon = class {
     this.unredacted = restored.unredacted === true;
     this.readIds = restored.readIds ?? [];
     this.refusalIds = restored.refusalIds ?? [];
+    this.refusalAlert = restored.refusalAlert ?? null;
     this.exposure = restored.exposure ?? null;
     this.userAtoms = restored.userAtoms ?? [];
     this.userNames = restored.userNames ?? [];
@@ -13768,13 +13779,13 @@ var Cordon = class {
     if (result.firstSight) store.save(command, result.pins);
     const imitations = shadows(listed, store.others(command));
     const shadowed = new Set(imitations.map((shadow) => shadow.name));
-    const held = [
+    const held2 = [
       ...imitations.map((shadow) => ({ name: shadow.name, why: "shadow", imitates: shadow.imitates })),
       ...result.held.filter((tool) => !shadowed.has(tool.name))
     ];
     const server2 = command.join(" ");
-    this.heldTools = new Map(held.map((tool) => [tool.name, { why: tool.why, server: server2, ...tool.imitates === void 0 ? {} : { imitates: tool.imitates } }]));
-    for (const tool of held) {
+    this.heldTools = new Map(held2.map((tool) => [tool.name, { why: tool.why, server: server2, ...tool.imitates === void 0 ? {} : { imitates: tool.imitates } }]));
+    for (const tool of held2) {
       const other = imitations.find((shadow) => shadow.name === tool.name);
       this.notifier.notify({
         at: (/* @__PURE__ */ new Date()).toISOString(),
@@ -13785,7 +13796,7 @@ var Cordon = class {
         ...labelled("pin")
       });
     }
-    return held;
+    return held2;
   }
   /** The owner's approval: the server's next start pins its tools afresh. */
   static approveServer(cordonHome2, command) {
@@ -13803,9 +13814,11 @@ var Cordon = class {
     if (decision.kind !== "deny") return decision;
     const told = { ...decision, reason: `${decision.reason.replace(/\.+$/u, "")}. ${STOP}` };
     this.refusalIds = [...this.refusalIds, refusalId(this.turn)].slice(-MAX_REFUSAL_IDS);
-    this.persist();
     const limit = this.policy.refusals ?? 0;
-    if (limit > 0 && refusalsIn(this.refusalIds, this.turn) === limit) {
+    const owed = limit > 0 && refusalsIn(this.refusalIds, this.turn) >= limit && this.refusalAlert !== this.turn;
+    if (owed) this.refusalAlert = this.turn;
+    this.persist();
+    if (owed) {
       this.notifier.notify({
         at: (/* @__PURE__ */ new Date()).toISOString(),
         decision: "refusals-hold",
@@ -13922,9 +13935,9 @@ var Cordon = class {
         ...labelled(decision.rule)
       });
     }
-    const held = this.reserve(call);
-    if (held.refusal !== null) {
-      const refusal = held.refusal;
+    const held2 = this.reserve(call);
+    if (held2.refusal !== null) {
+      const refusal = held2.refusal;
       this.notifier.notify({
         at: (/* @__PURE__ */ new Date()).toISOString(),
         decision: "deny",
@@ -13939,7 +13952,7 @@ var Cordon = class {
     const taken = approvals.take(id, binding);
     if (!taken.taken) {
       try {
-        held.release();
+        held2.release();
       } catch {
       }
     }
@@ -14121,8 +14134,8 @@ var Cordon = class {
    */
   spend(call, decision) {
     if (decision.kind !== "allow" && decision.kind !== "rewrite" && decision.kind !== "ask") return decision;
-    const held = this.reserve(call);
-    return held.refusal ?? decision;
+    const held2 = this.reserve(call);
+    return held2.refusal ?? decision;
   }
   reserve(call) {
     const budgets = this.policy.budgets ?? [];
@@ -14132,9 +14145,9 @@ var Cordon = class {
     const verdict = classify(call, this.policy.tools);
     const effects = verdict.classified ? verdict.effects : [];
     const store = new BudgetStore(this.cordonHome);
-    const held = [];
+    const held2 = [];
     const release = () => {
-      for (const undo of held) undo();
+      for (const undo of held2) undo();
     };
     for (const budget of budgets) {
       if (!effects.includes(budget.effect)) continue;
@@ -14171,7 +14184,7 @@ var Cordon = class {
           }
         };
       }
-      held.push(reservation.release);
+      held2.push(reservation.release);
     }
     return { refusal: null, release };
   }
@@ -14250,6 +14263,7 @@ var Cordon = class {
       unredacted: this.unredacted,
       readIds: this.readIds,
       refusalIds: this.refusalIds,
+      refusalAlert: this.refusalAlert,
       directive: this.directive,
       exposure: this.exposure,
       userAtoms: this.userAtoms,
@@ -15102,10 +15116,10 @@ function display(event, env) {
 }
 function unscanned(event, cordonHome2, dialect, error) {
   const said = `Cordon failure: ${error.message}. The result of ${event.call.tool} was not scanned`;
-  const held = holdSession(cordonHome2, event.sessionId);
-  const after = held ? "calls that act are held until your next message" : "the hold on calls that act could not be recorded either, so it will not outlast this failure; stop the agent if the result matters";
+  const held2 = holdSession(cordonHome2, event.sessionId);
+  const after = held2 ? "calls that act are held until your next message" : "the hold on calls that act could not be recorded either, so it will not outlast this failure; stop the agent if the result matters";
   if (dialect.replaces === "block") {
-    return { decision: "block", reason: `${said}, so it is withheld${held ? "" : `; ${after}`}.`, ...held ? {} : { systemMessage: `${said}; ${after}.` } };
+    return { decision: "block", reason: `${said}, so it is withheld${held2 ? "" : `; ${after}`}.`, ...held2 ? {} : { systemMessage: `${said}; ${after}.` } };
   }
   return { systemMessage: `${said}; ${after}.` };
 }
@@ -15391,8 +15405,8 @@ function handle2(event, env) {
 }
 function unscanned2(event, cordonHome2, error) {
   const said = `Cordon failure: ${error.message}. The result of ${event.call.tool} was not scanned, so it is withheld`;
-  const held = holdSession(cordonHome2, event.sessionId);
-  const after = held ? "calls that act are held until your next message" : "the hold on calls that act could not be recorded either, so it will not outlast this failure; stop the agent if the result matters";
+  const held2 = holdSession(cordonHome2, event.sessionId);
+  const after = held2 ? "calls that act are held until your next message" : "the hold on calls that act could not be recorded either, so it will not outlast this failure; stop the agent if the result matters";
   return { decision: "deny", reason: `${said}.`, systemMessage: `${said}; ${after}.` };
 }
 function silentOnFailure2(event) {
@@ -15763,8 +15777,8 @@ function observeToolList(value, cordon, policy, command) {
   const listed = result?.["tools"];
   if (result === null || !Array.isArray(listed)) return value;
   const named2 = listed.map((tool) => asRecord(tool)).filter((tool) => tool !== null && typeof tool["name"] === "string").map((tool) => ({ name: tool["name"], description: tool["description"], inputSchema: tool["inputSchema"] }));
-  const held = new Set(cordon.admitTools(command, named2).map((tool) => tool.name));
-  const tools = listed.filter((tool) => !held.has(String(asRecord(tool)?.["name"])));
+  const held2 = new Set(cordon.admitTools(command, named2).map((tool) => tool.name));
+  const tools = listed.filter((tool) => !held2.has(String(asRecord(tool)?.["name"])));
   value = { ...value, result: { ...result, tools } };
   for (const tool of tools) {
     const entry = asRecord(tool);

@@ -122,6 +122,8 @@ export class Cordon {
   private readIds: string[] = []
   /** One id per call refused to the agent; see SessionState.refusalIds. */
   private refusalIds: string[] = []
+  /** The turn whose refusals-hold alert was sent; see SessionState.refusalAlert. */
+  private refusalAlert: number | null = null
   private directive: EffectClass[] | null = null
   private lastSource: Source | null = null
   /**
@@ -187,6 +189,7 @@ export class Cordon {
     this.unredacted = restored.unredacted === true
     this.readIds = restored.readIds ?? []
     this.refusalIds = restored.refusalIds ?? []
+    this.refusalAlert = restored.refusalAlert ?? null
     this.exposure = restored.exposure ?? null
     this.userAtoms = restored.userAtoms ?? []
     this.userNames = restored.userNames ?? []
@@ -422,9 +425,17 @@ export class Cordon {
     // and the owner's journal keeps the reason as the gate gave it.
     const told: Decision = { ...decision, reason: `${decision.reason.replace(/\.+$/u, '')}. ${STOP}` }
     this.refusalIds = [...this.refusalIds, refusalId(this.turn)].slice(-MAX_REFUSAL_IDS)
-    this.persist()
     const limit = this.policy.refusals ?? 0
-    if (limit > 0 && refusalsIn(this.refusalIds, this.turn) === limit) {
+    // The alert is owed once per turn and remembered in the state, not
+    // inferred from landing on the limit: hooks refusing in parallel each
+    // count their own, and the merged count stepped over the limit without
+    // ever equalling it, so the alert never came (review of this rule).
+    // Whoever first sees the count at the limit with no alert sent sends it;
+    // two at once send it twice, which is the cheaper error.
+    const owed = limit > 0 && refusalsIn(this.refusalIds, this.turn) >= limit && this.refusalAlert !== this.turn
+    if (owed) this.refusalAlert = this.turn
+    this.persist()
+    if (owed) {
       this.notifier.notify({
         at: new Date().toISOString(),
         decision: 'refusals-hold',
@@ -941,6 +952,7 @@ export class Cordon {
       unredacted: this.unredacted,
       readIds: this.readIds,
       refusalIds: this.refusalIds,
+      refusalAlert: this.refusalAlert,
       directive: this.directive,
       exposure: this.exposure,
       userAtoms: this.userAtoms,

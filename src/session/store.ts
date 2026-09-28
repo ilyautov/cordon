@@ -39,6 +39,8 @@ export interface SessionState {
    * would lose one of them.
    */
   refusalIds?: string[]
+  /** The turn whose refusals-hold alert was sent, so it is sent once. Merged by maximum. */
+  refusalAlert?: number | null
   /**
    * The narrowing requested by the user with a `cordon: scope` directive.
    *
@@ -289,6 +291,7 @@ export class SessionStore {
     const unredacted = Object.hasOwn(data, 'unredacted') ? data['unredacted'] : undefined
     const readIds = Object.hasOwn(data, 'readIds') ? data['readIds'] : undefined
     const refusalIds = Object.hasOwn(data, 'refusalIds') ? data['refusalIds'] : undefined
+    const refusalAlert = Object.hasOwn(data, 'refusalAlert') ? data['refusalAlert'] : undefined
     const directive = Object.hasOwn(data, 'directive') ? data['directive'] : undefined
     const exposure = Object.hasOwn(data, 'exposure') ? data['exposure'] : undefined
     const userAtoms = Object.hasOwn(data, 'userAtoms') ? data['userAtoms'] : undefined
@@ -311,6 +314,9 @@ export class SessionStore {
     }
     // Filtered, the list would revive an approval given before a read.
     if (readIds !== undefined && (!Array.isArray(readIds) || readIds.some((id) => typeof id !== 'string' || !READ_ID.test(id)))) {
+      throw new Error(`the session state ${shown(sessionId)} is incompatible`)
+    }
+    if (refusalAlert !== undefined && refusalAlert !== null && (typeof refusalAlert !== 'number' || !Number.isInteger(refusalAlert) || refusalAlert < 0)) {
       throw new Error(`the session state ${shown(sessionId)} is incompatible`)
     }
     // Filtered, the list would forget refusals, which lifts the hold on them.
@@ -377,6 +383,7 @@ export class SessionStore {
       unredacted: unredacted === true,
       readIds: Array.isArray(readIds) ? (readIds as string[]).slice(-MAX_READ_IDS) : [],
       refusalIds: Array.isArray(refusalIds) ? (refusalIds as string[]).slice(-MAX_REFUSAL_IDS) : [],
+      refusalAlert: typeof refusalAlert === 'number' ? refusalAlert : null,
       directive: Array.isArray(directive) ? (directive as EffectClass[]) : null,
       exposure: isExposure(exposure) ? exposure : null,
       userAtoms: Array.isArray(userAtoms) ? (userAtoms as string[]).slice(-MAX_USER_ATOMS) : [],
@@ -398,6 +405,7 @@ export class SessionStore {
       unredacted: state.unredacted === true,
       readIds: (state.readIds ?? []).slice(-MAX_READ_IDS),
       refusalIds: (state.refusalIds ?? []).slice(-MAX_REFUSAL_IDS),
+      refusalAlert: state.refusalAlert ?? null,
       directive: state.directive ?? null,
       exposure: state.exposure ?? null,
       userAtoms: (state.userAtoms ?? []).slice(-MAX_USER_ATOMS),
@@ -603,6 +611,7 @@ function mergeStates(into: SessionState, other: SessionState): SessionState {
     unredacted: into.unredacted === true || other.unredacted === true,
     readIds: [...new Set([...(into.readIds ?? []), ...(other.readIds ?? [])])].sort().slice(-MAX_READ_IDS),
     refusalIds: [...new Set([...(into.refusalIds ?? []), ...(other.refusalIds ?? [])])].slice(-MAX_REFUSAL_IDS),
+    refusalAlert: Math.max(into.refusalAlert ?? -1, other.refusalAlert ?? -1) < 0 ? null : Math.max(into.refusalAlert ?? -1, other.refusalAlert ?? -1),
     directive: mergeDirectives(into.directive ?? null, other.directive ?? null),
     exposure: into.exposure ?? other.exposure ?? null,
     userAtoms: mergeUserAtoms(into.userAtoms ?? [], other.userAtoms ?? []),
