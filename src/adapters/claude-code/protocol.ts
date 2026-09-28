@@ -4,7 +4,7 @@ import { CLAUDE_CODE, type Dialect } from './dialect.js'
 
 export type HookEvent =
   | { kind: 'PreToolUse'; sessionId: string; call: ToolCall }
-  | { kind: 'PostToolUse'; sessionId: string; call: ToolCall; response: unknown }
+  | { kind: 'PostToolUse'; sessionId: string; call: ToolCall; response: unknown; missing?: true }
   | { kind: 'UserPromptSubmit'; sessionId: string; prompt: string }
   | { kind: 'MessageDisplay'; sessionId: string; messageId: string; final: boolean; delta: string }
   | { kind: 'ignored'; sessionId: string }
@@ -143,6 +143,11 @@ export function parseEvent(stdin: string, dialect: Dialect = CLAUDE_CODE): HookE
       sessionId,
       call: { tool, args: isRecord(input) ? input : {} },
       response: field(raw, dialect.resultField),
+      // No result field is not an empty result: a harness that renamed it
+      // would turn off every result check while the install looked green
+      // (Kimi, reviewing the connectors). The handler answers it as a result
+      // it could not read.
+      ...(dialect.resultAlways && !Object.hasOwn(raw, dialect.resultField) ? { missing: true as const } : {}),
     }
   }
 

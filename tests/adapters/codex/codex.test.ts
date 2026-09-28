@@ -207,3 +207,16 @@ describe('codex: a result with a part Cordon cannot read', () => {
   })
 })
 
+
+describe('codex: a result event without its result field', () => {
+  it('is not an empty result: the session is held and the human is told', () => {
+    // Kimi, review of this change: a harness that renamed the field would
+    // turn off every result check while the install still looked green.
+    const dir = home('read, create, update', 'autonomous')
+    run(dir, { hook_event_name: 'UserPromptSubmit', prompt: 'look up this item' })
+    const out = run(dir, { hook_event_name: 'PostToolUse', tool_name: 'mcp__web__open', tool_input: {}, tool_result: 'moved elsewhere' })
+    expect(out.decision).toBe('block')
+    const next = run(dir, pre('apply_patch', patch('*** Add File: /w/unrequested.txt', '+x')))
+    expect(next.hookSpecificOutput?.permissionDecision).toBe('deny')
+  })
+})

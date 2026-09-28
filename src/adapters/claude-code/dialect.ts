@@ -49,6 +49,12 @@ export interface Dialect {
   /** The field of PostToolUse that holds the result. */
   resultField: 'tool_response' | 'tool_output'
   /**
+   * Whether every result event carries that field, so its absence means the
+   * harness changed rather than the tool returned nothing. Claude Code's
+   * empty result without the field is pinned as legitimate work.
+   */
+  resultAlways: boolean
+  /**
    * Built-in tools whose result retells what the model itself wrote, beyond
    * Claude Code's Write, Edit, NotebookEdit and TodoWrite. Read as content,
    * each would mark the session as having read something untrusted. Asked
@@ -80,6 +86,7 @@ export const CLAUDE_CODE: Dialect = {
   humanPrompts: true,
   partialResults: false,
   resultField: 'tool_response',
+  resultAlways: false,
   textless: named(),
   builtin: {},
   translate: asIs,
@@ -93,6 +100,7 @@ export const CODEX: Dialect = {
   humanPrompts: true,
   partialResults: false,
   resultField: 'tool_response',
+  resultAlways: true,
   textless: named('apply_patch'),
   builtin: CODEX_BUILTIN,
   translate: (call, cwd) => {
@@ -124,6 +132,7 @@ export const KIMI: Dialect = {
   humanPrompts: true,
   partialResults: false,
   resultField: 'tool_output',
+  resultAlways: true,
   // AskUserQuestion is not here: its result is the human's answer, and
   // reading it as untrusted costs a stricter decision, never a looser one.
   // TaskList retells the model's own tasks and GetGoal the user's objective
@@ -153,6 +162,7 @@ export const DEEPSEEK: Dialect = {
   // The bridge flattens a result to its text blocks (read from its source).
   partialResults: true,
   resultField: 'tool_response',
+  resultAlways: true,
   // A command it does not name is read as content: the stricter reading.
   textless: (call) => call.tool === 'write' || call.tool === 'edit'
     || (call.tool === 'str_replace_editor' && typeof call.args.command === 'string' && EDITS.has(call.args.command)),

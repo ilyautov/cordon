@@ -8905,7 +8905,7 @@ var APPROVES = /(?:\bcordon(?:@[\w.^~-]+)?|\bcli\.m?js)\s+(?:(?:mcp\s+)?approve|
 function mentions(command, marker) {
   if (marker.includes("/")) return command.includes(marker);
   for (let at = command.indexOf(marker); at !== -1; at = command.indexOf(marker, at + 1)) {
-    if (!/^[\p{L}\p{N}._]/u.test(command.slice(at + marker.length, at + marker.length + 1))) return true;
+    if (!/^\.*[\p{L}\p{N}_]/u.test(command.slice(at + marker.length))) return true;
   }
   return false;
 }
@@ -14719,6 +14719,7 @@ var CLAUDE_CODE = {
   humanPrompts: true,
   partialResults: false,
   resultField: "tool_response",
+  resultAlways: false,
   textless: named(),
   builtin: {},
   translate: asIs
@@ -14731,6 +14732,7 @@ var CODEX = {
   humanPrompts: true,
   partialResults: false,
   resultField: "tool_response",
+  resultAlways: true,
   textless: named("apply_patch"),
   builtin: CODEX_BUILTIN,
   translate: (call, cwd) => {
@@ -14753,6 +14755,7 @@ var KIMI = {
   humanPrompts: true,
   partialResults: false,
   resultField: "tool_output",
+  resultAlways: true,
   // AskUserQuestion is not here: its result is the human's answer, and
   // reading it as untrusted costs a stricter decision, never a looser one.
   // TaskList retells the model's own tasks and GetGoal the user's objective
@@ -14774,6 +14777,7 @@ var DEEPSEEK = {
   // The bridge flattens a result to its text blocks (read from its source).
   partialResults: true,
   resultField: "tool_response",
+  resultAlways: true,
   // A command it does not name is read as content: the stricter reading.
   textless: (call) => call.tool === "write" || call.tool === "edit" || call.tool === "str_replace_editor" && typeof call.args.command === "string" && EDITS.has(call.args.command),
   builtin: DEEPSEEK_BUILTIN,
@@ -14824,7 +14828,12 @@ function parseEvent(stdin, dialect = CLAUDE_CODE) {
       kind: "PostToolUse",
       sessionId,
       call: { tool, args: isRecord(input) ? input : {} },
-      response: field(raw, dialect.resultField)
+      response: field(raw, dialect.resultField),
+      // No result field is not an empty result: a harness that renamed it
+      // would turn off every result check while the install looked green
+      // (Kimi, reviewing the connectors). The handler answers it as a result
+      // it could not read.
+      ...dialect.resultAlways && !Object.hasOwn(raw, dialect.resultField) ? { missing: true } : {}
     };
   }
   return { kind: "ignored", sessionId };
@@ -14975,9 +14984,10 @@ function unscanned(event, cordonHome2, dialect, error) {
 }
 function observe(cordon, event, env, dialect) {
   const extracted = extractText(event.call.tool, event.response, dialect.textless(event.call));
-  if (!extracted.known) {
+  if (!extracted.known || event.missing) {
     cordon.markUnredacted();
-    const said = `Cordon: the result of ${event.call.tool} could not be read (its shape is unknown or too large), so a layer hidden in it could not be cut`;
+    const why = event.missing ? "the harness sent no result field" : "its shape is unknown or too large";
+    const said = `Cordon: the result of ${event.call.tool} could not be read (${why}), so a layer hidden in it could not be cut`;
     if (dialect.replaces === "block") return { decision: "block", reason: `${said}; it is withheld.` };
     return { systemMessage: `${said}. Calls that act are held until your next message.` };
   }

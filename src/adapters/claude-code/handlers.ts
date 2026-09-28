@@ -209,14 +209,15 @@ function observe(
 ): HookOutput {
   const extracted = extractText(event.call.tool, event.response, dialect.textless(event.call))
 
-  if (!extracted.known) {
+  if (!extracted.known || event.missing) {
     // We do not know the shape, so we cannot strip the layer, and the model
     // has already read it. Staying silent is not allowed: we mark the session,
     // and the gate decides from there.
     cordon.markUnredacted()
     // Not silence either (Kimi, reviewing the connectors): where a block can
     // withhold the result, it does; elsewhere the human is told.
-    const said = `Cordon: the result of ${event.call.tool} could not be read (its shape is unknown or too large), so a layer hidden in it could not be cut`
+    const why = event.missing ? 'the harness sent no result field' : 'its shape is unknown or too large'
+    const said = `Cordon: the result of ${event.call.tool} could not be read (${why}), so a layer hidden in it could not be cut`
     if (dialect.replaces === 'block') return { decision: 'block', reason: `${said}; it is withheld.` }
     return { systemMessage: `${said}. Calls that act are held until your next message.` }
   }
