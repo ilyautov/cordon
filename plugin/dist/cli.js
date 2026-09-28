@@ -13538,7 +13538,15 @@ function escape(text) {
 // src/cordon.ts
 var INERT = /^(?:|"?(?:none|null|undefined|true|false|ok|success)"?|\{\}|\[\]|-?\d+(?:\.\d+)?)$/iu;
 function canonicalLink(link) {
-  return link.trim().toLowerCase().replace(/^https?:\/\//u, "").replace(/\/+$/u, "");
+  return link.trim().toLowerCase().replace(/\/+$/u, "");
+}
+function namedLink(link, named2) {
+  const canonical2 = canonicalLink(link);
+  if (named2.has(canonical2)) return true;
+  const web = /^https?:\/\//u.exec(canonical2);
+  if (web === null) return false;
+  const bare2 = canonical2.slice(web[0].length);
+  return named2.has(bare2) && !named2.has(`http://${bare2}`) && !named2.has(`https://${bare2}`);
 }
 var Cordon = class {
   policy;
@@ -13935,10 +13943,10 @@ var Cordon = class {
    */
   observeLinks(links, source) {
     if (source.trust !== "untrusted") return;
-    const named2 = /* @__PURE__ */ new Set([...this.userAtoms.map(canonicalLink), ...this.userWords]);
+    const named2 = new Set(this.userAtoms.map(canonicalLink));
     let foreign = false;
     for (const link of links) {
-      if (named2.has(canonicalLink(link))) continue;
+      if (namedLink(link, named2)) continue;
       this.taint.record(link, source);
       foreign = true;
     }

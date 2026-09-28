@@ -81,9 +81,24 @@ export type PieceRole = 'content' | 'label'
  */
 const INERT = /^(?:|"?(?:none|null|undefined|true|false|ok|success)"?|\{\}|\[\]|-?\d+(?:\.\d+)?)$/iu
 
-/** A link in one spelling: lower case, no http(s) scheme, no trailing slash. */
+/** A link in one spelling: lower case, no trailing slash. */
 function canonicalLink(link: string): string {
-  return link.trim().toLowerCase().replace(/^https?:\/\//u, '').replace(/\/+$/u, '')
+  return link.trim().toLowerCase().replace(/\/+$/u, '')
+}
+
+/**
+ * Whether the user named this link. With a scheme the user wrote, the scheme
+ * must match; a link the user wrote bare matches under either web scheme,
+ * unless the user also wrote it with a scheme, which then decides. The user's
+ * atoms carry the bare twin of every scheme link, hence the second check.
+ */
+function namedLink(link: string, named: ReadonlySet<string>): boolean {
+  const canonical = canonicalLink(link)
+  if (named.has(canonical)) return true
+  const web = /^https?:\/\//u.exec(canonical)
+  if (web === null) return false
+  const bare = canonical.slice(web[0].length)
+  return named.has(bare) && !named.has(`http://${bare}`) && !named.has(`https://${bare}`)
 }
 
 /**
@@ -619,15 +634,19 @@ export class Cordon {
    */
   observeLinks(links: readonly string[], source: Source): void {
     if (source.trust !== 'untrusted') return
-    // Compared whole, in one spelling: the user writes www.shop.example/item
-    // and the tool returns https://www.shop.example/item/, and matching atom
-    // by atom failed there, since a scheme link yields twins the bare one
-    // does not. A bare host is no atom at all, so the user's words count too
-    // (Kimi, reviewing this change).
-    const named = new Set([...this.userAtoms.map(canonicalLink), ...this.userWords])
+    // Compared whole, as the gate compares a named destination: the user
+    // writes www.shop.example/item and the tool returns
+    // https://www.shop.example/item/, and matching atom by atom failed there,
+    // since a scheme link yields twins the bare one does not. A scheme the
+    // user wrote must match, so an http downgrade of their https link is not
+    // theirs; words do not vouch, since a version or a file name the user
+    // typed passed an attacker's https://20.11.0 (Kimi, reviewing this
+    // change). A bare host is no atom, so it is not named here either, as it
+    // is not for the gate.
+    const named = new Set(this.userAtoms.map(canonicalLink))
     let foreign = false
     for (const link of links) {
-      if (named.has(canonicalLink(link))) continue
+      if (namedLink(link, named)) continue
       // A link with no atoms cannot enter provenance, but it is still the
       // source's: it marks the read rather than passing for the user's.
       this.taint.record(link, source)

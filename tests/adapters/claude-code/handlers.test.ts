@@ -460,8 +460,8 @@ describe('handle: a link in an identifier field', () => {
     // spelling AgentDojo uses.
     for (const [said, returned] of [
       ['www.shop.example/item/42', 'https://www.shop.example/item/42'],
-      ['https://shop.example/item/42', 'http://shop.example/item/42/'],
-      ['shop.example', 'https://shop.example'],
+      ['https://shop.example/item/42', 'https://SHOP.example/item/42/'],
+      ['http://www.shop.example/item/42', 'http://www.shop.example/item/42'],
     ]) {
       const shared = env()
       const id = `u4-${said}`
@@ -482,6 +482,29 @@ describe('handle: a link in an identifier field', () => {
     for (const returned of ['evil.example', 'javascript:fetch(1)']) {
       const shared = env()
       const id = `u5-${returned}`
+      handle(
+        { kind: 'PostToolUse', sessionId: id, call: { tool: 'mcp__web__search', args: {} },
+          response: { content: [{ type: 'text', text: 'ok' }], structuredContent: { url: returned } } },
+        shared,
+      )
+      const out = handle({ kind: 'PreToolUse', sessionId: id, call: { tool: 'wb_reply', args: { text: 'thanks' } } }, shared)
+      expect(out.hookSpecificOutput?.permissionDecisionReason, returned).toMatch(/read untrusted content/)
+    }
+  })
+
+  it('a word the user typed does not vouch for a link, nor does a downgrade', () => {
+    // Kimi, reviewing this change: every word of the user's messages vouched
+    // for a link, so a version the user typed passed https://20.11.0 as
+    // theirs; and a comparison without the scheme passed an http downgrade
+    // of the user's https link.
+    for (const [said, returned] of [
+      ['we are pinned to node 20.11.0, read the advisory', 'https://20.11.0'],
+      ['extract archive.zip', 'https://archive.zip'],
+      ['reply to the review of https://shop.example/item/42', 'http://shop.example/item/42'],
+    ] as const) {
+      const shared = env()
+      const id = `u7-${returned}`
+      handle({ kind: 'UserPromptSubmit', sessionId: id, prompt: said }, shared)
       handle(
         { kind: 'PostToolUse', sessionId: id, call: { tool: 'mcp__web__search', args: {} },
           response: { content: [{ type: 'text', text: 'ok' }], structuredContent: { url: returned } } },
