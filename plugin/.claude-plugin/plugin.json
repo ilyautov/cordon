@@ -15,5 +15,9 @@
     "hooks",
     "firewall",
     "agent-safety"
-  ]
+  ],
+  "icon": ".claude-plugin/icon.svg",
+  "documentationUrl": "https://github.com/ilyautov/cordon/blob/main/docs/install.md",
+  "supportUrl": "https://github.com/ilyautov/cordon/issues",
+  "privacyPolicyUrl": "https://github.com/ilyautov/cordon/blob/main/PRIVACY.md"
 }
