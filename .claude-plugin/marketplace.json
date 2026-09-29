@@ -4,12 +4,16 @@
     "name": "Ilya Utov",
     "url": "https://github.com/ilyautov"
   },
+  "metadata": {
+    "description": "Cordon: a deterministic prompt-injection firewall for Claude Code"
+  },
   "plugins": [
     {
       "name": "cordon",
       "source": "./plugin",
       "description": "Prompt-injection firewall for AI agents: reads anything, takes orders only from you",
-      "version": "0.12.1"
+      "version": "0.12.1",
+      "category": "security"
     }
   ]
 }

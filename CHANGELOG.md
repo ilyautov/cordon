@@ -2,6 +2,10 @@
 
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versions follow [SemVer](https://semver.org/).
 
+## [Unreleased]
+
+The plugin's hook command quotes `${CLAUDE_PLUGIN_ROOT}`. Unquoted, a plugin root with a space in it (a home directory named `John Smith`) split the path, `node` was handed half of it, and every hook crashed, which Claude Code reads as "let it through". The plugin now carries its own README, a display name, a category and keywords for the Claude plugin directory, and the marketplace a description; `claude plugin validate` passes on both with no warning.
+
 ## [0.12.1] - 2026-09-28
 
 A link in an identifier field of a tool's result (`url`, `href`, `uri`, `link`) was skipped whole: not cleaned, which is right, since rewriting a link breaks it, but also not remembered, so a result of `ok` with `url` set to an attacker's page left neither a mark nor provenance. The Claude Code adapter, which Codex, Kimi and DeepSeek share, now hands such links to the core, which records any the user did not name and marks the read; the user's own link coming back changes nothing, compared as the gate compares a named destination: case and a trailing slash do not matter, a link the user wrote bare matches either web scheme, and a scheme the user wrote must match, so an `http` downgrade is not theirs. A word the user typed does not vouch for a link (a version like `20.11.0` would have vouched for `https://20.11.0`), and a link that cannot be compared counts as the source's. A bare host has no atom to record, so for it only the read is marked. The MCP gateway and LangChain read only a result's text blocks and have no such fields.

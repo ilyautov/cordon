@@ -1,10 +1,19 @@
 {
   "name": "cordon",
+  "displayName": "Cordon",
   "version": "0.12.1",
   "description": "Prompt-injection firewall for AI agents: reads anything, takes orders only from you",
   "author": {
     "name": "Ilya Utov"
   },
   "homepage": "https://github.com/ilyautov/cordon",
-  "license": "MIT"
+  "license": "MIT",
+  "repository": "https://github.com/ilyautov/cordon",
+  "keywords": [
+    "security",
+    "prompt-injection",
+    "hooks",
+    "firewall",
+    "agent-safety"
+  ]
 }

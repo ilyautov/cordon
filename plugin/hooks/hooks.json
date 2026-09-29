@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/dist/cli.js hook",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/dist/cli.js\" hook",
             "timeout": 5
           }
         ]
@@ -17,7 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/dist/cli.js hook",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/dist/cli.js\" hook",
             "timeout": 5
           }
         ]
@@ -29,7 +29,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/dist/cli.js hook",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/dist/cli.js\" hook",
             "timeout": 10
           }
         ]
@@ -40,7 +40,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/dist/cli.js hook",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/dist/cli.js\" hook",
             "timeout": 5
           }
         ]

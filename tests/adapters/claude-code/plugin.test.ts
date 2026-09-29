@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process'
-import { existsSync, readFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdtempSync, readFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { beforeAll, describe, expect, it } from 'vitest'
 
@@ -90,8 +91,26 @@ describe('packaging the plugin: the quiet ways of not working', () => {
     // harness will read the crash as "let it through".
     for (const event of Object.keys(hooks.hooks)) {
       const command = hooks.hooks[event]![0]!.hooks[0]!.command
-      const path = command.replace('${CLAUDE_PLUGIN_ROOT}', PLUGIN_ROOT).replace(/^node\s+/u, '').split(' ')[0]!
+      const path = /^node\s+"([^"]+)"/u.exec(command.replace('${CLAUDE_PLUGIN_ROOT}', PLUGIN_ROOT))?.[1] ?? ''
       expect(existsSync(path), `${event}: ${path} does not exist`).toBe(true)
+    }
+  })
+
+  it('the command runs from a plugin root with a space in it', () => {
+    // claude plugin validate: an unquoted placeholder splits on a space in the
+    // expanded path, node is handed half a path, the hook crashes, and the
+    // harness reads the crash as "let it through". Run the way the harness
+    // runs it: the placeholder substituted, the line given to a shell.
+    const root = join(mkdtempSync(join(tmpdir(), 'cordon plugin ')), 'with space')
+    cpSync(PLUGIN_ROOT, root, { recursive: true })
+    const home = mkdtempSync(join(tmpdir(), 'cordon-home-'))
+    for (const event of Object.keys(hooks.hooks)) {
+      const command = hooks.hooks[event]![0]!.hooks[0]!.command.replaceAll('${CLAUDE_PLUGIN_ROOT}', root)
+      const out = execFileSync('/bin/sh', ['-c', command], {
+        input: JSON.stringify({ session_id: 'space', hook_event_name: 'UserPromptSubmit', prompt: 'hello' }),
+        env: { ...process.env, CORDON_HOME: home },
+      }).toString()
+      expect(() => JSON.parse(out === '' ? '{}' : out), `${event}: ${out}`).not.toThrow()
     }
   })
 
