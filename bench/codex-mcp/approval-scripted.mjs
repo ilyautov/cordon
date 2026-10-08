@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { createInterface } from 'node:readline'
 import { fileURLToPath } from 'node:url'
+import { readCompletePendingRequest } from './pending-request.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const BUNDLE = join(HERE, '../../plugin/dist/cli.js')
@@ -160,7 +161,7 @@ const held = await withGateway('4412', async ({ home, log, request }) => {
       JSON.stringify({ earlyReply }))
   }
   const id = names[0].slice(0, -'.request.json'.length)
-  const shown = JSON.parse(readFileSync(join(home, 'approvals', names[0]), 'utf8'))
+  const shown = await readCompletePendingRequest(join(home, 'approvals', names[0]), 5000)
   const shownArgs = JSON.parse(shown.args)
   const heldDraftFullyShown = shown.tool === 'send_email' && shownArgs.to === args.to && shownArgs.body === args.body
   if (!heldDraftFullyShown) throw new Error('the held request omitted part of the draft')
