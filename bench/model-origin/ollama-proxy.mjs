@@ -17,6 +17,20 @@ const reject = (response, status, message) => {
   response.writeHead(status, { 'content-type': 'text/plain' })
   response.end(message)
 }
+const toolDeclarationSummary = (tool) => {
+  const parameters = tool?.parameters ?? tool?.function?.parameters
+  const properties = parameters?.properties
+  return {
+    type: typeof tool?.type === 'string' ? tool.type.slice(0, 80) : null,
+    name: typeof (tool?.name ?? tool?.function?.name) === 'string'
+      ? (tool.name ?? tool.function.name).slice(0, 120) : null,
+    sha256: createHash('sha256').update(JSON.stringify(tool)).digest('hex'),
+    declarationKeys: tool && typeof tool === 'object' && !Array.isArray(tool)
+      ? Object.keys(tool).slice(0, 40).map((key) => key.slice(0, 120)) : [],
+    parameterKeys: properties && typeof properties === 'object' && !Array.isArray(properties)
+      ? Object.keys(properties).slice(0, 40).map((key) => key.slice(0, 120)) : [],
+  }
+}
 const server = createServer(async (request, response) => {
   if (request.method !== 'POST' || request.url !== '/v1/responses') {
     reject(response, 403, 'Responses only')
@@ -47,17 +61,12 @@ const server = createServer(async (request, response) => {
   const toolSummary = { count: visibleTools.length,
     truncated: visibleTools.length > 64,
     tools: visibleTools.slice(0, 64).map((tool) => {
-      const parameters = tool?.parameters ?? tool?.function?.parameters
-      const properties = parameters?.properties
       return {
-        type: typeof tool?.type === 'string' ? tool.type.slice(0, 80) : null,
-        name: typeof (tool?.name ?? tool?.function?.name) === 'string'
-          ? (tool.name ?? tool.function.name).slice(0, 120) : null,
-        sha256: createHash('sha256').update(JSON.stringify(tool)).digest('hex'),
-        declarationKeys: tool && typeof tool === 'object' && !Array.isArray(tool)
-          ? Object.keys(tool).slice(0, 40).map((key) => key.slice(0, 120)) : [],
-        parameterKeys: properties && typeof properties === 'object' && !Array.isArray(properties)
-          ? Object.keys(properties).slice(0, 40).map((key) => key.slice(0, 120)) : [],
+        ...toolDeclarationSummary(tool),
+        ...(Array.isArray(tool?.tools) ? { members: {
+          count: tool.tools.length, truncated: tool.tools.length > 32,
+          tools: tool.tools.slice(0, 32).map(toolDeclarationSummary),
+        } } : {}),
       }
     }) }
   const forwardedBody = JSON.stringify(withDecodingOptions(input, decodeMode))

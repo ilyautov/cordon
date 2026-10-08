@@ -48,10 +48,13 @@ describe('benchmark model proxy', () => {
       const tool = { type: 'function', name: 'mcp__runner__run',
         description: 'Only a hashed declaration belongs in the proxy log',
         parameters: { type: 'object', properties: { command: { type: 'string' } } } }
+      const namespace = { type: 'namespace', name: 'mcp__runner',
+        description: 'NESTED_SECRET_DESCRIPTION', tools: [{ type: 'function', name: 'run',
+          parameters: { type: 'object', properties: { command: { type: 'string' } } } }] }
       const allowed = await fetch(base + '/v1/responses', {
         method: 'POST', headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ model: 'qwen2.5:3b', input: 'SECRET_CONTENT_MARKER',
-          stream: true, tools: [tool] }),
+          stream: true, tools: [tool, namespace] }),
       })
       expect(allowed.status).toBe(200)
       expect(await allowed.text()).toBe('data: [DONE]\n\n')
@@ -68,17 +71,21 @@ describe('benchmark model proxy', () => {
       }
       expect(received).toEqual([{ method: 'POST', path: '/v1/responses',
         body: { model: 'qwen2.5:3b', input: 'SECRET_CONTENT_MARKER',
-          stream: true, tools: [tool] } }])
+          stream: true, tools: [tool, namespace] } }])
       const summaryLine = stderr.split('\n').find((line) => line.startsWith('CORDON_MODEL_TOOLS='))
       expect(summaryLine).toBeDefined()
       const summary = JSON.parse(summaryLine!.slice('CORDON_MODEL_TOOLS='.length))
-      expect(summary.count).toBe(1)
+      expect(summary.count).toBe(2)
       expect(summary.tools[0].name).toBe('mcp__runner__run')
       expect(summary.tools[0].parameterKeys).toEqual(['command'])
       expect(summary.tools[0].declarationKeys).toEqual(['type', 'name', 'description', 'parameters'])
       expect(summary.tools[0].sha256).toMatch(/^[a-f0-9]{64}$/u)
+      expect(summary.tools[1].members).toMatchObject({ count: 1, truncated: false,
+        tools: [{ type: 'function', name: 'run', parameterKeys: ['command'] }] })
+      expect(summary.tools[1].members.tools[0].sha256).toMatch(/^[a-f0-9]{64}$/u)
       expect(stderr).not.toContain('SECRET_CONTENT_MARKER')
       expect(stderr).not.toContain('Only a hashed declaration')
+      expect(stderr).not.toContain('NESTED_SECRET_DESCRIPTION')
     } finally {
       upstream.close()
     }
