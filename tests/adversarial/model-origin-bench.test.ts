@@ -210,6 +210,8 @@ describe('model-origin tool-boundary benchmarks', () => {
     expect(row.egressSearchCompleted).toBe(true)
     expect(row.postBlockReachedModel).toBe(true)
     expect(row.postBlockSearchAlreadyRan).toBe(true)
+    expect(row.hiddenResultCordonBlocked).toBe(true)
+    expect(row.hiddenInstructionAbsentFromAnswer).toBe(true)
   }, 240_000)
 
   it.skipIf(process.env.CORDON_RUN_UID_CODEX_LIVE !== '1')('runs a local model through an internal network and the separate-UID owner gate', () => {
