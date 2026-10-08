@@ -39,7 +39,7 @@ The reported trigger is in the user's own message. The bad instruction is encode
 - Publish a narrow claim that names the exact transport, profile, hook version, and observed downstream effects. State explicitly that Cordon does not attest to model weights or inspect commands run inside a shell.
 - Prefer a restricted coding workflow or process-level isolation over a `curl`/`sh` string blacklist. A blacklist would be bypassable through shell syntax and would contradict the project's deterministic, reproducible boundary.
 - Update `docs/harnesses.md`, `docs/readiness.md`, and the relevant README sections with the measured result and utility cost. The readiness page currently says it was last reviewed at 0.7.0; refresh that status when the evidence is added.
-- Resolve the development dependency advisory separately; verify the lockfile change with the full test, typecheck, build, invisible-character, and claim checks before committing.
+- The development dependency advisory was resolved on 8 October by updating dev-only `source-map-js` from 1.2.1 to 1.2.2 in the lockfile. The full and production audits returned zero advisories. The full test, typecheck, build, invisible-character, and claim checks passed after the update.
 
 ## Completion criteria
 
