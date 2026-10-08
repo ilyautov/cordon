@@ -221,6 +221,8 @@ A separate live Codex CLI 0.160.1 pair with `gpt-6-luna` used `cordon mcp connec
 
 The connector now refuses sockets with any group or other permission. A regression first showed that a socket with mode `0660` was accepted and reached the peer; the connector now refuses it before connecting. This matters when another local identity shares the owner's group, even though the benchmark service itself creates mode `0600`.
 
+A later output-boundary regression found that the connector could return the owner's success code before a prior JSON-RPC reply finished writing to the host. A delayed writable sink showed the premature `0`; a sink that reported a write failure after owner status also returned `0`. The connector now waits for each host-output write callback before returning success and reports write errors or a 30-second stalled flush as failure. These tests validate stream-write completion, not that a model has read or acted on the reply.
+
 ## Continuing the older benchmarks
 
 

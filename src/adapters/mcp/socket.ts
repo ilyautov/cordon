@@ -18,6 +18,8 @@ export interface SocketGatewayOptions {
 // The gateway serializes upstream output as JSON lines, so this non-JSON
 // trailer cannot be forged by an upstream MCP message. The bridge strips it.
 const STATUS = Buffer.from('\u001eCORDON_EXIT:')
+// A host that stops reading must not leave an owner success pending forever.
+const OUTPUT_FLUSH_TIMEOUT_MS = 30_000
 
 function socketPath(path: string): string {
   if (!isAbsolute(path)) throw new Error('the MCP socket path must be absolute')
@@ -145,9 +147,13 @@ export function connectSocketGateway(
     let connected = false
     let status: number | null = null
     let buffer = Buffer.alloc(0)
+    let pendingOutput = 0
+    let socketClosed = false
+    let flushTimer: NodeJS.Timeout | null = null
     const finish = (code: number, reason?: string): void => {
       if (settled) return
       settled = true
+      if (flushTimer !== null) clearTimeout(flushTimer)
       if (reason !== undefined) log(reason)
       hostIn.unpipe(socket)
       socket.destroy()
@@ -179,16 +185,45 @@ export function connectSocketGateway(
         } else if (status !== null) {
           finish(1, 'owner socket sent data after terminal status')
           return
-        } else if (!hostOut.write(line)) {
-          socket.pause()
-          hostOut.once('drain', () => socket.resume())
+        } else {
+          // The owner's status says its gateway finished, but success cannot
+          // reach the host before every earlier reply leaves this bridge.
+          pendingOutput++
+          if (flushTimer === null) {
+            flushTimer = setTimeout(() => finish(1, 'host output did not flush'), OUTPUT_FLUSH_TIMEOUT_MS)
+          }
+          let accepted: boolean
+          try {
+            accepted = hostOut.write(line, (error) => {
+              pendingOutput--
+              if (pendingOutput === 0 && flushTimer !== null) {
+                clearTimeout(flushTimer)
+                flushTimer = null
+              }
+              if (error) finish(1, `host output failed: ${error.message}`)
+              else if (socketClosed && pendingOutput === 0) finish(0)
+            })
+          } catch (error) {
+            pendingOutput--
+            finish(1, `host output failed: ${(error as Error).message}`)
+            return
+          }
+          if (!accepted && !settled) {
+            socket.pause()
+            hostOut.once('drain', () => { if (!settled) socket.resume() })
+          }
         }
       }
     })
     socket.on('error', (error) => finish(1, `owner socket failed: ${error.message}`))
-    socket.on('close', () => finish(status !== null && buffer.length === 0 ? status : 1,
-      status === null ? 'owner socket closed without terminal status' :
-        buffer.length === 0 ? undefined : 'owner socket closed with an incomplete frame'))
+    socket.on('close', () => {
+      if (settled) return
+      if (status === null) finish(1, 'owner socket closed without terminal status')
+      else if (buffer.length !== 0) finish(1, 'owner socket closed with an incomplete frame')
+      else if (status !== 0) finish(status)
+      else if (pendingOutput === 0) finish(0)
+      else socketClosed = true
+    })
     hostOut.on('error', (error) => finish(1, `host output failed: ${error.message}`))
   })
 }

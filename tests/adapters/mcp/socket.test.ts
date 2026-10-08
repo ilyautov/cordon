@@ -3,10 +3,12 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, 
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createInterface } from 'node:readline'
+import { Readable, Writable } from 'node:stream'
 import { fileURLToPath } from 'node:url'
 import { createServer } from 'node:net'
 import { describe, expect, it } from 'vitest'
 import { ensureBuiltCli } from '../../support/built-cli.js'
+import { connectSocketGateway } from '../../../src/adapters/mcp/socket.js'
 
 const CLI = join(process.cwd(), 'dist', 'cli.js')
 const FAKE_SERVER = fileURLToPath(new URL('./fake-server.mjs', import.meta.url))
@@ -31,6 +33,82 @@ async function waitForSocket(path: string, server: ChildProcess): Promise<void> 
 }
 
 describe.skipIf(typeof process.getuid !== 'function')('owner-controlled MCP socket transport', () => {
+  it('waits for the host output write before returning owner success', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'cmcp-slow-output-'))
+    const socketDir = join(root, 'socket')
+    mkdirSync(socketDir, { mode: 0o700 })
+    const socket = join(socketDir, 'gateway.sock')
+    const reply = '{"jsonrpc":"2.0","id":1,"result":{}}\n'
+    const server = createServer((client) => client.end(reply + '\u001eCORDON_EXIT:0\n'))
+    await new Promise<void>((resolve) => server.listen(socket, resolve))
+    chmodSync(socket, 0o600)
+    const release: { current: (() => void) | null } = { current: null }
+    let written = false
+    const output = new Writable({
+      highWaterMark: 1,
+      write(_chunk, _encoding, callback) {
+        release.current = () => { written = true; callback() }
+      },
+    })
+    try {
+      let settled = false
+      const result = connectSocketGateway(socket, currentUid(), Readable.from([]), output, () => {})
+      void result.then(() => { settled = true })
+      for (let i = 0; i < 100 && release.current === null; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 5))
+      }
+      expect(release.current).not.toBeNull()
+      await new Promise((resolve) => setTimeout(resolve, 20))
+      expect(settled).toBe(false)
+      expect(written).toBe(false)
+      const complete = release.current
+      release.current = null
+      complete?.()
+      expect(await result).toBe(0)
+      expect(written).toBe(true)
+    } finally {
+      const complete = release.current
+      release.current = null
+      complete?.()
+      await new Promise<void>((resolve) => server.close(() => resolve()))
+    }
+  })
+
+  it('reports a host output failure after receiving owner success', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'cmcp-output-error-'))
+    const socketDir = join(root, 'socket')
+    mkdirSync(socketDir, { mode: 0o700 })
+    const socket = join(socketDir, 'gateway.sock')
+    const server = createServer((client) => client.end('{"jsonrpc":"2.0","id":1,"result":{}}\n\u001eCORDON_EXIT:0\n'))
+    await new Promise<void>((resolve) => server.listen(socket, resolve))
+    chmodSync(socket, 0o600)
+    const reject: { current: (() => void) | null } = { current: null }
+    const output = new Writable({
+      write(_chunk, _encoding, callback) {
+        reject.current = () => callback(new Error('synthetic host output failure'))
+      },
+    })
+    const logs: string[] = []
+    try {
+      const result = connectSocketGateway(socket, currentUid(), Readable.from([]), output,
+        (line) => logs.push(line))
+      for (let i = 0; i < 100 && reject.current === null; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 5))
+      }
+      expect(reject.current).not.toBeNull()
+      const fail = reject.current
+      reject.current = null
+      fail?.()
+      expect(await result).toBe(1)
+      expect(logs.join('\n')).toContain('host output failed')
+    } finally {
+      const fail = reject.current
+      reject.current = null
+      fail?.()
+      await new Promise<void>((resolve) => server.close(() => resolve()))
+    }
+  })
+
   it('treats a socket close without owner status as failure', async () => {
     ensureBuiltCli()
     const root = mkdtempSync(join(tmpdir(), 'cmcp-no-status-'))

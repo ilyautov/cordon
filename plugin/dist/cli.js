@@ -15954,6 +15954,7 @@ import { chmodSync, lstatSync as lstatSync2, realpathSync as realpathSync3, unli
 import { createConnection, createServer } from "node:net";
 import { basename as basename3, dirname as dirname4, isAbsolute as isAbsolute5, join as join13 } from "node:path";
 var STATUS = Buffer.from("CORDON_EXIT:");
+var OUTPUT_FLUSH_TIMEOUT_MS = 3e4;
 function socketPath(path) {
   if (!isAbsolute5(path)) throw new Error("the MCP socket path must be absolute");
   const parent = realpathSync3(dirname4(path));
@@ -16078,9 +16079,13 @@ function connectSocketGateway(path, ownerUid, hostIn = process.stdin, hostOut = 
     let connected = false;
     let status = null;
     let buffer = Buffer.alloc(0);
+    let pendingOutput = 0;
+    let socketClosed = false;
+    let flushTimer = null;
     const finish = (code, reason) => {
       if (settled) return;
       settled = true;
+      if (flushTimer !== null) clearTimeout(flushTimer);
       if (reason !== void 0) log(reason);
       hostIn.unpipe(socket);
       socket.destroy();
@@ -16111,17 +16116,45 @@ function connectSocketGateway(path, ownerUid, hostIn = process.stdin, hostOut = 
         } else if (status !== null) {
           finish(1, "owner socket sent data after terminal status");
           return;
-        } else if (!hostOut.write(line)) {
-          socket.pause();
-          hostOut.once("drain", () => socket.resume());
+        } else {
+          pendingOutput++;
+          if (flushTimer === null) {
+            flushTimer = setTimeout(() => finish(1, "host output did not flush"), OUTPUT_FLUSH_TIMEOUT_MS);
+          }
+          let accepted;
+          try {
+            accepted = hostOut.write(line, (error) => {
+              pendingOutput--;
+              if (pendingOutput === 0 && flushTimer !== null) {
+                clearTimeout(flushTimer);
+                flushTimer = null;
+              }
+              if (error) finish(1, `host output failed: ${error.message}`);
+              else if (socketClosed && pendingOutput === 0) finish(0);
+            });
+          } catch (error) {
+            pendingOutput--;
+            finish(1, `host output failed: ${error.message}`);
+            return;
+          }
+          if (!accepted && !settled) {
+            socket.pause();
+            hostOut.once("drain", () => {
+              if (!settled) socket.resume();
+            });
+          }
         }
       }
     });
     socket.on("error", (error) => finish(1, `owner socket failed: ${error.message}`));
-    socket.on("close", () => finish(
-      status !== null && buffer.length === 0 ? status : 1,
-      status === null ? "owner socket closed without terminal status" : buffer.length === 0 ? void 0 : "owner socket closed with an incomplete frame"
-    ));
+    socket.on("close", () => {
+      if (settled) return;
+      if (status === null) finish(1, "owner socket closed without terminal status");
+      else if (buffer.length !== 0) finish(1, "owner socket closed with an incomplete frame");
+      else if (status !== 0) finish(status);
+      else if (pendingOutput === 0) finish(0);
+      else socketClosed = true;
+    });
     hostOut.on("error", (error) => finish(1, `host output failed: ${error.message}`));
   });
 }
