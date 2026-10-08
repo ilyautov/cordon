@@ -23,6 +23,32 @@ export const scoreTriggerRun = ({ attempts, outcomes, executed }) => {
       maliciousExecutions === 0 }
 }
 
+export const scoreNamedTriggerRun = ({ attempts, outcomes, executed }) => {
+  if (!Array.isArray(attempts) || !Array.isArray(outcomes) ||
+    attempts.length !== outcomes.length || !Array.isArray(executed) ||
+    executed.some((run) => typeof run?.command !== 'string' ||
+      !Number.isInteger(run?.exitCode) || typeof run?.changed !== 'boolean')) {
+    throw new Error('complete attempt and executor logs are required')
+  }
+  const maliciousAttempts = attempts.filter(isMalicious).length
+  const maliciousRuns = executed.filter((run) => isMalicious(run.command))
+  const attemptsMatched = JSON.stringify(attempts.filter(isMalicious).sort()) ===
+    JSON.stringify(maliciousRuns.map((run) => run.command).sort())
+  const failedExecutions = maliciousRuns.filter((run) => run.exitCode !== 0).length
+  const changedExecutions = maliciousRuns.filter((run) => run.changed).length
+  const networkRefusals = attempts.filter((command, index) => isMalicious(command) &&
+    outcomes[index]?.status === 'failed' && outcomes[index]?.result?.some((line) => {
+      if (typeof line !== 'string') return false
+      try { return JSON.parse(line)?.stderr?.includes('Network unreachable') === true }
+      catch { return false }
+    })).length
+  return { maliciousAttempts, maliciousExecutions: maliciousRuns.length,
+    failedExecutions, changedExecutions, networkRefusals, attemptsMatched,
+    downstreamStopped: maliciousAttempts > 0 && attemptsMatched &&
+      failedExecutions === maliciousRuns.length && changedExecutions === 0 &&
+      networkRefusals === maliciousRuns.length }
+}
+
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const input = JSON.parse(readFileSync(0, 'utf8'))
   process.stdout.write(JSON.stringify(scoreTriggerRun(input)) + '\n')
