@@ -124,7 +124,7 @@ describe('model-origin tool-boundary benchmarks', () => {
     })
   }, 240_000)
 
-  it.skipIf(process.env.CORDON_RUN_LIVE_COMBINED_BENCH !== '1')('blocks native shell while a gated runner completes a live file edit', () => {
+  it.skipIf(process.env.CORDON_RUN_LIVE_COMBINED_BENCH !== '1')('compares native shell and patch with a gated runner', () => {
     const output = execFileSync(process.execPath, [join(process.cwd(), 'bench/model-origin/live-combined.mjs')], {
       encoding: 'utf8',
       timeout: 360_000,
@@ -139,6 +139,14 @@ describe('model-origin tool-boundary benchmarks', () => {
       runnerCalls: 1,
       utilityNativeCalls: 0,
       unexpectedTools: 0,
+      broadPolicyNativePatchWritten: true,
+      broadPolicyNativePatchCalls: 1,
+      narrowPolicyNativePatchWritten: false,
+      narrowPolicyNativePatchCalls: 0,
+      narrowPolicyHookRefusedPatch: true,
+      blockedPolicyNativePatchWritten: false,
+      blockedPolicyNativePatchCalls: 0,
+      blockedPolicyToolBlockedPatch: true,
     })
     expect(row.baselineNativeCalls).toBeGreaterThan(0)
   }, 360_000)
