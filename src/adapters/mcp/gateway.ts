@@ -13,6 +13,7 @@ import type { Policy } from '../../policy/defaults.js'
 import { homeProblem, projectDir } from '../../policy/home.js'
 import { classifySource } from '../../provenance/trust.js'
 import { APPROVAL_TTL_MS, ApprovalStore } from '../../session/approvals.js'
+import { extractText, replaceText } from '../../output/tool-text.js'
 import { parseError, parseLine, pendingKey, toolError, type Message } from './jsonrpc.js'
 
 export interface GatewayOptions {
@@ -522,16 +523,14 @@ function observeToolResult(
 ): Record<string, unknown> {
   const result = asRecord(value['result'])
   if (result === null) return value
-  const content = result['content']
-  if (content === undefined) return value
-  if (!Array.isArray(content)) {
-    cordon.markUnredacted()
-    return value
-  }
-
   const source = classifySource({ kind: 'tool', label: sourceLabel(call), tool: call.tool }, policy)
   const texts: string[] = []
-  for (const block of content) {
+  const content = result['content']
+  if (content !== undefined && !Array.isArray(content)) {
+    return withholdUnreadableResult(value, call.tool, source, cordon)
+  }
+
+  for (const block of content ?? []) {
     const entry = asRecord(block)
     if (entry !== null && entry['type'] === 'text' && typeof entry['text'] === 'string') {
       observeInto(entry, 'text', call.tool, source, cordon)
@@ -540,8 +539,49 @@ function observeToolResult(
       cordon.markUnredacted()
     }
   }
+
+  // MCP structuredContent may be sent alongside an inert `content` block.
+  // Codex's hook already walks this shape; passing it through here left an
+  // unobserved instruction in the same tool result on the gateway path.
+  const structured = result['structuredContent']
+  if (structured !== undefined) {
+    // An MCP server controls tool names. `Write` is textless in Claude Code,
+    // but a server with that name can still return arbitrary readable data.
+    const extracted = extractText('', structured)
+    if (!extracted.known || extracted.unseen) {
+      return withholdUnreadableResult(value, call.tool, source, cordon)
+    }
+    let changed = false
+    let substitutable = true
+    const cleaned = extracted.parts.map((part) => {
+      const envelope = cordon.observe(part.text, source, part.content ? 'content' : 'label')
+      if (envelope.text !== part.text) changed = true
+      if (!envelope.substitute) substitutable = false
+      if (part.content) texts.push(envelope.text)
+      return envelope.text
+    })
+    cordon.observeLinks(extracted.links, source)
+    if (changed) {
+      if (!substitutable) return withholdUnreadableResult(value, call.tool, source, cordon)
+      const next = replaceText('', structured, cleaned)
+      if (next === structured) return withholdUnreadableResult(value, call.tool, source, cordon)
+      result['structuredContent'] = next
+    }
+  }
   cordon.recordLookup(call, texts)
   return value
+}
+
+function withholdUnreadableResult(
+  value: Record<string, unknown>,
+  tool: string,
+  source: Source,
+  cordon: Cordon,
+): Record<string, unknown> {
+  cordon.markUnredacted()
+  cordon.notice(tool, `output of ${tool} could not be scanned and was withheld`, source)
+  return { ...value, result: { isError: true,
+    content: [{ type: 'text', text: 'Cordon withheld tool output because it could not be scanned.' }] } }
 }
 
 /**

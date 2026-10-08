@@ -14619,7 +14619,7 @@ function climbs(label) {
   return plain3.split(/[/\\]/u).includes("..");
 }
 
-// src/adapters/claude-code/output.ts
+// src/output/tool-text.ts
 var TEXTLESS = /* @__PURE__ */ new Set(["Write", "Edit", "NotebookEdit", "TodoWrite"]);
 var TEXT_KEYS = /* @__PURE__ */ new Set([
   "text",
@@ -15875,15 +15875,13 @@ function withNotice(value, notice) {
 function observeToolResult(value, call, cordon, policy) {
   const result = asRecord(value["result"]);
   if (result === null) return value;
-  const content = result["content"];
-  if (content === void 0) return value;
-  if (!Array.isArray(content)) {
-    cordon.markUnredacted();
-    return value;
-  }
   const source = classifySource({ kind: "tool", label: sourceLabel(call), tool: call.tool }, policy);
   const texts = [];
-  for (const block of content) {
+  const content = result["content"];
+  if (content !== void 0 && !Array.isArray(content)) {
+    return withholdUnreadableResult(value, call.tool, source, cordon);
+  }
+  for (const block of content ?? []) {
     const entry = asRecord(block);
     if (entry !== null && entry["type"] === "text" && typeof entry["text"] === "string") {
       observeInto(entry, "text", call.tool, source, cordon);
@@ -15892,8 +15890,39 @@ function observeToolResult(value, call, cordon, policy) {
       cordon.markUnredacted();
     }
   }
+  const structured = result["structuredContent"];
+  if (structured !== void 0) {
+    const extracted = extractText("", structured);
+    if (!extracted.known || extracted.unseen) {
+      return withholdUnreadableResult(value, call.tool, source, cordon);
+    }
+    let changed2 = false;
+    let substitutable = true;
+    const cleaned = extracted.parts.map((part) => {
+      const envelope = cordon.observe(part.text, source, part.content ? "content" : "label");
+      if (envelope.text !== part.text) changed2 = true;
+      if (!envelope.substitute) substitutable = false;
+      if (part.content) texts.push(envelope.text);
+      return envelope.text;
+    });
+    cordon.observeLinks(extracted.links, source);
+    if (changed2) {
+      if (!substitutable) return withholdUnreadableResult(value, call.tool, source, cordon);
+      const next = replaceText("", structured, cleaned);
+      if (next === structured) return withholdUnreadableResult(value, call.tool, source, cordon);
+      result["structuredContent"] = next;
+    }
+  }
   cordon.recordLookup(call, texts);
   return value;
+}
+function withholdUnreadableResult(value, tool, source, cordon) {
+  cordon.markUnredacted();
+  cordon.notice(tool, `output of ${tool} could not be scanned and was withheld`, source);
+  return { ...value, result: {
+    isError: true,
+    content: [{ type: "text", text: "Cordon withheld tool output because it could not be scanned." }]
+  } };
 }
 function observeResourceRead(value, pending, cordon, policy) {
   const contents = asRecord(value["result"])?.["contents"];

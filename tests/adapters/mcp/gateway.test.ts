@@ -188,6 +188,119 @@ describe('the MCP gateway', () => {
     expect(await gateway.stop()).toBe(0)
   })
 
+  it('does not pass a hidden instruction in structured tool output', async () => {
+    const env = { ...withCallLog(), FAKE_STRUCTURED: '1' }
+    const gateway = start(basePolicy(), env)
+    try {
+      gateway.send({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'poisoned_page', arguments: {} } })
+      const response = await gateway.next()
+      const result = response.result as { content: Array<{ text: string }>; structuredContent: { path: string } }
+      expect(result.content[0]!.text).toBe('ok')
+      expect(result.structuredContent.path).not.toContain(HIDDEN)
+
+      gateway.send({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: {
+        name: 'update_price', arguments: { nmId: '99887766', price: 1 },
+      } })
+      const update = (await gateway.next()).result as { isError?: boolean; content: Array<{ text: string }> }
+      expect(update.isError).toBe(true)
+      expect(update.content[0]!.text).toContain('untrusted content')
+      expect(callLog(env)).toEqual(['poisoned_page'])
+    } finally {
+      await gateway.stop()
+    }
+  })
+
+  it('scans structured output even when the MCP tool is named Write', async () => {
+    const policy = basePolicy()
+    policy.tools['Write'] = ['read']
+    policy.toolsReturn['Write'] = 'rendered'
+    const gateway = start(policy, { FAKE_WRITE_NAME: '1' })
+    try {
+      gateway.send({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'Write', arguments: {} } })
+      const response = await gateway.next()
+      expect(JSON.stringify(response)).not.toContain(HIDDEN)
+    } finally {
+      await gateway.stop()
+    }
+  })
+
+  it('withholds unsanitizable structured output in source view and refuses a later update', async () => {
+    const policy = basePolicy()
+    delete policy.toolsReturn.poisoned_page
+    const env = { ...withCallLog(), FAKE_STRUCTURED: '1' }
+    const gateway = start(policy, env)
+    try {
+      gateway.send({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'poisoned_page', arguments: {} } })
+      const response = await gateway.next()
+      const result = response.result as { isError?: boolean; content: Array<{ text: string }> }
+      expect(result.isError).toBe(true)
+      expect(result.content[0]!.text).toContain('could not be scanned')
+      expect(JSON.stringify(response)).not.toContain(HIDDEN)
+
+      gateway.send({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: {
+        name: 'update_price', arguments: { nmId: '99887766', price: 1 },
+      } })
+      const update = (await gateway.next()).result as { isError?: boolean; content: Array<{ text: string }> }
+      expect(update.isError).toBe(true)
+      expect(update.content[0]!.text).toContain('could not be stripped')
+      expect(callLog(env)).toEqual(['poisoned_page'])
+    } finally {
+      await gateway.stop()
+    }
+  })
+
+  it('withholds structured output it cannot classify', async () => {
+    const env = { ...withCallLog(), FAKE_STRUCTURED_UNKNOWN: '1' }
+    const gateway = start(basePolicy(), env)
+    try {
+      gateway.send({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'poisoned_page', arguments: {} } })
+      const response = await gateway.next()
+      const result = response.result as { isError?: boolean; content: Array<{ text: string }>; structuredContent?: unknown }
+      expect(result.isError).toBe(true)
+      expect(result.structuredContent).toBeUndefined()
+      expect(result.content[0]!.text).toContain('could not be scanned')
+      expect(JSON.stringify(response)).not.toContain(HIDDEN)
+
+      gateway.send({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: {
+        name: 'update_price', arguments: { nmId: '99887766', price: 1 },
+      } })
+      const update = (await gateway.next()).result as { isError?: boolean; content: Array<{ text: string }> }
+      expect(update.isError).toBe(true)
+      expect(update.content[0]!.text).toContain('could not be stripped')
+      expect(callLog(env)).toEqual(['poisoned_page'])
+    } finally {
+      await gateway.stop()
+    }
+  })
+
+  it('preserves harmless structured output with the same transport shape', async () => {
+    const gateway = start(basePolicy(), { FAKE_STRUCTURED_CLEAN: '1' })
+    try {
+      gateway.send({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'poisoned_page', arguments: {} } })
+      const response = await gateway.next()
+      const result = response.result as { isError?: boolean; content: Array<{ text: string }>; structuredContent: unknown }
+      expect(result.isError).toBeUndefined()
+      expect(result.content[0]!.text).toBe('ok')
+      expect(result.structuredContent).toEqual({ path: '/docs/node.txt', message: 'The public documentation describes the API.' })
+    } finally {
+      await gateway.stop()
+    }
+  })
+
+  it('withholds a malformed content field instead of forwarding unscanned text', async () => {
+    const gateway = start(basePolicy(), { FAKE_BAD_CONTENT: '1' })
+    try {
+      gateway.send({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'poisoned_page', arguments: {} } })
+      const response = await gateway.next()
+      const result = response.result as { isError?: boolean; content: Array<{ text: string }> }
+      expect(result.isError).toBe(true)
+      expect(result.content[0]!.text).toContain('could not be scanned')
+      expect(JSON.stringify(response)).not.toContain(HIDDEN)
+    } finally {
+      await gateway.stop()
+    }
+  })
+
   it('treats an upstream tool error as an untrusted read before a later update', async () => {
     const env = { ...withCallLog(), FAKE_TOOL_ERROR: '1' }
     const gateway = start(basePolicy(), env)

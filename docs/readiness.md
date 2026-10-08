@@ -9,6 +9,7 @@ This page tracks what Cordon took from the tools it is compared with in [compari
 | Rug-pull protection: pin a tool's description and schema, hold a tool that changed | Snyk Agent Scan (formerly mcp-scan), Deconvolute | the gateway pins on first sight; `cordon mcp approve -- <cmd>` accepts a change | `tests/gate/pins.test.ts`, `tests/session/pins.test.ts`, `tests/adapters/mcp/gateway.test.ts` |
 | Pre-deploy scan of agent configuration with stable codes, OWASP mapping and SARIF | Snyk Agent Scan, Cisco mcp-scanner | `cordon audit`, codes CA101–CA901 ([audit.md](audit.md)) | `tests/audit/audit.test.ts`, the CI self-audit step |
 | Cleaning text hidden inside a tool's `inputSchema` | MCP scanners | `description` and `title` at any depth up to 16 levels | `tests/adapters/mcp/gateway.test.ts` |
+| Scanning MCP structured tool results | MCP `structuredContent` | the gateway scans text in structured results beside text blocks, withholds unknown shapes, and does not let an MCP tool named `Write` skip the scan | `tests/adapters/mcp/gateway.test.ts` (scripted child process) |
 | One-command setup with named profiles | AgentWall-style installers | `cordon init --profile locked\|research\|documents\|coding` | `tests/policy/templates.test.ts`, `tests/cli.test.ts` |
 | Status and an event view for the owner | AgentWall, gateway dashboards | `cordon doctor`, `cordon log` | `tests/cli.test.ts` |
 | An audit log a SIEM can ingest | Lasso, enterprise platforms | JSON Lines at `notify.file`, schema in [enterprise.md](enterprise.md#audit-logs) | `tests/cordon.test.ts` |
