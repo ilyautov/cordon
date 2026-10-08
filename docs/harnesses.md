@@ -83,7 +83,7 @@ In Codex's interactive TUI (0.157, measured 2026-09-28) an `ask` is reported as 
 
 ## Not measured
 
-- Whether Codex's own `web_search` and `update_plan` pass through the hooks. If they do, both are unclassified and refused with an approval id. In the probes only `Bash`, `apply_patch` and MCP tools did.
+- Whether Codex's own `web_search` and `update_plan` pass through the hooks. If they do, both are unclassified and refused with an approval id. In the probes only `Bash`, `apply_patch` and MCP tools did. A separate-UID Codex CLI 0.160.1 probe found no `tools` field in any of four local-provider Responses requests, despite working patch and MCP calls, so that request cannot supply the missing inventory ([request-shape record](model-origin-benchmark.md#separate-uid-codex-cli-with-a-deterministic-model-responder)).
 - Kimi's `ask` and exit 2.
 - Whether Codex shows a PostToolUse `systemMessage` to the human. Where Cordon reports rather than cuts (a hidden layer in a file read as source text), the journal holds the report either way: `cordon log`.
 - Kimi's `Agent` subagent.

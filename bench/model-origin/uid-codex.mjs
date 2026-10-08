@@ -175,7 +175,8 @@ const checks = {
 }
 process.stdout.write(JSON.stringify({ agentImage, runnerImage, checks, controls: controls.map((row) => ({
   root: row.root, scenario: row.scenario, socketMode: row.socketMode,
-  modelCalls: row.result.modelCalls, runnerCalls: row.runnerCalls.length,
+  modelCalls: row.result.modelCalls, modelRequestShape: row.result.modelRequestShape,
+  runnerCalls: row.runnerCalls.length,
   gatewayDenials: row.gatewayDenials, hookBlockedPatch: row.result.hookBlockedPatch,
   nativeFileChange: row.result.nativeFileChange, ownerStderr: row.ownerStderr,
 })), ...checks }) + '\n')
