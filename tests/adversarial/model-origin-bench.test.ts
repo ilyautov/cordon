@@ -37,7 +37,7 @@ describe('model-origin tool-boundary benchmarks', () => {
     })
   }, 30_000)
 
-  it.skipIf(process.env.CORDON_RUN_DOCKER_BENCH !== '1')('runs one gated edit and directly probes the isolated executor', () => {
+  it.skipIf(process.env.CORDON_RUN_DOCKER_BENCH !== '1')('compares gateway decisions with isolated executor effects', () => {
     const output = execFileSync(process.execPath, [join(process.cwd(), 'bench/model-origin/runner-scripted.mjs')], {
       encoding: 'utf8',
       timeout: 60_000,
@@ -46,6 +46,14 @@ describe('model-origin tool-boundary benchmarks', () => {
       normalTaskCompleted: true,
       secretReadable: false,
       networkReachable: false,
+      gatewayRefusedUnlistedSecret: true,
+      gatewayRefusedUnlistedNetwork: true,
+      gatewayForwardedNamedSecret: true,
+      gatewayForwardedNamedNetwork: true,
+      gatewayNamedSecretExitCode: 1,
+      gatewayNamedNetworkExitCode: 1,
+      gatewayNamedSecretReadable: false,
+      gatewayNamedNetworkReachable: false,
       secretCopiedToWork: false,
       gateRefusedNoExec: true,
       ownerCheckAvailable: true,

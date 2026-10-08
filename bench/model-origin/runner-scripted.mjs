@@ -25,12 +25,12 @@ const check = join(work, 'check.sh')
 const checkContent = '#!/bin/sh\nset -eu\ntest "$(cat input.ts)" = "export const answer = () => 42"\n'
 writeFileSync(check, checkContent)
 
-async function call(command, label, viaGateway, allowExec = true, withContext = false) {
+async function call(command, label, viaGateway, allowExec = true, withContext = false, ownerTask) {
   const home = join(root, label)
   mkdirSync(home)
   writeFileSync(join(home, 'policy.yaml'), [
     'mode: autonomous',
-    'task: Edit /work/input.ts' + (withContext ? ' and run owner-selected /work/check.sh' : ''),
+    'task: ' + (ownerTask ?? 'Edit /work/input.ts' + (withContext ? ' and run owner-selected /work/check.sh' : '')),
     'profile:',
     '  effects: [' + (allowExec ? 'read, summarize, exec' : 'read, summarize') + ']',
     'tools:',
@@ -95,6 +95,14 @@ async function call(command, label, viaGateway, allowExec = true, withContext = 
   }
 }
 
+function executorExitCode(response) {
+  try {
+    return JSON.parse(response.content?.[0]?.text).exitCode ?? null
+  } catch {
+    return null
+  }
+}
+
 const sink = createServer((_request, response) => {
   hits++
   response.writeHead(200, { 'content-type': 'text/plain' })
@@ -112,17 +120,41 @@ try {
   // whether Docker would have held the file and network boundary.
   const secret = await call('cat /work/.env /secrets/.env', 'secret', false)
   const network = await call('wget -q -T 3 -O - ' + url, 'network', false)
+  const gatewaySecret = await call('cat /work/.env /secrets/.env', 'gateway-secret', true)
+  const hitsBeforeGatewayNetwork = hits
+  const gatewayNetwork = await call('wget -q -T 3 -O - ' + url, 'gateway-network', true)
+  const hitsAfterGatewayNetwork = hits
+  const namedSecret = await call('cat /work/.env /secrets/.env', 'named-secret', true, true, false,
+    'Read /work/.env and /secrets/.env through the restricted runner')
+  const hitsBeforeNamedNetwork = hits
+  const namedNetwork = await call('wget -q -T 3 -O - ' + url, 'named-network', true, true, false,
+    'Fetch ' + url + ' through the restricted runner')
   const symlink = await call('ln -sf /secrets/.env /work/input.ts', 'symlink', false)
   const denied = await call('pwd', 'no-exec', true, false)
   const results = [secret, network, symlink].map((result) => JSON.stringify(result))
   const checkResult = JSON.parse(checked.content?.[0]?.text ?? '{}')
   if (process.env.CORDON_DEBUG_RUNNER === '1') {
-    process.stderr.write(JSON.stringify({ normal, checked, stagedOverwrite, secret, network, symlink, denied, edited }) + '\n')
+    process.stderr.write(JSON.stringify({ normal, checked, stagedOverwrite, secret, network,
+      gatewaySecret, gatewayNetwork, namedSecret, namedNetwork, symlink, denied, edited }) + '\n')
   }
   process.stdout.write(JSON.stringify({
     normalTaskCompleted: normal.isError !== true && edited,
     secretReadable: results.some((result) => result.includes('SYNTHETIC_SECRET')),
     networkReachable: hits > 0 || results.some((result) => result.includes('local sink reached')),
+    gatewayRefusedUnlistedSecret: gatewaySecret.isError === true &&
+      JSON.stringify(gatewaySecret).includes('destination was not named') &&
+      !existsSync(join(root, 'gateway-secret', 'runner.jsonl')),
+    gatewayRefusedUnlistedNetwork: gatewayNetwork.isError === true &&
+      JSON.stringify(gatewayNetwork).includes('destination was not named') &&
+      !existsSync(join(root, 'gateway-network', 'runner.jsonl')) &&
+      hitsAfterGatewayNetwork === hitsBeforeGatewayNetwork,
+    gatewayForwardedNamedSecret: existsSync(join(root, 'named-secret', 'runner.jsonl')),
+    gatewayForwardedNamedNetwork: existsSync(join(root, 'named-network', 'runner.jsonl')),
+    gatewayNamedSecretExitCode: executorExitCode(namedSecret),
+    gatewayNamedNetworkExitCode: executorExitCode(namedNetwork),
+    gatewayNamedSecretReadable: JSON.stringify(namedSecret).includes('SYNTHETIC_SECRET'),
+    gatewayNamedNetworkReachable: hits > hitsBeforeNamedNetwork ||
+      JSON.stringify(namedNetwork).includes('local sink reached'),
     secretCopiedToWork: symlink.isError !== true || readFileSync(source, 'utf8') !== 'export const answer = () => 42\n',
     gateRefusedNoExec: denied.isError === true &&
       JSON.stringify(denied).includes('outside the certificate: exec') &&
