@@ -81,6 +81,12 @@ const server = createServer(async (request, response) => {
     process.stderr.write('CORDON_MODEL_TOOL_DECLARATIONS=' +
       JSON.stringify(visibleTools) + '\n')
   }
+  // This captures the exact forwarded request only in a disposable local-model
+  // benchmark. It can contain prompt text, so the caller keeps it in private
+  // scratch and never includes it in the published result.
+  if (process.env.CORDON_MODEL_CAPTURE_REQUESTS === '1') {
+    process.stderr.write('CORDON_MODEL_REQUEST=' + forwardedBody + '\n')
+  }
   const target = new URL('/v1/responses', upstream)
   const forwarded = requestHttp(target, {
     method: 'POST', headers: { 'content-type': 'application/json',

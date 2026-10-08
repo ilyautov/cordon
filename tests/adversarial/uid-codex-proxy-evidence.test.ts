@@ -40,5 +40,28 @@ describe('local-model decoding evidence', () => {
     expect(capture.valid.sha256).toMatch(/^[a-f0-9]{64}$/u)
     expect(capture.missing.valid).toBe(false)
     expect(capture.changed.valid).toBe(false)
+    const requestsOutput = execFileSync(process.execPath, ['--input-type=module', '-e', `
+      import { capturedModelRequests } from './bench/model-origin/uid-codex-request-capture.mjs'
+      const request = { model: 'local', input: 'SYNTHETIC_PROMPT', tools: [] }
+      const marker = 'CORDON_MODEL_REQUEST=' + JSON.stringify(request)
+      process.stdout.write(JSON.stringify({ valid: capturedModelRequests(
+        [marker, marker].join('\\n'), 2, 'local'),
+        missing: capturedModelRequests(marker, 2, 'local'),
+        changedModel: capturedModelRequests('CORDON_MODEL_REQUEST=' +
+          JSON.stringify({ ...request, model: 'other' }), 1, 'local') }))
+    `], { cwd: process.cwd(), encoding: 'utf8' })
+    const requests = JSON.parse(requestsOutput)
+    expect(requests.valid).toMatchObject({ valid: true, markers: 2,
+      requests: [{ input: 'SYNTHETIC_PROMPT' }, { input: 'SYNTHETIC_PROMPT' }] })
+    expect(requests.valid.sha256).toMatch(/^[a-f0-9]{64}$/u)
+    expect(requests.missing.valid).toBe(false)
+    expect(requests.changedModel.valid).toBe(false)
+    const failureOutput = execFileSync(process.execPath, ['--input-type=module', '-e', `
+      import { proxyLogReadFailure } from './bench/model-origin/uid-codex-request-capture.mjs'
+      process.stdout.write(proxyLogReadFailure({ status: null, signal: 'SIGTERM',
+        error: { code: 'ENOBUFS' }, stderr: 'PRIVATE_PROMPT' }))
+    `], { cwd: process.cwd(), encoding: 'utf8' })
+    expect(failureOutput).toContain('ENOBUFS')
+    expect(failureOutput).not.toContain('PRIVATE_PROMPT')
   })
 })

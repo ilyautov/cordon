@@ -92,7 +92,8 @@ describe('benchmark model proxy', () => {
         [join(process.cwd(), 'bench/model-origin/ollama-proxy.mjs')], {
           env: { ...process.env, CORDON_MODEL_ID: 'qwen2.5:3b',
             CORDON_MODEL_UPSTREAM: `http://127.0.0.1:${address.port}`,
-            CORDON_MODEL_PORT: '0', CORDON_MODEL_CAPTURE_TOOLS: '1' },
+            CORDON_MODEL_PORT: '0', CORDON_MODEL_CAPTURE_TOOLS: '1',
+            CORDON_MODEL_CAPTURE_REQUESTS: '1' },
           stdio: ['ignore', 'ignore', 'pipe'],
         })
       children.push(capture)
@@ -116,7 +117,12 @@ describe('benchmark model proxy', () => {
       expect(captureLine).toBeDefined()
       expect(JSON.parse(captureLine!.slice('CORDON_MODEL_TOOL_DECLARATIONS='.length)))
         .toEqual([tool, namespace])
-      expect(captureStderr).not.toContain('SECRET_CONTENT_MARKER')
+      const requestLine = captureStderr.split('\n')
+        .find((line) => line.startsWith('CORDON_MODEL_REQUEST='))
+      expect(requestLine).toBeDefined()
+      expect(JSON.parse(requestLine!.slice('CORDON_MODEL_REQUEST='.length)))
+        .toEqual({ model: 'qwen2.5:3b', input: 'SECRET_CONTENT_MARKER',
+          stream: true, tools: [tool, namespace] })
     } finally {
       upstream.close()
     }
