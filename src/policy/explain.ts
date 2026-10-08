@@ -184,7 +184,7 @@ export function lint(policy: Policy): LintFinding[] {
     found.push({ level: 'warning', text: 'exec in autonomous mode: before an untrusted read any shell command runs unasked, and after one a command runs whenever what it names was named by you' })
   }
   if (granted.includes('exec')) {
-    found.push({ level: 'note', text: 'exec is granted: a shell command\'s text is not parsed, so no path or host bound reaches it' })
+    found.push({ level: 'note', text: 'exec is granted: a shell command\'s text is not parsed, so Cordon cannot enforce path or host bounds or prevent network access by withholding network-egress' })
   }
   for (const [tool, effects] of Object.entries(policy.tools)) {
     // A declaration replaces the built-in class. `Bash: [read]` makes every
@@ -205,7 +205,7 @@ export function lint(policy: Policy): LintFinding[] {
   for (const effect of granted) {
     if (IRREVERSIBLE.has(effect)) found.push({ level: 'note', text: `${effect} is granted, and it cannot be undone` })
   }
-  if ((granted.includes('network-egress') || granted.includes('exec')) && policy.profile.resources.hosts.length === 0) {
+  if (granted.includes('network-egress') && policy.profile.resources.hosts.length === 0) {
     found.push({ level: 'note', text: 'the network is granted with no hosts listed: any host is reachable' })
   }
   const budgeted = new Set((policy.budgets ?? []).map((budget) => budget.effect))

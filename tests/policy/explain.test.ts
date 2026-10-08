@@ -169,4 +169,10 @@ describe('lint', () => {
   it('notes a network grant with no hosts named', () => {
     expect(found(policy({ profile: { effects: ['read', 'network-egress'], resources: { paths: [], hosts: [] } } }))).toMatch(/note: .*any host/)
   })
+
+  it('does not claim network-egress is granted by an exec-only policy', () => {
+    const out = found(policy({ mode: 'interactive', profile: { effects: ['read', 'exec'], resources: { paths: [], hosts: [] } } }))
+    expect(out).toMatch(/note: exec is granted/)
+    expect(out).not.toMatch(/the network is granted/)
+  })
 })

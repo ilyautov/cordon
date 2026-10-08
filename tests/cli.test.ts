@@ -490,6 +490,13 @@ describe('cordon policy check and explain', () => {
     expect(stdout).toContain('financial is granted')
   })
 
+  it('distinguishes exec reach from a network-egress grant', () => {
+    const { stdout, status } = run(['policy', 'check', file('mode: interactive\nprofile:\n  effects: [read, exec]\n')], '', {})
+    expect(status).toBe(0)
+    expect(stdout).toContain('cannot enforce path or host bounds or prevent network access by withholding network-egress')
+    expect(stdout).not.toContain('the network is granted')
+  })
+
   it('check fails a file the loader would refuse, with the loader\'s words', () => {
     const { stderr, status } = run(['policy', 'check', file('mode: sometimes\n')], '', {})
     expect(status).toBe(1)
