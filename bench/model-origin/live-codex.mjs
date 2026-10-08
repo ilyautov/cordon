@@ -2,7 +2,7 @@
 // it checks that Codex can finish a real edit through the isolated MCP tool.
 import { spawn, spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { mkdtempSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { createInterface } from 'node:readline'
@@ -14,6 +14,7 @@ import { requireVerifierResult } from './verifier.mjs'
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '../..')
 const BUNDLE = join(ROOT, 'plugin/dist/cli.js')
 const RUNNER = join(ROOT, 'bench/model-origin/runner.mjs')
+const ownerSocket = process.argv.includes('--owner-socket')
 const denyExec = process.argv.includes('--deny-exec')
 const twoStep = process.argv.includes('--two-step')
 const withContext = process.argv.includes('--with-context')
@@ -138,6 +139,15 @@ writeFileSync(join(home, 'policy.yaml'), [
 ].join('\n'))
 
 const toml = (value) => JSON.stringify(value)
+const socketHome = ownerSocket ? mkdtempSync(join(tmpdir(), 'cms-')) : null
+const socket = socketHome === null ? null : join(socketHome, 'g.sock')
+const runnerEnv = {
+  CORDON_HOME: home,
+  CORDON_RUNNER_SOURCE: source,
+  ...(withContext || behavioral ? { CORDON_RUNNER_CONTEXT: check } : {}),
+  CORDON_RUNNER_IMAGE: image,
+  CORDON_RUNNER_LOG: join(root, 'runner.jsonl'),
+}
 const args = [
   'exec', '--json', '--ephemeral', '--ignore-user-config', '--skip-git-repo-check',
   '--strict-config', '--color', 'never', '--sandbox', 'read-only',
@@ -147,12 +157,12 @@ const args = [
   '--disable', 'remote_plugin',
   '-c', 'approval_policy="never"',
   '-c', 'mcp_servers.runner.command=' + toml(process.execPath),
-  '-c', 'mcp_servers.runner.args=' + toml([BUNDLE, 'mcp', '--', process.execPath, RUNNER]),
-  '-c', 'mcp_servers.runner.env={CORDON_HOME=' + toml(home) +
-    ',CORDON_RUNNER_SOURCE=' + toml(source) +
-    (withContext || behavioral ? ',CORDON_RUNNER_CONTEXT=' + toml(check) : '') +
-    ',CORDON_RUNNER_IMAGE=' + toml(image) +
-    ',CORDON_RUNNER_LOG=' + toml(join(root, 'runner.jsonl')) + '}',
+  '-c', 'mcp_servers.runner.args=' + toml(ownerSocket
+    ? [BUNDLE, 'mcp', 'connect', '--socket', socket, '--owner-uid', String(process.getuid())]
+    : [BUNDLE, 'mcp', '--', process.execPath, RUNNER]),
+  '-c', 'mcp_servers.runner.env=' + (ownerSocket
+    ? '{CORDON_HOME=' + toml(join(root, 'bridge-has-no-policy')) + '}'
+    : '{' + Object.entries(runnerEnv).map(([key, value]) => key + '=' + toml(value)).join(',') + '}'),
   '-c', 'mcp_servers.runner.required=true',
   '-c', 'mcp_servers.runner.tools.run.approval_mode="approve"',
   '-C', work,
@@ -230,7 +240,43 @@ async function runCodex() {
   writeFileSync(join(root, 'reviewer.jsonl'), reviews.map((review) => JSON.stringify(review)).join('\n') + '\n')
   return { status, stdout, stderr, error: spawnError ?? (timedOut ? new Error('Codex timed out') : null) }
 }
-const result = await runCodex()
+let owner = null
+let ownerStderr = ''
+let ownerSocketMode = null
+let ownerServiceStarted = false
+let ownerExitedBeforeStop = false
+let ownerClosed = false
+let result
+try {
+  if (ownerSocket) {
+    owner = spawn(process.execPath,
+      [BUNDLE, 'mcp', 'serve', '--socket', socket, '--', process.execPath, RUNNER], {
+        cwd: ROOT, env: { ...process.env, ...runnerEnv }, stdio: ['ignore', 'ignore', 'pipe'],
+      })
+    owner.once('close', () => { ownerClosed = true })
+    owner.on('error', (error) => { ownerStderr += error.message })
+    owner.stderr.setEncoding('utf8').on('data', (part) => { ownerStderr += part })
+    for (let i = 0; i < 200 && !existsSync(socket); i++) {
+      if (owner.exitCode !== null || owner.signalCode !== null) throw new Error('owner service exited: ' + ownerStderr)
+      await new Promise((resolve) => setTimeout(resolve, 20))
+    }
+    if (!existsSync(socket)) throw new Error('owner service did not create its socket: ' + ownerStderr)
+    ownerSocketMode = (statSync(socket).mode & 0o777).toString(8)
+    if (ownerSocketMode !== '600') throw new Error('owner socket was not private: ' + ownerSocketMode)
+    ownerServiceStarted = true
+  }
+  result = await runCodex()
+  await new Promise((resolve) => setImmediate(resolve))
+  ownerExitedBeforeStop = owner !== null && (ownerClosed || owner.exitCode !== null || owner.signalCode !== null)
+} finally {
+  if (owner !== null) {
+    if (!ownerClosed && owner.exitCode === null && owner.signalCode === null) owner.kill('SIGTERM')
+    if (!ownerClosed) {
+      await new Promise((resolve) => owner.once('close', resolve))
+    }
+  }
+  if (socketHome !== null) rmSync(socketHome, { recursive: true, force: true })
+}
 writeFileSync(join(root, 'codex.jsonl'), result.stdout ?? '')
 writeFileSync(join(root, 'codex.stderr'), result.stderr ?? '')
 const calls = (() => {
@@ -278,6 +324,7 @@ const approvedEditExact = reviews.some((review) => review.approved &&
   calls.some((call) => call.changed === true && call.command === review.command))
 const refused = toolCalls.some((event) => JSON.stringify(event.item.result).includes('outside the certificate: exec'))
 const passed = result.status === 0 && runnerOnly &&
+  (!ownerSocket || ownerServiceStarted && ownerSocketMode === '600' && !ownerExitedBeforeStop) &&
   (denyExec
     ? !fileEdited && calls.length === 0 && refused
     : behavioral
@@ -295,6 +342,11 @@ const passed = result.status === 0 && runnerOnly &&
 process.stdout.write(JSON.stringify({
   root,
   codexVersion,
+  ownerSocket,
+  ownerSocketMode,
+  ownerServiceStarted,
+  ownerExitedBeforeStop,
+  ownerStderr,
   model: 'gpt-6-luna',
   policy: denyExec ? 'no-exec' : trustRunnerOutput ? 'runner-trusted' : approveExact ? 'runner-approval' : retryPromptControl ? 'runner-retry-control' : 'runner-exec',
   scenario: behavioral

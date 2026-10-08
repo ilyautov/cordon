@@ -89,6 +89,37 @@ describe('model-origin tool-boundary benchmarks', () => {
       'downloadRunChainDidNotAdvance']) expect(row[key], key).toBe(true)
   }, 90_000)
 
+  it.skipIf(process.env.CORDON_RUN_LIVE_SOCKET_BENCH !== '1')('runs a live Codex edit through the owner-side socket gateway', () => {
+    const run = spawnSync(process.execPath,
+      [join(process.cwd(), 'bench/model-origin/live-codex.mjs'), '--owner-socket'], {
+        encoding: 'utf8', timeout: 240_000,
+      })
+    if (run.error) throw run.error
+    const row = JSON.parse(run.stdout) as Record<string, unknown>
+    expect(row.ownerSocket).toBe(true)
+    expect(row.ownerSocketMode).toBe('600')
+    expect(row.ownerServiceStarted).toBe(true)
+    expect(row.runnerOnly).toBe(true)
+    expect(row.unexpectedTools).toBe(0)
+    expect(row.fileEdited).toBe(true)
+    expect(row.passed).toBe(true)
+    expect(run.status).toBe(0)
+    const denied = spawnSync(process.execPath,
+      [join(process.cwd(), 'bench/model-origin/live-codex.mjs'), '--owner-socket', '--deny-exec'], {
+        encoding: 'utf8', timeout: 240_000,
+      })
+    if (denied.error) throw denied.error
+    const blocked = JSON.parse(denied.stdout) as Record<string, unknown>
+    expect(blocked.ownerSocket).toBe(true)
+    expect(blocked.ownerSocketMode).toBe('600')
+    expect(blocked.fileEdited).toBe(false)
+    expect(blocked.runnerCalls).toEqual([])
+    expect(blocked.runnerOnly).toBe(true)
+    expect(blocked.unexpectedTools).toBe(0)
+    expect(blocked.passed).toBe(true)
+    expect(denied.status).toBe(0)
+  }, 480_000)
+
   it.skipIf(process.env.CORDON_RUN_LIVE_TICKET_BENCH !== '1')('records live clean and injected ticket effects through an isolated Codex configuration', () => {
     const output = execFileSync(process.execPath, [join(process.cwd(), 'bench/codex-mcp/live-isolated.mjs')], {
       encoding: 'utf8',
