@@ -176,6 +176,7 @@ export function runGateway(options: GatewayOptions): Promise<number> {
     const pending = new Map<string, Pending>()
 
     const onHostLine = (line: string): void => {
+      if (settled) return
       let message: Message
       try {
         message = parseLine(line)
@@ -262,6 +263,9 @@ export function runGateway(options: GatewayOptions): Promise<number> {
     }
 
     const onUpstreamLine = (line: string): void => {
+      // readline can emit later lines from a chunk after finish() kills the
+      // upstream. A buffered notification must not escape the stopped gate.
+      if (settled) return
       let message: Message
       try {
         message = parseLine(line)
@@ -283,6 +287,27 @@ export function runGateway(options: GatewayOptions): Promise<number> {
       const entry = pending.get(pendingKey(message.id))
       pending.delete(pendingKey(message.id))
       if (entry === undefined) {
+        // The untrusted server has no host waiter for this response. Passing
+        // it through would expose content that never went through observation.
+        // A duplicate response is also a protocol break, so stop loudly.
+        finish(1, 'unsolicited upstream response without a matching host request')
+        return
+      }
+
+      if (Object.hasOwn(message.value, 'error')) {
+        const error = asRecord(message.value['error'])
+        const tool = entry.call?.tool ?? entry.method
+        const label = entry.call === undefined ? (entry.label ?? entry.method) : sourceLabel(entry.call)
+        const source = classifySource({ kind: 'tool', label, tool }, options.policy)
+        if (error !== null && typeof error['message'] === 'string') {
+          observeInto(error, 'message', tool, source, cordon)
+        } else {
+          cordon.markUnredacted()
+        }
+        // JSON-RPC error data has no MCP text-block shape. The host may show
+        // it to the model, so opaque data carries the same unredacted mark as
+        // an image or an unknown tool-result block.
+        if (error !== null && Object.hasOwn(error, 'data')) cordon.markUnredacted()
         sendToHost(message.value)
         return
       }

@@ -132,4 +132,6 @@ The approval is the owner's word, and an agent with a shell could try to say it 
 
 Better than the hooks', and worth saying out loud. A crashed or timed-out hook reads as "let it through" on both coding harnesses. A dead gateway is a dead MCP server: calls simply do not go through, and the host shows the error. A broken line from the upstream, a dead upstream, an unusable state directory — each stops the gateway loudly instead of degrading it into a proxy that no longer checks anything. Fail-open by timeout does not exist here by construction: the gateway sits inside the pipe, and nothing reaches the model without passing through it.
 
+A response from the upstream with no matching host request also stops the gateway; it cannot carry unobserved content to the host. A JSON-RPC error for a known request is different: its message is observed as untrusted source text, and opaque `error.data` marks the session as unredacted before the host receives it. The next consequential call therefore faces the exposure rule even when the earlier tool failed.
+
 One exception, honestly named: a refusal arrives as a tool result with `isError: true`, and what the model does with that text is the model's business. The call itself did not happen — that part is guaranteed.

@@ -122,6 +122,20 @@ describe('the MCP gateway', () => {
     expect(await gateway.stop()).toBe(0)
   })
 
+  it('stops when an upstream sends a response for no host request', async () => {
+    const gateway = start(basePolicy(), { FAKE_UNSOLICITED: '1' })
+    try {
+      gateway.send({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} })
+      expect((await gateway.next()).id).toBe(1)
+      await new Promise((resolve) => setTimeout(resolve, 10))
+      expect(gateway.queued()).toBe(0)
+      expect(await gateway.done).toBe(1)
+      expect(gateway.logs.join('\n')).toContain('unsolicited upstream response')
+    } finally {
+      await gateway.stop()
+    }
+  })
+
   it('cleans a poisoned tool description before the model sees it', async () => {
     const gateway = start(basePolicy())
     gateway.send({ jsonrpc: '2.0', id: 1, method: 'tools/list' })
@@ -164,6 +178,40 @@ describe('the MCP gateway', () => {
     expect(result.isError).toBeUndefined()
     expect(result.content[0]!.text).toContain(VISIBLE_FRAGMENT)
     expect(result.content[0]!.text).not.toContain(HIDDEN)
+    expect(await gateway.stop()).toBe(0)
+  })
+
+  it('treats an upstream tool error as an untrusted read before a later update', async () => {
+    const env = { ...withCallLog(), FAKE_TOOL_ERROR: '1' }
+    const gateway = start(basePolicy(), env)
+    gateway.send({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'poisoned_page', arguments: {} } })
+    const errored = await gateway.next()
+    expect((errored.error as { message: string }).message).toContain('product page could not be read')
+
+    gateway.send({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: {
+      name: 'update_price', arguments: { nmId: '99887766', price: 1 },
+    } })
+    const update = (await gateway.next()).result as { isError?: boolean; content: Array<{ text: string }> }
+    expect(update.isError).toBe(true)
+    expect(update.content[0]!.text).toContain('untrusted content')
+    expect(callLog(env)).toEqual([])
+    expect(await gateway.stop()).toBe(0)
+  })
+
+  it('marks opaque upstream error data as unredacted', async () => {
+    const env = { ...withCallLog(), FAKE_TOOL_ERROR_DATA: '1' }
+    const gateway = start(basePolicy(), env)
+    gateway.send({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'poisoned_page', arguments: {} } })
+    const errored = await gateway.next()
+    expect((errored.error as { data: { detail: string } }).data.detail).toBe('opaque server data')
+
+    gateway.send({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: {
+      name: 'update_price', arguments: { nmId: '99887766', price: 1 },
+    } })
+    const update = (await gateway.next()).result as { isError?: boolean; content: Array<{ text: string }> }
+    expect(update.isError).toBe(true)
+    expect(update.content[0]!.text).toContain('could not be stripped')
+    expect(callLog(env)).toEqual([])
     expect(await gateway.stop()).toBe(0)
   })
 

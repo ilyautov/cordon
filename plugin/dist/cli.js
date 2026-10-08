@@ -15639,6 +15639,7 @@ function runGateway(options) {
     };
     const pending = /* @__PURE__ */ new Map();
     const onHostLine = (line) => {
+      if (settled) return;
       let message;
       try {
         message = parseLine(line);
@@ -15716,6 +15717,7 @@ function runGateway(options) {
       sendUpstream(message.value);
     };
     const onUpstreamLine = (line) => {
+      if (settled) return;
       let message;
       try {
         message = parseLine(line);
@@ -15730,6 +15732,20 @@ function runGateway(options) {
       const entry = pending.get(pendingKey(message.id));
       pending.delete(pendingKey(message.id));
       if (entry === void 0) {
+        finish(1, "unsolicited upstream response without a matching host request");
+        return;
+      }
+      if (Object.hasOwn(message.value, "error")) {
+        const error = asRecord(message.value["error"]);
+        const tool = entry.call?.tool ?? entry.method;
+        const label = entry.call === void 0 ? entry.label ?? entry.method : sourceLabel(entry.call);
+        const source = classifySource({ kind: "tool", label, tool }, options.policy);
+        if (error !== null && typeof error["message"] === "string") {
+          observeInto(error, "message", tool, source, cordon);
+        } else {
+          cordon.markUnredacted();
+        }
+        if (error !== null && Object.hasOwn(error, "data")) cordon.markUnredacted();
         sendToHost(message.value);
         return;
       }

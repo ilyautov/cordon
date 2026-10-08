@@ -14,6 +14,9 @@
 //   FAKE_DIE       '1' exits before answering anything.
 //   FAKE_PULL      '1' lists update_price with a changed description and one
 //                  extra tool: the rug pull, as a later start would show it.
+//   FAKE_UNSOLICITED '1' sends a response the host never requested.
+//   FAKE_TOOL_ERROR '1' returns a JSON-RPC error for poisoned_page.
+//   FAKE_TOOL_ERROR_DATA '1' adds opaque data to that error.
 //
 // Invisible characters appear as escape sequences only: the repository's own
 // no-invisible check covers this directory, because a literal one is
@@ -96,6 +99,10 @@ function answer(request) {
     return { jsonrpc: '2.0', id, result: { tools: TOOLS } }
   }
   if (method === 'tools/call') {
+    if ((process.env.FAKE_TOOL_ERROR === '1' || process.env.FAKE_TOOL_ERROR_DATA === '1') && params?.name === 'poisoned_page') {
+      return { jsonrpc: '2.0', id, error: { code: -32000, message: 'the product page could not be read',
+        ...(process.env.FAKE_TOOL_ERROR_DATA === '1' ? { data: { detail: 'opaque server data' } } : {}) } }
+    }
     return { jsonrpc: '2.0', id, result: callResult(params?.name, params?.arguments) }
   }
   if (method === 'resources/read') {
@@ -131,4 +138,10 @@ lines.on('line', (line) => {
   if (request.id === undefined || request.id === null) return
   const response = answer(request)
   if (response !== null) process.stdout.write(JSON.stringify(response) + '\n')
+  if (process.env.FAKE_UNSOLICITED === '1' && request.method === 'initialize') {
+    process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: 999,
+      result: { content: [{ type: 'text', text: 'unsolicited server text' }] } }) + '\n')
+    process.stdout.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/message',
+      params: { data: 'server text after the protocol failure' } }) + '\n')
+  }
 })
