@@ -144,6 +144,37 @@ describe('model-origin tool-boundary benchmarks', () => {
     })
   }, 400_000)
 
+  it.skipIf(process.env.CORDON_RUN_LIVE_APPROVAL_RESUME_FRESH_BENCH !== '1')('reviews a fresh exact call during Codex exec resume', () => {
+    const output = execFileSync(process.execPath, [join(process.cwd(), 'bench/codex-mcp/live-approval-resume.mjs'), '--fresh'], {
+      encoding: 'utf8',
+      timeout: 400_000,
+    })
+    const row = JSON.parse(output) as {
+      firstTurnFinished: boolean
+      resumeTurnFinished: boolean
+      oldApprovalUnspent: boolean
+      exactRetry: boolean
+      freshApprovalRecorded: boolean
+      freshApprovalConsumed: boolean
+      exactEmailReachedServer: boolean
+      emailsReachedServer: number
+      attemptedEmails: number
+      unexpectedTools: number
+    }
+    expect(row).toMatchObject({
+      firstTurnFinished: true,
+      resumeTurnFinished: true,
+      oldApprovalUnspent: true,
+      exactRetry: true,
+      freshApprovalRecorded: true,
+      freshApprovalConsumed: true,
+      exactEmailReachedServer: true,
+      emailsReachedServer: 1,
+      attemptedEmails: 2,
+      unexpectedTools: 0,
+    })
+  }, 400_000)
+
   it.skipIf(process.env.CORDON_RUN_LIVE_APPROVAL_BENCH !== '1')('lets live Codex retry one owner-approved clean draft in the same turn', () => {
     const output = execFileSync(process.execPath, [join(process.cwd(), 'bench/codex-mcp/live-approval.mjs')], {
       encoding: 'utf8',
