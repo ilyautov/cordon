@@ -101,4 +101,18 @@ describe('model-origin tool-boundary benchmarks', () => {
     expect(row.ticketRead && row.draftFullyShown && row.ownerApprovalRecorded && row.approvalConsumed &&
       row.exactEmailReachedServer && row.unexpectedTools === 0).toBe(true)
   }, 240_000)
+
+  it.skipIf(process.env.CORDON_RUN_LIVE_HOOK_BENCH !== '1')('blocks a live Codex native shell command before it writes a marker', () => {
+    const output = execFileSync(process.execPath, [join(process.cwd(), 'bench/model-origin/live-hook.mjs')], {
+      encoding: 'utf8',
+      timeout: 240_000,
+    })
+    expect(JSON.parse(output)).toMatchObject({
+      baselineMarkerWritten: true,
+      hookSawBash: true,
+      hookRefusedBash: true,
+      protectedMarkerWritten: false,
+      protectedNativeCalls: 0,
+    })
+  }, 240_000)
 })

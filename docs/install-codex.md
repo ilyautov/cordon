@@ -23,13 +23,15 @@ Add to `~/.codex/hooks.json` (or a project's `.codex/hooks.json`), merging with 
 }
 ```
 
-Codex runs a new hook only after it is trusted: open `/hooks` in the Codex TUI and trust the three entries. Until then they do not run, and nothing says so in `codex exec`.
+For a project-local `.codex/hooks.json`, first trust the project so Codex loads its `.codex/` configuration layer. Then open `/hooks` in the Codex TUI and trust the three hook entries. The project layer and the hooks have separate trust checks; [Codex's hook documentation](https://learn.chatgpt.com/docs/hooks?site_variant=chatgpt&translationFallback=zh-Hans) describes both. Until the hook actually runs, `codex exec` can execute native tools without a Cordon journal entry.
 
 ## Checking that it works
 
 ```bash
 cordon doctor
 ```
+
+Confirm that `cordon log --last 1` gains a new refusal event after the check below. If the journal stays unchanged, check project and hook trust before treating the installation as active.
 
 Then, in a scratch directory, ask the agent to read https://example.com and save a summary to a file whose name it picks itself. Under `coding`, which asks in doubt, the write must be refused with a `cordon approve <id>` line, because the file was not named by you after an untrusted read, and `cordon log --last 1` must show it. (Under the autonomous `locked` profile it is refused too, with no id: nobody is asked there.)
 
