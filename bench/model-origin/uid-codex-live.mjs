@@ -398,11 +398,16 @@ if (!resultLine || bridgeCode !== 0 || (!behavioral && agentCode !== 0) ||
     bridgeExitCode: bridgeCode, bridgeSignal: bridge?.signalCode ?? null,
     modelCalls: proxyEvidence.modelCalls,
     runnerRuns: parseJsonl(runnerLog),
+    journal: parseJsonl(join(home, 'events.jsonl')),
+    reviews,
     ownerSourceEdited: readFileSync(source, 'utf8') !== initialSource,
     finalAgentResultPresent: Boolean(resultLine),
   })
   writeFileSync(join(root, 'incomplete-result.json'),
     JSON.stringify({ ...partial, agentTimeLimitMs, agentCloseSettled,
+      modelId, modelDigest: found.digest, agentImage, runnerImage,
+      scenario, comparisonArm, ownerPolicyMode: interactiveReview ? 'interactive' : 'autonomous',
+      retryPrompt,
       bridgeCloseSettled, decodeMode, decodeModeMarkers: proxyEvidence.decodeModeMarkers,
       toolListObservation: toolListTap?.snapshot() ?? null }, null, 2) + '\n')
   for (const [name, contents] of [
