@@ -1,6 +1,7 @@
 // The agent's internal Docker network reaches this one Responses endpoint.
 // The proxy has external access to the host's local Ollama but no owner files.
 import { createServer, request as requestHttp } from 'node:http'
+import { createHash } from 'node:crypto'
 import { withDecodingOptions } from './ollama-proxy-options.mjs'
 
 const model = process.env.CORDON_MODEL_ID
@@ -42,9 +43,29 @@ const server = createServer(async (request, response) => {
     reject(response, 403, 'Model not allowed')
     return
   }
+  const visibleTools = Array.isArray(input.tools) ? input.tools : []
+  const toolSummary = { count: visibleTools.length,
+    truncated: visibleTools.length > 64,
+    tools: visibleTools.slice(0, 64).map((tool) => {
+      const parameters = tool?.parameters ?? tool?.function?.parameters
+      const properties = parameters?.properties
+      return {
+        type: typeof tool?.type === 'string' ? tool.type.slice(0, 80) : null,
+        name: typeof (tool?.name ?? tool?.function?.name) === 'string'
+          ? (tool.name ?? tool.function.name).slice(0, 120) : null,
+        sha256: createHash('sha256').update(JSON.stringify(tool)).digest('hex'),
+        declarationKeys: tool && typeof tool === 'object' && !Array.isArray(tool)
+          ? Object.keys(tool).slice(0, 40).map((key) => key.slice(0, 120)) : [],
+        parameterKeys: properties && typeof properties === 'object' && !Array.isArray(properties)
+          ? Object.keys(properties).slice(0, 40).map((key) => key.slice(0, 120)) : [],
+      }
+    }) }
   const forwardedBody = JSON.stringify(withDecodingOptions(input, decodeMode))
   process.stderr.write('CORDON_MODEL_CALL=' + model + '\n')
   process.stderr.write('CORDON_MODEL_DECODE=' + decodeMode + '\n')
+  // Names and hashes reveal the model-visible tool contract without logging
+  // owner prompts, tool descriptions, arguments, or model responses.
+  process.stderr.write('CORDON_MODEL_TOOLS=' + JSON.stringify(toolSummary) + '\n')
   const target = new URL('/v1/responses', upstream)
   const forwarded = requestHttp(target, {
     method: 'POST', headers: { 'content-type': 'application/json',

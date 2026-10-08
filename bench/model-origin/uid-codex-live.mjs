@@ -50,6 +50,7 @@ const { approveExact, approvePoison, approveDownload, reviewControl, namedTrigge
   reviewOptions(process.argv, scenario)
 const approveHarmful = approvePoison || approveDownload
 const decodeMode = process.argv.includes('--greedy-seed7') ? 'greedy-seed7' : 'passthrough'
+const reducedNativeTools = process.argv.includes('--reduced-native-tools')
 const modelId = process.env.CORDON_LOCAL_MODEL || 'qwen2.5:7b'
 const expectedDigest = process.env.CORDON_LOCAL_MODEL_DIGEST ||
   '845dbda0ea48ed749caafd9e6037047aa19acfcfd82e704d7ca97d631a0b697e'
@@ -315,6 +316,7 @@ try {
     '-e', 'CORDON_LIVE_SCENARIO=' + scenario,
     '-e', 'CORDON_LIVE_TASK=' + behavioralTask,
     '-e', 'CORDON_LIVE_RETRY_PROMPT=' + (retryPrompt ? '1' : '0'),
+    '-e', 'CORDON_REDUCED_NATIVE_TOOLS=' + (reducedNativeTools ? '1' : '0'),
     agentImage, 'node', '/probe/uid-codex-live-agent.mjs',
   ], { stdio: ['pipe', 'pipe', 'pipe'] })
   agentSpawned = true
@@ -407,8 +409,12 @@ if (!resultLine || bridgeCode !== 0 || (!behavioral && agentCode !== 0) ||
     JSON.stringify({ ...partial, agentTimeLimitMs, agentCloseSettled,
       modelId, modelDigest: found.digest, agentImage, runnerImage,
       scenario, comparisonArm, ownerPolicyMode: interactiveReview ? 'interactive' : 'autonomous',
-      retryPrompt,
+      retryPrompt, reducedNativeTools,
       bridgeCloseSettled, decodeMode, decodeModeMarkers: proxyEvidence.decodeModeMarkers,
+      toolSummaryMarkers: proxyEvidence.toolSummaryMarkers,
+      toolSummaryComplete: proxyEvidence.toolSummaryComplete,
+      toolSummaryParseErrors: proxyEvidence.toolSummaryParseErrors,
+      modelToolSummaries: proxyEvidence.toolSummaries,
       toolListObservation: toolListTap?.snapshot() ?? null }, null, 2) + '\n')
   for (const [name, contents] of [
     ['agent-stderr.txt', agentStderr], ['bridge-stderr.txt', bridgeStderr],
@@ -458,11 +464,15 @@ const output = {
   modelId, modelDigest: found.digest, agentImage, runnerImage, socketMode, decodeMode,
   decodeModeMarkers: proxyEvidence.decodeModeMarkers,
   decodeModeApplied: proxyEvidence.decodeModeApplied,
+  toolSummaryMarkers: proxyEvidence.toolSummaryMarkers,
+  toolSummaryComplete: proxyEvidence.toolSummaryComplete,
+  toolSummaryParseErrors: proxyEvidence.toolSummaryParseErrors,
+  modelToolSummaries: proxyEvidence.toolSummaries,
   comparisonArm,
   reviewMode: approvePoison ? 'synthetic-one-documentation-call'
     : approveDownload ? 'synthetic-exact-download-call'
     : approveExact ? 'synthetic-exact-call' : 'none',
-  retryPrompt,
+  retryPrompt, reducedNativeTools,
   ownerPolicyMode: interactiveReview ? 'interactive' : 'autonomous',
   agentExitCode: agentCode, codexExitCode: agentResult.code, turnCompleted: agentResult.turnCompleted,
   modelCalls, modelEndpointAllowed: modelCalls > 0 && agentResult.turnCompleted,

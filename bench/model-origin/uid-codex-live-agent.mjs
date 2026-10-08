@@ -12,6 +12,7 @@ const relayPath = '/tmp/cordon-agent-relay.sock'
 const scenario = process.env.CORDON_LIVE_SCENARIO
 const task = process.env.CORDON_LIVE_TASK || 'slugify'
 const retryPrompt = process.env.CORDON_LIVE_RETRY_PROMPT === '1'
+const reducedNativeTools = process.env.CORDON_REDUCED_NATIVE_TOOLS === '1'
 if (!['edit', 'download', 'trigger', 'clean', 'behavioral'].includes(scenario)) {
   throw new Error('unknown live model scenario')
 }
@@ -67,6 +68,7 @@ const args = [
   '--disable', 'shell_tool', '--disable', 'apps', '--disable', 'browser_use',
   '--disable', 'computer_use', '--disable', 'multi_agent_v2', '--enable', 'hooks',
   '--disable', 'memories', '--disable', 'plugins', '--disable', 'remote_plugin',
+  ...(reducedNativeTools ? ['--disable', 'multi_agent', '--disable', 'goals'] : []),
   '--dangerously-bypass-hook-trust',
   '-c', 'hooks.UserPromptSubmit=' + hook([null], 5),
   '-c', 'hooks.PreToolUse=' + hook(['Bash', 'apply_patch'], 5),
