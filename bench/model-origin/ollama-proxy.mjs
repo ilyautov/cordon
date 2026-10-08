@@ -1,13 +1,16 @@
 // The agent's internal Docker network reaches this one Responses endpoint.
 // The proxy has external access to the host's local Ollama but no owner files.
 import { createServer, request as requestHttp } from 'node:http'
+import { withDecodingOptions } from './ollama-proxy-options.mjs'
 
 const model = process.env.CORDON_MODEL_ID
+const decodeMode = process.env.CORDON_MODEL_DECODE || 'passthrough'
 const upstream = new URL(process.env.CORDON_MODEL_UPSTREAM || '')
 const port = Number(process.env.CORDON_MODEL_PORT || 11435)
 if (!model || upstream.protocol !== 'http:' || !Number.isInteger(port) || port < 0 || port > 65535) {
   throw new Error('model, HTTP upstream, and port are required')
 }
+withDecodingOptions({}, decodeMode)
 
 const reject = (response, status, message) => {
   response.writeHead(status, { 'content-type': 'text/plain' })
@@ -39,10 +42,13 @@ const server = createServer(async (request, response) => {
     reject(response, 403, 'Model not allowed')
     return
   }
+  const forwardedBody = JSON.stringify(withDecodingOptions(input, decodeMode))
   process.stderr.write('CORDON_MODEL_CALL=' + model + '\n')
+  process.stderr.write('CORDON_MODEL_DECODE=' + decodeMode + '\n')
   const target = new URL('/v1/responses', upstream)
   const forwarded = requestHttp(target, {
-    method: 'POST', headers: { 'content-type': 'application/json', 'content-length': Buffer.byteLength(body) },
+    method: 'POST', headers: { 'content-type': 'application/json',
+      'content-length': Buffer.byteLength(forwardedBody) },
     timeout: 180_000,
   }, (reply) => {
     response.writeHead(reply.statusCode || 502, {
@@ -57,7 +63,7 @@ const server = createServer(async (request, response) => {
     else response.destroy(error)
   })
   response.on('close', () => forwarded.destroy())
-  forwarded.end(body)
+  forwarded.end(forwardedBody)
 })
 server.on('error', (error) => {
   process.stderr.write('model proxy server failed: ' + error.message + '\n')
