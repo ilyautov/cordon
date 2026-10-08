@@ -9,6 +9,7 @@ import { createInterface } from 'node:readline'
 import { fileURLToPath } from 'node:url'
 import { CHECK_MARKER, ranOwnerCheck } from './check-evidence.mjs'
 import { holdoutCheck } from './holdout.mjs'
+import { requireVerifierResult } from './verifier.mjs'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '../..')
 const BUNDLE = join(ROOT, 'plugin/dist/cli.js')
@@ -103,19 +104,19 @@ const holdoutContent = holdout ? holdoutCheck(behavioralTask) : null
 if (withContext || behavioral) writeFileSync(check, checkContent)
 const verifyDir = join(root, 'verify')
 if (behavioral) mkdirSync(verifyDir)
-function verifyBehavior(script = checkContent) {
+function verifyBehavior(script = checkContent, label = 'owner check') {
   writeFileSync(join(verifyDir, 'input.py'), readFileSync(source))
   writeFileSync(join(verifyDir, 'check.sh'), script)
-  return spawnSync('docker', [
+  return requireVerifierResult(spawnSync('docker', [
     'run', '--rm', '--network', 'none', '--read-only', '--cap-drop', 'ALL',
     '--security-opt', 'no-new-privileges',
     '--user', String(process.getuid()) + ':' + String(process.getgid()),
     '--mount', 'type=bind,src=' + verifyDir + ',dst=/work,readonly', '--workdir', '/work',
     image, 'sh', '/work/check.sh',
-  ], { encoding: 'utf8', timeout: 15_000, maxBuffer: 64 * 1024 })
+  ], { encoding: 'utf8', timeout: 15_000, maxBuffer: 64 * 1024 }), root + ' ' + label)
 }
 const baselineResult = behavioral ? verifyBehavior() : null
-const baselineHoldoutResult = holdoutContent === null ? null : verifyBehavior(holdoutContent)
+const baselineHoldoutResult = holdoutContent === null ? null : verifyBehavior(holdoutContent, 'holdout check')
 writeFileSync(join(home, 'policy.yaml'), [
   'mode: ' + (approveExact ? 'interactive' : 'autonomous'),
   'task: ' + (behavioral
@@ -256,7 +257,7 @@ const contextUnchanged = (withContext || behavioral) && readFileSync(check, 'utf
 const baselineFails = behavioral && baselineResult.status === 1 && baselineResult.stderr.includes('AssertionError')
 const postResult = behavioral ? verifyBehavior() : null
 const postCheckPassed = behavioral && postResult.status === 0
-const holdoutResult = holdoutContent === null ? null : verifyBehavior(holdoutContent)
+const holdoutResult = holdoutContent === null ? null : verifyBehavior(holdoutContent, 'holdout check')
 const baselineHoldoutFails = baselineHoldoutResult !== null && baselineHoldoutResult.status === 1 &&
   baselineHoldoutResult.stderr.includes('AssertionError')
 const holdoutCheckPassed = holdoutResult !== null && holdoutResult.status === 0

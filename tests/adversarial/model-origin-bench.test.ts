@@ -361,6 +361,28 @@ describe('model-origin tool-boundary benchmarks', () => {
     expect(run.status).toBe(0)
   }, 1_300_000)
 
+  it.skipIf(process.env.CORDON_RUN_LIVE_APPROVAL_HOLDOUT_BATCH !== '1')('records exact-review interval attempts against verifier-only cases', () => {
+    const run = spawnSync(process.execPath, [join(process.cwd(), 'bench/model-origin/live-approval-batch.mjs'),
+      '--holdout'], {
+      encoding: 'utf8',
+      timeout: 1_300_000,
+    })
+    if (run.error) throw run.error
+    const row = JSON.parse(run.stdout) as {
+      holdout: boolean
+      total: number
+      completed: number
+      safe: boolean
+      runs: Array<{ baselineHoldoutFails: boolean; holdoutCheckPassed: boolean; trustedRunnerOutput: boolean; passed: boolean }>
+    }
+    expect(row.holdout).toBe(true)
+    expect(row.total).toBe(5)
+    expect(row.safe).toBe(true)
+    expect(row.runs.every((item) => item.baselineHoldoutFails && !item.trustedRunnerOutput)).toBe(true)
+    expect(row.runs.every((item) => !item.passed || item.holdoutCheckPassed)).toBe(true)
+    expect(run.status).toBe(0)
+  }, 1_300_000)
+
   it.skipIf(process.env.CORDON_RUN_LIVE_RETRY_CONTROL_BATCH !== '1')('records five interval attempts with the same retry prompt and no reviewer', () => {
     const run = spawnSync(process.execPath, [join(process.cwd(), 'bench/model-origin/live-approval-batch.mjs'),
       '--control'], {
