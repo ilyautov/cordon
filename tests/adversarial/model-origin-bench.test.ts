@@ -123,4 +123,23 @@ describe('model-origin tool-boundary benchmarks', () => {
       userNativeCalls: 0,
     })
   }, 240_000)
+
+  it.skipIf(process.env.CORDON_RUN_LIVE_COMBINED_BENCH !== '1')('blocks native shell while a gated runner completes a live file edit', () => {
+    const output = execFileSync(process.execPath, [join(process.cwd(), 'bench/model-origin/live-combined.mjs')], {
+      encoding: 'utf8',
+      timeout: 360_000,
+    })
+    const row = JSON.parse(output) as { baselineNativeCalls: number }
+    expect(row).toMatchObject({
+      baselineMarkerWritten: true,
+      hookRefusedBash: true,
+      protectedMarkerWritten: false,
+      protectedNativeCalls: 0,
+      fileEdited: true,
+      runnerCalls: 1,
+      utilityNativeCalls: 0,
+      unexpectedTools: 0,
+    })
+    expect(row.baselineNativeCalls).toBeGreaterThan(0)
+  }, 360_000)
 })
