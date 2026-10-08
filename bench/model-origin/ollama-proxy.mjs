@@ -75,6 +75,12 @@ const server = createServer(async (request, response) => {
   // Names and hashes reveal the model-visible tool contract without logging
   // owner prompts, tool descriptions, arguments, or model responses.
   process.stderr.write('CORDON_MODEL_TOOLS=' + JSON.stringify(toolSummary) + '\n')
+  // Opt-in capture is for matched-schema bench probes. Keep it separate from
+  // the normal privacy-preserving log, and never serialize the request input.
+  if (process.env.CORDON_MODEL_CAPTURE_TOOLS === '1') {
+    process.stderr.write('CORDON_MODEL_TOOL_DECLARATIONS=' +
+      JSON.stringify(visibleTools) + '\n')
+  }
   const target = new URL('/v1/responses', upstream)
   const forwarded = requestHttp(target, {
     method: 'POST', headers: { 'content-type': 'application/json',

@@ -16,7 +16,7 @@ import { incompleteRun } from './uid-codex-incomplete.mjs'
 import { ownerTask } from './uid-codex-owner-task.mjs'
 import { reviewOptions } from './uid-codex-review-options.mjs'
 import { removeNamedAgent } from './uid-codex-agent-cleanup.mjs'
-import { modelProxyEvidence } from './uid-codex-proxy-evidence.mjs'
+import { modelProxyEvidence, modelToolDeclarations } from './uid-codex-proxy-evidence.mjs'
 import { ToolListTap } from './uid-codex-tool-list-tap.mjs'
 import { waitChildClose } from './uid-codex-wait-child.mjs'
 import { requireVerifierResult } from './verifier.mjs'
@@ -51,6 +51,7 @@ const { approveExact, approvePoison, approveDownload, reviewControl, namedTrigge
 const approveHarmful = approvePoison || approveDownload
 const decodeMode = process.argv.includes('--greedy-seed7') ? 'greedy-seed7' : 'passthrough'
 const reducedNativeTools = process.argv.includes('--reduced-native-tools')
+const captureModelTools = process.argv.includes('--capture-model-tools')
 const modelId = process.env.CORDON_LOCAL_MODEL || 'qwen2.5:7b'
 const expectedDigest = process.env.CORDON_LOCAL_MODEL_DIGEST ||
   '845dbda0ea48ed749caafd9e6037047aa19acfcfd82e704d7ca97d631a0b697e'
@@ -269,6 +270,7 @@ try {
       ',dst=/ollama-proxy-options.mjs,readonly',
     '-e', 'CORDON_MODEL_ID=' + modelId,
     '-e', 'CORDON_MODEL_DECODE=' + decodeMode,
+    '-e', 'CORDON_MODEL_CAPTURE_TOOLS=' + (captureModelTools ? '1' : '0'),
     '-e', 'CORDON_MODEL_UPSTREAM=http://host.docker.internal:11434',
     '-e', 'CORDON_MODEL_PORT=11435',
     agentImage, 'node', '/proxy.mjs'], 'start narrow model proxy')
@@ -390,6 +392,11 @@ if (reviewerError !== null) throw new Error('owner reviewer failed: ' + reviewer
 if (interactiveReview) writeFileSync(join(root, 'reviewer.jsonl'),
   reviews.map((review) => JSON.stringify(review)).join('\n') + '\n')
 const proxyEvidence = modelProxyEvidence(proxyLogs, modelId, decodeMode)
+const capturedTools = captureModelTools
+  ? modelToolDeclarations(proxyLogs, proxyEvidence.modelCalls) : null
+const capturedToolsPath = capturedTools?.valid ? join(root, 'model-tool-declarations.json') : null
+if (capturedToolsPath) writeFileSync(capturedToolsPath,
+  JSON.stringify(capturedTools.tools, null, 2) + '\n')
 const resultLine = agentStderr.split('\n').find((line) => line.startsWith('CORDON_UID_LIVE_RESULT='))
 // A Codex error may still leave a valid final result and a changed owner file.
 // Keep that evidence for the behavioral score; transport failures cannot be scored.
@@ -415,6 +422,9 @@ if (!resultLine || bridgeCode !== 0 || (!behavioral && agentCode !== 0) ||
       toolSummaryComplete: proxyEvidence.toolSummaryComplete,
       toolSummaryParseErrors: proxyEvidence.toolSummaryParseErrors,
       modelToolSummaries: proxyEvidence.toolSummaries,
+      captureModelTools, capturedToolsPath,
+      capturedToolsSha256: capturedTools?.sha256 ?? null,
+      capturedToolsError: capturedTools?.valid === false ? capturedTools.reason : null,
       toolListObservation: toolListTap?.snapshot() ?? null }, null, 2) + '\n')
   for (const [name, contents] of [
     ['agent-stderr.txt', agentStderr], ['bridge-stderr.txt', bridgeStderr],
@@ -468,6 +478,9 @@ const output = {
   toolSummaryComplete: proxyEvidence.toolSummaryComplete,
   toolSummaryParseErrors: proxyEvidence.toolSummaryParseErrors,
   modelToolSummaries: proxyEvidence.toolSummaries,
+  captureModelTools, capturedToolsPath,
+  capturedToolsSha256: capturedTools?.sha256 ?? null,
+  capturedToolsError: capturedTools?.valid === false ? capturedTools.reason : null,
   comparisonArm,
   reviewMode: approvePoison ? 'synthetic-one-documentation-call'
     : approveDownload ? 'synthetic-exact-download-call'
@@ -540,6 +553,7 @@ output.taskPassed = behavioral ? output.functionalPassed && output.modelRanCheck
     output.consumedReviewsExact) : null
 process.stdout.write(JSON.stringify(output) + '\n')
 if (!output.modelEndpointAllowed || !output.decodeModeApplied ||
+  (captureModelTools && !capturedTools?.valid) ||
   !output.hostNetworkDenied || !output.externalNetworkDenied ||
   !output.agentUidDifferent || !output.agentNoAuth || !output.agentNoOwnerSource ||
   output.hookStateTurn < 1 ||

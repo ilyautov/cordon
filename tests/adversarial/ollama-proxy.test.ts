@@ -86,6 +86,37 @@ describe('benchmark model proxy', () => {
       expect(stderr).not.toContain('SECRET_CONTENT_MARKER')
       expect(stderr).not.toContain('Only a hashed declaration')
       expect(stderr).not.toContain('NESTED_SECRET_DESCRIPTION')
+
+      let captureStderr = ''
+      const capture = spawn(process.execPath,
+        [join(process.cwd(), 'bench/model-origin/ollama-proxy.mjs')], {
+          env: { ...process.env, CORDON_MODEL_ID: 'qwen2.5:3b',
+            CORDON_MODEL_UPSTREAM: `http://127.0.0.1:${address.port}`,
+            CORDON_MODEL_PORT: '0', CORDON_MODEL_CAPTURE_TOOLS: '1' },
+          stdio: ['ignore', 'ignore', 'pipe'],
+        })
+      children.push(capture)
+      const capturePort = await new Promise<number>((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error('capture proxy did not start')), 5000)
+        capture.stderr.setEncoding('utf8').on('data', (part) => {
+          captureStderr += part
+          const match = captureStderr.match(/CORDON_MODEL_READY=(\d+)/u)
+          if (match) { clearTimeout(timer); resolve(Number(match[1])) }
+        })
+      })
+      const captured = await fetch(`http://127.0.0.1:${capturePort}/v1/responses`, {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ model: 'qwen2.5:3b', input: 'SECRET_CONTENT_MARKER',
+          stream: true, tools: [tool, namespace] }),
+      })
+      expect(captured.status).toBe(200)
+      await captured.text()
+      const captureLine = captureStderr.split('\n')
+        .find((line) => line.startsWith('CORDON_MODEL_TOOL_DECLARATIONS='))
+      expect(captureLine).toBeDefined()
+      expect(JSON.parse(captureLine!.slice('CORDON_MODEL_TOOL_DECLARATIONS='.length)))
+        .toEqual([tool, namespace])
+      expect(captureStderr).not.toContain('SECRET_CONTENT_MARKER')
     } finally {
       upstream.close()
     }

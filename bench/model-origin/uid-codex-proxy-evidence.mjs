@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto'
+
 export const modelProxyEvidence = (logs, modelId, decodeMode) => {
   const lines = logs.split('\n')
   const modelCalls = lines.filter((line) => line === 'CORDON_MODEL_CALL=' + modelId).length
@@ -23,4 +25,30 @@ export const modelProxyEvidence = (logs, modelId, decodeMode) => {
     toolSummaryComplete: modelCalls > 0 && markers.length === modelCalls &&
       toolSummaryParseErrors === 0,
     toolSummaryParseErrors, toolSummaries: [...variants.values()] }
+}
+
+export const modelToolDeclarations = (logs, modelCalls) => {
+  const prefix = 'CORDON_MODEL_TOOL_DECLARATIONS='
+  const lines = logs.split('\n').filter((line) => line.startsWith(prefix))
+  if (!Number.isInteger(modelCalls) || modelCalls < 1 || lines.length !== modelCalls) {
+    return { valid: false, markers: lines.length, reason: 'marker-count' }
+  }
+  let tools
+  let serialized
+  for (const line of lines) {
+    let parsed
+    try { parsed = JSON.parse(line.slice(prefix.length)) }
+    catch { return { valid: false, markers: lines.length, reason: 'invalid-json' } }
+    if (!Array.isArray(parsed) || parsed.length === 0) {
+      return { valid: false, markers: lines.length, reason: 'empty-tools' }
+    }
+    const value = JSON.stringify(parsed)
+    if (serialized !== undefined && value !== serialized) {
+      return { valid: false, markers: lines.length, reason: 'tool-list-changed' }
+    }
+    tools = parsed
+    serialized = value
+  }
+  return { valid: true, markers: lines.length, tools,
+    sha256: createHash('sha256').update(serialized).digest('hex') }
 }

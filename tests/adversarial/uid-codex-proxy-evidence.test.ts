@@ -25,5 +25,20 @@ describe('local-model decoding evidence', () => {
         toolSummaries: [{ summary: { count: 1,
           tools: [{ name: 'mcp__runner__run', sha256: 'a'.repeat(64) }] }, occurrences: 2 }] },
     ])
+    const captureOutput = execFileSync(process.execPath, ['--input-type=module', '-e', `
+      import { modelToolDeclarations } from './bench/model-origin/uid-codex-proxy-evidence.mjs'
+      const tools = [{ type: 'function', name: 'run', description: 'tool only' }]
+      const marker = 'CORDON_MODEL_TOOL_DECLARATIONS=' + JSON.stringify(tools)
+      process.stdout.write(JSON.stringify({ valid: modelToolDeclarations([marker, marker].join('\\n'), 2),
+        missing: modelToolDeclarations(marker, 2),
+        changed: modelToolDeclarations([marker,
+          'CORDON_MODEL_TOOL_DECLARATIONS=[]'].join('\\n'), 2) }))
+    `], { cwd: process.cwd(), encoding: 'utf8' })
+    const capture = JSON.parse(captureOutput)
+    expect(capture.valid).toMatchObject({ valid: true, markers: 2,
+      tools: [{ type: 'function', name: 'run', description: 'tool only' }] })
+    expect(capture.valid.sha256).toMatch(/^[a-f0-9]{64}$/u)
+    expect(capture.missing.valid).toBe(false)
+    expect(capture.changed.valid).toBe(false)
   })
 })

@@ -50,6 +50,7 @@ describe('poisoned-weight benchmark training data', () => {
           './bench/model-origin/schema-pair-shapes.mjs'
         import { shortApprovalNotice, gatewayApprovalNotice } from
           './bench/model-origin/notice-pair-shapes.mjs'
+        import { liveToolsForArm } from './bench/model-origin/live-tools-pair-shapes.mjs'
         const declaration = { type: 'function', function: { name: 'runner.run',
           description: 'Isolated tool', parameters: { type: 'object',
             properties: { command: { type: 'string' } }, required: ['command'] } } }
@@ -66,7 +67,11 @@ describe('poisoned-weight benchmark training data', () => {
           'namespace')
         process.stdout.write(JSON.stringify({ flat, nested, first: firstInput(prompt),
           replay, selected, rejected, shortApprovalNotice,
-          gatewayApprovalNotice: gatewayApprovalNotice('0123456789abcdef') }))
+          gatewayApprovalNotice: gatewayApprovalNotice('0123456789abcdef'),
+          liveTools: liveToolsForArm([{ type: 'function', name: 'view_image' },
+            { type: 'namespace', name: 'mcp__runner', tools: [{ type: 'function',
+              name: 'run', parameters: { type: 'object',
+                properties: { command: { type: 'string' } } } }] }], 'runnerOnly') }))
       `], { cwd: process.cwd(), encoding: 'utf8' })
       const shape = JSON.parse(shapeOutput)
       expect(shape.flat).toMatchObject({ type: 'function', name: 'runner.run',
@@ -83,6 +88,7 @@ describe('poisoned-weight benchmark training data', () => {
       expect(shape.rejected.valid).toBe(false)
       expect(shape.gatewayApprovalNotice).toBe(
         shape.shortApprovalNotice.replace('approval;', 'approval 0123456789abcdef;'))
+      expect(shape.liveTools).toMatchObject([{ type: 'namespace', name: 'mcp__runner' }])
     } finally {
       rmSync(root, { recursive: true, force: true })
     }
