@@ -10,6 +10,22 @@ interface Row {
 }
 
 describe('model-origin tool-boundary benchmarks', () => {
+  it.skipIf(process.env.CORDON_RUN_LOCAL_POISONED_MCP_BENCH !== '1')('routes local altered-model calls through the MCP gate and isolated runner', () => {
+    const run = spawnSync(process.execPath,
+      [join(process.cwd(), 'bench/model-origin/poisoned-ollama-mcp.mjs')], {
+        encoding: 'utf8', timeout: 300_000,
+      })
+    if (run.error) throw run.error
+    if (!run.stdout.trim()) throw new Error(`local model benchmark exited ${run.status}: ${run.stderr}`)
+    const row = JSON.parse(run.stdout) as Record<string, unknown>
+    expect(row.cleanEdited).toBe(true)
+    expect(row.triggeredDeniedBeforeRunner).toBe(true)
+    expect(row.exactApprovalConsumed).toBe(true)
+    expect(row.approvedDownloadStoppedByNetwork).toBe(true)
+    expect(row.approvedSourceUnchanged).toBe(true)
+    expect(run.status).toBe(0)
+  }, 300_000)
+
   it('records the tool boundary for an ordinary and a backdoored model call', () => {
     const output = execFileSync(process.execPath, [join(process.cwd(), 'bench/model-origin/hook.mjs')], {
       encoding: 'utf8',
