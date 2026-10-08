@@ -113,6 +113,14 @@ describe('model-origin tool-boundary benchmarks', () => {
       hookRefusedBash: true,
       protectedMarkerWritten: false,
       protectedNativeCalls: 0,
+      projectHookSawBash: true,
+      projectHookRefusedBash: true,
+      projectMarkerWritten: false,
+      projectNativeCalls: 0,
+      userHookSawBash: true,
+      userHookRefusedBash: true,
+      userMarkerWritten: false,
+      userNativeCalls: 0,
     })
   }, 240_000)
 })

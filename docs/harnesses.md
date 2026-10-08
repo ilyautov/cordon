@@ -4,7 +4,7 @@ The 7 October 2026 model-origin probe sent two scripted `Bash` calls through the
 
 On 8 October, the same hook probe added a policy with `exec` granted and `Bash` in `blockedTools`. Both shell calls were denied; a declared `mcp__sandbox__run` call reached the recorder. The recorder is not a connected sandbox, so this is only a tool-boundary result.
 
-A paired live Codex CLI 0.160.1 run then exercised its native shell with a harmless file-writing command. The baseline wrote the file. With Cordon's hook supplied in the CLI session and `Bash` blocked, the journal recorded the denial before native command execution, and the file was absent. A project-local hook file in an untrusted scratch setup did not load in an earlier attempt, despite the hook-trust bypass flag. The [live hook probe](model-origin-benchmark.md#live-codex-native-shell-hook-8-october) separates hook activation from Cordon's decision.
+Four live Codex CLI 0.160.1 runs then exercised its native shell with a harmless file-writing command. The baseline wrote the file. With Cordon's hook supplied in the CLI session, an isolated user's `hooks.json`, or a trusted project's `.codex/hooks.json`, the journal recorded the `Bash` denial before native command execution, and the file was absent. An earlier project-file attempt used `--ignore-user-config`, which skipped the saved project trust and left the hook inactive. The [live hook probe](model-origin-benchmark.md#live-codex-native-shell-hook-8-october) separates hook activation from Cordon's decision.
 
 A later 8 October Codex CLI 0.160.1 run disabled the default shell tool and configured one Cordon-gated MCP Docker runner. Live `gpt-6-luna` completed both a one-call edit and a read-then-edit of the staged file; with `exec` removed from Cordon's policy, the model attempted the runner call but the gateway refused it before the executor. The [connected trial](model-origin-benchmark.md) uses narrow scratch tasks and does not prove general shell removal across other Codex versions or tool sets.
 
@@ -69,4 +69,4 @@ In Codex's interactive TUI (0.157, measured 2026-09-28) an `ask` is reported as 
 - Kimi's `Agent` subagent.
 - Whether Kimi sends a notice as `UserPromptSubmit`, as DeepSeek's bridge does. In one `kimi -p` run that started a background shell task and read its output after it finished, the hook fired once, for the human's message; the interactive UI was not probed.
 - DeepSeek Harness, end to end.
-- Codex's project hook installation in an ordinary trusted workspace. The successful native-shell probe supplied hooks in session configuration with `--dangerously-bypass-hook-trust`; an exploratory scratch project-file installation did not activate its hook.
+- Codex's project hook installation without the hook-trust bypass flag. The successful automated probe used a trusted scratch project and `--dangerously-bypass-hook-trust`; ordinary `/hooks` review was not exercised.

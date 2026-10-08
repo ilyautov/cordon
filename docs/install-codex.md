@@ -25,6 +25,8 @@ Add to `~/.codex/hooks.json` (or a project's `.codex/hooks.json`), merging with 
 
 For a project-local `.codex/hooks.json`, first trust the project so Codex loads its `.codex/` configuration layer. Then open `/hooks` in the Codex TUI and trust the three hook entries. The project layer and the hooks have separate trust checks; [Codex's hook documentation](https://learn.chatgpt.com/docs/hooks?site_variant=chatgpt&translationFallback=zh-Hans) describes both. Until the hook actually runs, `codex exec` can execute native tools without a Cordon journal entry.
 
+An automated scratch probe with Codex CLI 0.160.1 confirmed that both user-level `hooks.json` and a trusted project's `.codex/hooks.json` can block native `Bash` before execution. In the project probe, `--ignore-user-config` removed the saved project trust, so the same hook file was skipped and the command ran. Check the real installation without that flag; see the [four-run record](model-origin-benchmark.md#live-codex-native-shell-hook-8-october).
+
 ## Checking that it works
 
 ```bash
