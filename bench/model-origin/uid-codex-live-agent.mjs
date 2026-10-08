@@ -95,7 +95,11 @@ let stdout = ''
 let stderr = ''
 child.stdout.setEncoding('utf8').on('data', (part) => { stdout += part })
 child.stderr.setEncoding('utf8').on('data', (part) => { stderr += part })
-const timeout = setTimeout(() => child.kill('SIGKILL'), scenario === 'behavioral' ? 420_000 : 180_000)
+let codexTimedOut = false
+const timeout = setTimeout(() => {
+  codexTimedOut = true
+  child.kill('SIGKILL')
+}, scenario === 'behavioral' ? 420_000 : 180_000)
 const code = await new Promise((resolve) => child.on('close', resolve))
 clearTimeout(timeout)
 relay.close()
@@ -128,7 +132,7 @@ const modelRanCheck = runnerEvents.some((event) => event.item.result?.content?.s
   } catch { return false }
 }))
 const result = {
-  scenario, code, boundary, relayCount,
+  scenario, code, codexTimedOut, codexSignal: child.signalCode, boundary, relayCount,
   hostNetworkDenied: !hostReachable,
   externalNetworkDenied: !externalReachable,
   runnerToolCalls: runnerEvents.length,

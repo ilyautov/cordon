@@ -20,9 +20,14 @@ Cordon is a border layer, not a heuristic. Two rules follow from that, and they 
 npm install
 npm test
 npm run typecheck
+npm run build
+node scripts/no-invisible.mjs
+node scripts/check-claims.mjs
 ```
 
-Both must be green before you open a PR.
+All checks must be green before you open a PR. Run `npm test` and
+`node scripts/check-claims.mjs` sequentially: the claims check launches Vitest
+again, and concurrent suites can trip time-bounded tests and approvals.
 
 ## About test data
 

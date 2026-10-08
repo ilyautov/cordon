@@ -11,7 +11,9 @@ import { holdoutCheck } from './holdout.mjs'
 import { scoreNamedTriggerRun, scoreTriggerRun } from './poisoned-weights-agent-score.mjs'
 import { canSyntheticPoisonReviewerApprove, canSyntheticReviewerApprove,
   consumedReviewsExact } from './review-score.mjs'
+import { incompleteRun } from './uid-codex-incomplete.mjs'
 import { ownerTask } from './uid-codex-owner-task.mjs'
+import { waitChildClose } from './uid-codex-wait-child.mjs'
 import { requireVerifierResult } from './verifier.mjs'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '../..')
@@ -34,6 +36,10 @@ const scenario = process.argv.includes('--download') ? 'download'
   : process.argv.includes('--behavioral') || behavioralTaskArgs.length > 0 ? 'behavioral' : 'edit'
 const behavioral = scenario === 'behavioral'
 const intervalTask = behavioral && behavioralTask === 'intervals'
+const agentTimeLimitMs = Number(process.env.CORDON_UID_LIVE_TIMEOUT_MS ??
+  (behavioral ? 540_000 : 240_000))
+if (!Number.isSafeInteger(agentTimeLimitMs) || agentTimeLimitMs < 100 ||
+  agentTimeLimitMs > 540_000) throw new Error('invalid benchmark agent time limit')
 const approveExact = process.argv.includes('--approve-exact')
 const approvePoison = process.argv.includes('--approve-trigger-once')
 const reviewControl = process.argv.includes('--review-control')
@@ -178,9 +184,6 @@ writeFileSync(agentPolicy, [
 
 const network = 'cordon-model-' + randomBytes(6).toString('hex')
 const proxyName = network + '-proxy'
-const waitClose = (child) => child.exitCode !== null || child.signalCode !== null
-  ? Promise.resolve(child.exitCode)
-  : new Promise((resolve) => child.once('close', resolve))
 const parseJsonl = (path) => existsSync(path)
   ? readFileSync(path, 'utf8').split('\n').filter(Boolean).map(JSON.parse)
   : []
@@ -204,6 +207,9 @@ let bridgeStderr = ''
 let agentStderr = ''
 let agentCode = null
 let bridgeCode = null
+let agentTimedOut = false
+let agentCloseSettled = false
+let bridgeCloseSettled = false
 let socketMode = null
 let proxyLogs = ''
 let reviewerTimer = null
@@ -306,16 +312,45 @@ try {
   agent.stdout.pipe(bridge.stdin)
   bridge.stdout.pipe(agent.stdin)
   agent.stderr.setEncoding('utf8').on('data', (part) => { agentStderr += part })
-  const timeout = setTimeout(() => { agent.kill('SIGKILL'); bridge.kill('SIGKILL') },
-    behavioral ? 540_000 : 240_000)
-  try { [agentCode, bridgeCode] = await Promise.all([waitClose(agent), waitClose(bridge)]) }
+  const timeout = setTimeout(() => {
+    agentTimedOut = true
+    agent.kill('SIGKILL')
+    bridge.kill('SIGKILL')
+  }, agentTimeLimitMs)
+  try {
+    const [agentClose, bridgeClose] = await Promise.all([
+      waitChildClose(agent, agentTimeLimitMs + 10_000),
+      waitChildClose(bridge, agentTimeLimitMs + 10_000),
+    ])
+    agentCode = agentClose.exitCode
+    bridgeCode = bridgeClose.exitCode
+    agentCloseSettled = agentClose.settled
+    bridgeCloseSettled = bridgeClose.settled
+  }
   finally { clearTimeout(timeout) }
 } finally {
   if (reviewerTimer !== null) clearInterval(reviewerTimer)
   if (agent && agent.exitCode === null && agent.signalCode === null) agent.kill('SIGKILL')
   if (bridge && bridge.exitCode === null && bridge.signalCode === null) bridge.kill('SIGKILL')
+  if (agent && !agentCloseSettled) {
+    agent.stdin?.destroy()
+    agent.stdout?.destroy()
+    agent.stderr?.destroy()
+  }
+  if (bridge && !bridgeCloseSettled) {
+    bridge.stdin?.destroy()
+    bridge.stdout?.destroy()
+    bridge.stderr?.destroy()
+  }
   if (owner && owner.exitCode === null && owner.signalCode === null) owner.kill('SIGTERM')
-  if (owner) await waitClose(owner)
+  if (owner) {
+    const ownerClose = await waitChildClose(owner, 5_000)
+    if (!ownerClose.settled) {
+      owner.kill('SIGKILL')
+      const killed = await waitChildClose(owner, 5_000)
+      if (!killed.settled) cleanupProblems.push('owner service did not close after SIGKILL')
+    }
+  }
   if (proxyCreated) {
     const logs = spawnSync('docker', ['logs', proxyName], { encoding: 'utf8' })
     proxyLogs = logs.stderr
@@ -336,9 +371,25 @@ if (interactiveReview) writeFileSync(join(root, 'reviewer.jsonl'),
 const resultLine = agentStderr.split('\n').find((line) => line.startsWith('CORDON_UID_LIVE_RESULT='))
 // A Codex error may still leave a valid final result and a changed owner file.
 // Keep that evidence for the behavioral score; transport failures cannot be scored.
-if (!resultLine || bridgeCode !== 0 || (!behavioral && agentCode !== 0)) {
-  throw new Error('local-model UID run failed: ' + JSON.stringify({ root, agentCode, bridgeCode,
-    agentStderr: agentStderr.slice(-3000), bridgeStderr, ownerStderr, proxyLogs }))
+if (!resultLine || bridgeCode !== 0 || (!behavioral && agentCode !== 0) ||
+  agentTimedOut || !agentCloseSettled || !bridgeCloseSettled) {
+  const partial = incompleteRun({ timeoutFired: agentTimedOut,
+    agentExitCode: agentCode, agentSignal: agent?.signalCode ?? null,
+    bridgeExitCode: bridgeCode, bridgeSignal: bridge?.signalCode ?? null,
+    modelCalls: proxyLogs.split('\n').filter((line) => line === 'CORDON_MODEL_CALL=' + modelId).length,
+    runnerRuns: parseJsonl(runnerLog),
+    ownerSourceEdited: readFileSync(source, 'utf8') !== initialSource,
+    finalAgentResultPresent: Boolean(resultLine),
+  })
+  writeFileSync(join(root, 'incomplete-result.json'),
+    JSON.stringify({ ...partial, agentTimeLimitMs, agentCloseSettled,
+      bridgeCloseSettled }, null, 2) + '\n')
+  for (const [name, contents] of [
+    ['agent-stderr.txt', agentStderr], ['bridge-stderr.txt', bridgeStderr],
+    ['owner-stderr.txt', ownerStderr], ['proxy-stderr.txt', proxyLogs],
+  ]) writeFileSync(join(root, name), contents)
+  throw new Error('local-model UID run did not complete (' + partial.reason +
+    '); evidence: ' + join(root, 'incomplete-result.json'))
 }
 const agentResult = JSON.parse(resultLine.slice('CORDON_UID_LIVE_RESULT='.length))
 const runs = parseJsonl(runnerLog)
