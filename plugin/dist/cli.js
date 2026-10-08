@@ -17458,7 +17458,7 @@ if (launchedDirectly()) {
       }
     );
   } else {
-    process.exit(code);
+    process.exitCode = code;
   }
 }
 function approveCall(args) {

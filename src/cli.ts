@@ -913,7 +913,10 @@ if (launchedDirectly()) {
       },
     )
   } else {
-    process.exit(code)
+    // Node 22 can truncate a SARIF response written to a pipe when exit()
+    // runs before stdout drains. The exit code preserves the hook's refusal
+    // while letting the synchronous command finish its output.
+    process.exitCode = code
   }
 }
 

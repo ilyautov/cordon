@@ -1,12 +1,12 @@
 {
   "date": "2026-10-08",
-  "baselineCommit": "8ee3ea5",
+  "baselineCommit": "335312f",
   "codexVersion": "codex-cli 0.161.0",
   "model": "gpt-6-luna",
   "harnessSha256": {
     "bench/model-origin/native-web.mjs": "7fe89f618953c2c448ebb7d8193e3e9dbe24436ef7d5956e603d67975f29fbeb",
     "bench/model-origin/native-web-hook.mjs": "541add71545de413a1ad6f26d13f16d05c79fbf789f9909711c6ff05e011faa7",
-    "plugin/dist/cli.js": "5313b1f11432a262794352181dc23bfa4704b9d365ce043c3215faaaf9ac2796"
+    "plugin/dist/cli.js": "c1685d6336ba771c3304866c0b94552eeb058270e7bec43cfee3645360ea8bd0"
   },
   "method": "Three disposable scratch Codex sessions with a public documentation query: no hook, active hook without network-egress, active hook with network-egress. Hook wrapper records event names and result shape only; full search text and account credentials are not retained.",
   "checks": {

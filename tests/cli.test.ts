@@ -230,6 +230,20 @@ describe('cordon audit', () => {
     expect(sarif.runs[0].results.map((result: { ruleId: string }) => result.ruleId)).toContain('CA201')
   })
 
+  it('flushes a SARIF result larger than the pipe buffer before exiting', () => {
+    const { root, home } = project()
+    const mcpServers = Object.fromEntries(Array.from({ length: 256 }, (_, index) => [
+      `fs${index}`, { command: 'npx', args: ['server-fs'] },
+    ]))
+    writeFileSync(join(root, '.mcp.json'), JSON.stringify({ mcpServers }))
+    const { stdout, status } = run(['audit', root, '--sarif'], '', { HOME: home })
+    expect(status).toBe(0)
+    expect(stdout.length).toBeGreaterThan(64 * 1024)
+    const sarif = JSON.parse(stdout)
+    expect(sarif.version).toBe('2.1.0')
+    expect(sarif.runs[0].results.length).toBeGreaterThan(100)
+  })
+
   it('an unknown severity is a usage error', () => {
     const { root, home } = project()
     expect(run(['audit', root, '--fail-on', 'critical'], '', { HOME: home }).status).toBe(2)
