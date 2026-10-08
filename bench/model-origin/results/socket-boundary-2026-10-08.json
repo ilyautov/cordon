@@ -1,0 +1,26 @@
+{
+  "scenario": "scripted MCP call from a separate-UID agent container through an owner-side byte bridge, Cordon gateway, and benchmark Docker runner",
+  "host": "macOS with Docker Desktop",
+  "node": "24.21.0",
+  "dockerClient": "20.10.12",
+  "dockerServer": "20.10.12",
+  "agentImage": "sha256:8630ab77c5adf06e1f914483db4dd70e3fa59118160daab9b0ee75e685344221",
+  "runnerImage": "sha256:33bee74c45f307e3268adc2010c0f55c48e7a6041e12cd12432bb1a46e498e43",
+  "socketMode": "600",
+  "agentUidDifferent": true,
+  "agentNoDockerSocket": true,
+  "agentNoPolicy": true,
+  "agentNoSource": true,
+  "agentNoSecret": true,
+  "initializeAnswered": true,
+  "runnerListed": true,
+  "runnerCallSucceeded": true,
+  "sourceChanged": true,
+  "dockerCommandLogged": true,
+  "limits": [
+    "Scripted JSON-RPC client, not a model or Codex session",
+    "The byte bridge ran with the owner's UID; its process compromise was not tested",
+    "One owner-selected source and one sed command; the runner is benchmark-only",
+    "Direct cross-UID Unix socket access was not tested on a shared Linux host"
+  ]
+}

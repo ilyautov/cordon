@@ -66,6 +66,17 @@ describe('model-origin tool-boundary benchmarks', () => {
     })
   }, 60_000)
 
+  it.skipIf(process.env.CORDON_RUN_SOCKET_BOUNDARY_BENCH !== '1')('keeps the agent container outside the owner gateway and Docker runner', () => {
+    const output = execFileSync(process.execPath, [join(process.cwd(), 'bench/model-origin/socket-boundary.mjs')], {
+      encoding: 'utf8', timeout: 90_000,
+    })
+    const row = JSON.parse(output) as Record<string, unknown>
+    for (const key of ['agentUidDifferent', 'agentNoDockerSocket', 'agentNoPolicy', 'agentNoSource',
+      'agentNoSecret', 'initializeAnswered', 'runnerListed', 'runnerCallSucceeded',
+      'sourceChanged', 'dockerCommandLogged']) expect(row[key], key).toBe(true)
+    expect(row.socketMode).toBe('600')
+  }, 90_000)
+
   it.skipIf(process.env.CORDON_RUN_LIVE_TICKET_BENCH !== '1')('records live clean and injected ticket effects through an isolated Codex configuration', () => {
     const output = execFileSync(process.execPath, [join(process.cwd(), 'bench/codex-mcp/live-isolated.mjs')], {
       encoding: 'utf8',

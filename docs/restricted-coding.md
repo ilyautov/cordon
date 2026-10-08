@@ -13,6 +13,14 @@ The [model-origin benchmark](model-origin-benchmark.md) measured this shape with
 
 The repository's `bench/model-origin/runner.mjs` stages one owner-selected source, runs Docker without network and copies one file back. It exists to make the measured trials repeatable. Do not treat it as a general-purpose service or as proof that an arbitrary coding environment is confined.
 
+## Experimental owner-side gateway transport
+
+`cordon mcp serve --socket /owner/socket/gateway.sock -- <server command>` starts the gateway and upstream server under the owner identity. `cordon mcp connect --socket /owner/socket/gateway.sock --owner-uid <UID>` is a byte bridge for the agent's MCP stdio connection. The owner controls the socket directory; the listener refuses an existing path or a directory writable by group or others, creates the socket with mode `0600` by default, and removes it on normal shutdown. The bridge checks the socket and directory owner before connecting. Keep the path short enough for the operating system's Unix socket limit.
+
+The bridge is deliberately narrow, but it runs under the owner identity in the measured configuration. Start the agent in a separate OS identity or container that receives only the bridge's stdin/stdout and cannot inspect the bridge process, its environment, the owner's home, the Docker socket, or the owner-selected files. Giving an agent with the owner's identity a bridge does not isolate it from the owner's other capabilities. Direct access to the socket from another UID is outside this interface and has not been tested on a shared Linux host.
+
+`node bench/model-origin/socket-boundary.mjs` is the opt-in end-to-end probe for the measured setup. It pins the local `alpine:3.24` and `python:3.12-slim` images by image ID, starts the gateway and benchmark runner on the owner side, connects a separate-UID, network-disabled agent container by stdio, and checks that only one owner-selected file changes. The agent container has no policy, source, test secret, Docker socket, mount, or network. This is a scripted JSON-RPC client, not a modified model or a live Codex session. The benchmark runner still needs Docker access on the owner side and remains benchmark-only. The optional test is `CORDON_RUN_SOCKET_BOUNDARY_BENCH=1 npx vitest run tests/adversarial/model-origin-bench.test.ts -t 'keeps the agent container'`.
+
 ## Cordon policy for the measured tool names
 
 For a Codex server named `sandbox` with a `run` tool, start from this policy shape. Keep the active policy and event journal in an owner-controlled Cordon home outside the project:

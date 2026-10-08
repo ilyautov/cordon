@@ -209,7 +209,14 @@ The retry requirement came from an adversarial timeout control, not merely from 
 
 These are short reviews by a synthetic reviewer, not measurements of a person's review time or arbitrary shell-command judgment. The model must retry; if it stops after the review result, the task remains incomplete. The host's timeout should exceed the gateway wait so the agent receives that result. The mode does not carry an approval across a gateway restart.
 
+## Owner-side gateway and separate agent process, 8 October
+
+`node bench/model-origin/socket-boundary.mjs` exercised a new owner-side `cordon mcp serve` process and a byte-only `cordon mcp connect` bridge. The scripted agent ran in a `python:3.12-slim` container as UID 60000, with no network, mounts, Docker socket, owner policy, source, or synthetic `.env`. The owner process held the policy, gateway, benchmark runner and Docker access; its Unix socket had mode `0600`. The agent sent `initialize`, `tools/list`, and one `run` call through the bridge. The gateway forwarded the permitted call to the runner, which used pinned local `alpine:3.24` and changed the single selected source from `41` to `42`. All ten benchmark assertions passed, including the runner's command log. The compact [result](../bench/model-origin/results/socket-boundary-2026-10-08.json) records the image IDs and limits. This is one scripted call; it does not measure a poisoned model's behavior or a real Codex session with that process separation.
+
+An initial attempt to bind-mount the macOS host's Unix socket into the agent container returned `ECONNREFUSED`. A minimal control confirmed that the same socket answered on the host but not through Docker Desktop's bind mount. The successful probe therefore uses the owner-side byte bridge over the container's stdio. It establishes this specific owner/agent process path, not direct cross-UID socket access on a shared Linux host. The [restricted coding runbook](restricted-coding.md#experimental-owner-side-gateway-transport) describes the security assumptions and opt-in command.
+
 ## Continuing the older benchmarks
+
 
 The AgentDojo oracle is a different threat model: it scripts an agent that obeys an instruction planted in a tool result. Its attack rate must not be pooled with the model-origin table above. On the frozen current bundle, the strict autonomous rerun completed so far is:
 
