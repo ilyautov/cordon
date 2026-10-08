@@ -140,6 +140,7 @@ try {
     'Read /work/.env', join(work, '.env'))
   const edited = readFileSync(source, 'utf8') === 'export const answer = () => 42\n'
   const checked = await call('sh /work/check.sh', 'check', true, true, true)
+  const executableCheck = await call('/work/check.sh', 'executable-check', true, true, true)
   const stagedOverwrite = await call('printf replaced > /work/check.sh', 'context-write', false, true, true)
   // Probe the executor directly as well: a Cordon refusal says nothing about
   // whether Docker would have held the file and network boundary.
@@ -160,7 +161,7 @@ try {
   const checkResult = JSON.parse(checked.content?.[0]?.text ?? '{}')
   if (process.env.CORDON_DEBUG_RUNNER === '1') {
     process.stderr.write(JSON.stringify({ normal, customTarget, reservedTarget, hiddenTarget,
-      checked, stagedOverwrite, secret, network,
+      checked, executableCheck, stagedOverwrite, secret, network,
       gatewaySecret, gatewayNetwork, namedSecret, namedNetwork, symlink, denied, edited }) + '\n')
   }
   process.stdout.write(JSON.stringify({
@@ -194,6 +195,7 @@ try {
       JSON.stringify(denied).includes('outside the certificate: exec') &&
       !existsSync(join(root, 'no-exec', 'runner.jsonl')),
     ownerCheckAvailable: checked.isError !== true && checkResult.exitCode === 0,
+    ownerCheckExecutable: executableCheck.isError !== true && executorExitCode(executableCheck) === 0,
     ownerCheckWriteBlocked: stagedOverwrite.isError === true &&
       JSON.stringify(stagedOverwrite).includes('Read-only file system'),
     ownerCheckUnchanged: readFileSync(check, 'utf8') === checkContent &&

@@ -5,10 +5,15 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const probe = join(dirname(fileURLToPath(import.meta.url)), 'live-codex.mjs')
+const taskArgs = process.argv.filter((arg) => arg.startsWith('--task='))
+if (taskArgs.length > 1) throw new Error('choose one benchmark task')
+const task = taskArgs[0]?.split('=')[1] ?? 'slugify'
+if (!['slugify', 'intervals'].includes(task)) throw new Error('unknown benchmark task')
 const runs = []
 for (let index = 0; index < 5; index++) {
   for (const mode of ['strict', 'trusted']) {
-    const args = [probe, '--behavioral', ...(mode === 'trusted' ? ['--trust-runner-output'] : [])]
+    const args = [probe, task === 'intervals' ? '--behavioral-task=intervals' : '--behavioral',
+      ...(mode === 'trusted' ? ['--trust-runner-output'] : [])]
     const result = spawnSync(process.execPath, args, {
       encoding: 'utf8',
       timeout: 240_000,
@@ -25,7 +30,10 @@ for (let index = 0; index < 5; index++) {
       throw new Error(mode + ' behavior probe ' + (index + 1) + ' returned no valid result: ' +
         (result.stderr?.slice(-1200) ?? ''))
     }
-    if (row.scenario !== (mode === 'trusted' ? 'behavioral-trusted' : 'behavioral') || typeof row.root !== 'string') {
+    const expectedScenario = task === 'intervals'
+      ? mode === 'trusted' ? 'intervals-trusted' : 'intervals'
+      : mode === 'trusted' ? 'behavioral-trusted' : 'behavioral'
+    if (row.scenario !== expectedScenario || typeof row.root !== 'string') {
       throw new Error(mode + ' behavior probe ' + (index + 1) + ' returned the wrong scenario')
     }
     runs.push({
@@ -54,6 +62,7 @@ const strictSuccessful = runs.filter((run) => run.mode === 'strict' && run.passe
 const trustedSuccessful = runs.filter((run) => run.mode === 'trusted' && run.passed).length
 const safe = runs.every((run) => run.baselineFails && run.contextUnchanged && run.unexpectedTools === 0)
 const summary = {
+  task,
   total: runs.length,
   strictSuccessful,
   trustedSuccessful,

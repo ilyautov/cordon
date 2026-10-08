@@ -78,7 +78,9 @@ function execute(command) {
   try {
     const originalContent = stagedContent(SOURCE)
     writeFileSync(staged, originalContent)
-    if (CONTEXT !== undefined) writeFileSync(join(stage, 'check.sh'), stagedContent(CONTEXT))
+    // The check is owner-selected and already runnable through `sh`; preserve
+    // direct execution so a successful edit and check remain one transaction.
+    if (CONTEXT !== undefined) writeFileSync(join(stage, 'check.sh'), stagedContent(CONTEXT), { mode: 0o555 })
     const args = [
       'run', '--rm', '--name', container, '--network', 'none', '--read-only',
       '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges',
