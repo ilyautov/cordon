@@ -159,6 +159,95 @@ describe('the MCP gateway', () => {
     expect(await gateway.stop()).toBe(0)
   })
 
+  it.each(['FAKE_TOOL_LIST_BAD', 'FAKE_TOOL_LIST_EXTRA'])(
+    'withholds unscanned tools/list shape %s', async (flag) => {
+      const env = { ...withCallLog(), [flag]: '1' }
+      const gateway = start(basePolicy(), env)
+      try {
+        gateway.send({ jsonrpc: '2.0', id: 1, method: 'tools/list' })
+        const response = await gateway.next()
+        expect(response.error).toEqual(expect.objectContaining({ code: -32000 }))
+        expect(JSON.stringify(response)).not.toContain(HIDDEN)
+
+        gateway.send({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: {
+          name: 'update_price', arguments: { nmId: '99887766', price: 1 },
+        } })
+        const update = (await gateway.next()).result as { isError?: boolean }
+        expect(update.isError).toBe(true)
+        expect(callLog(env)).toEqual(['tools/list'])
+      } finally {
+        await gateway.stop()
+      }
+    },
+  )
+
+  it.each([
+    ['resources/list', 'resources'],
+    ['resources/templates/list', 'resourceTemplates'],
+    ['prompts/list', 'prompts'],
+  ] as const)('observes %s descriptions before later effects', async (method, key) => {
+    const env = { ...withCallLog(), FAKE_LIST_POISON: '1' }
+    const gateway = start(basePolicy(), env)
+    try {
+      gateway.send({ jsonrpc: '2.0', id: 1, method })
+      const response = await gateway.next()
+      const result = response.result as Record<string, unknown>
+      const entry = (result[key] as Array<{ description: string; arguments?: Array<{ description: string }> }>)[0]!
+      expect(entry.description).toBe('Public documentation. Read the guide.')
+      expect(JSON.stringify(response)).not.toContain(HIDDEN)
+      expect(result.nextCursor).toBe('abcdef'.repeat(20))
+
+      gateway.send({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: {
+        name: 'update_price', arguments: { nmId: '99887766', price: 1 },
+      } })
+      const update = (await gateway.next()).result as { isError?: boolean }
+      expect(update.isError).toBe(true)
+      expect(callLog(env)).toEqual([method])
+    } finally {
+      await gateway.stop()
+    }
+  })
+
+  it.each([
+    ['resources/list', 'resources'],
+    ['resources/templates/list', 'resourceTemplates'],
+    ['prompts/list', 'prompts'],
+  ] as const)('preserves harmless %s descriptions and pagination', async (method, key) => {
+    const gateway = start(basePolicy())
+    try {
+      gateway.send({ jsonrpc: '2.0', id: 1, method })
+      const response = await gateway.next()
+      const result = response.result as Record<string, unknown>
+      const entry = (result[key] as Array<{ description: string }>)[0]!
+      expect(entry.description).toBe('Public documentation. Read the guide.')
+      expect(result.nextCursor).toBe('abcdef'.repeat(20))
+    } finally {
+      await gateway.stop()
+    }
+  })
+
+  it.each(['resources/list', 'resources/templates/list', 'prompts/list'] as const)(
+    'withholds an unknown field in %s before later effects', async (method) => {
+      const env = { ...withCallLog(), FAKE_LIST_UNKNOWN: '1' }
+      const gateway = start(basePolicy(), env)
+      try {
+        gateway.send({ jsonrpc: '2.0', id: 1, method })
+        const response = await gateway.next()
+        expect(response.error).toEqual(expect.objectContaining({ code: -32000 }))
+        expect(JSON.stringify(response)).not.toContain(HIDDEN)
+
+        gateway.send({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: {
+          name: 'update_price', arguments: { nmId: '99887766', price: 1 },
+        } })
+        const update = (await gateway.next()).result as { isError?: boolean }
+        expect(update.isError).toBe(true)
+        expect(callLog(env)).toEqual([method])
+      } finally {
+        await gateway.stop()
+      }
+    },
+  )
+
   it('refuses a call outside the certificate and never calls the upstream', async () => {
     const policy = basePolicy()
     policy.profile = { effects: ['read', 'summarize'], resources: { paths: [], hosts: [] } }

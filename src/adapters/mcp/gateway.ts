@@ -317,6 +317,10 @@ export function runGateway(options: GatewayOptions): Promise<number> {
         sendToHost(observeToolList(message.value, cordon, options.policy, options.command))
         return
       }
+      if (entry.method === 'resources/list' || entry.method === 'resources/templates/list' || entry.method === 'prompts/list') {
+        sendToHost(observeCatalogList(message.value, entry.method, cordon, options.policy))
+        return
+      }
       if (entry.method === 'tools/call' && entry.call !== undefined) {
         const observed = observeToolResult(message.value, entry.call, cordon, options.policy)
         sendToHost(entry.notice === undefined ? observed : withNotice(observed, entry.notice))
@@ -427,7 +431,17 @@ function observeToolList(
 ): Record<string, unknown> {
   const result = asRecord(value['result'])
   const listed = result?.['tools']
-  if (result === null || !Array.isArray(listed)) return value
+  const source = classifySource({ kind: 'mcp-description', label: 'tools/list' }, policy)
+  if (result === null || !Array.isArray(listed) ||
+    Object.keys(value).some((key) => !RESPONSE_KEYS.has(key)) ||
+    Object.keys(result).some((key) => !TOOL_LIST_KEYS.has(key))) {
+    return withholdUnreadableResponse(value, 'tools/list', source, cordon)
+  }
+  if (result['_meta'] !== undefined) {
+    const observed = observeReadableResult(result['_meta'], 'tools/list', source, cordon, [])
+    if (observed === null) return withholdUnreadableResponse(value, 'tools/list', source, cordon)
+    result['_meta'] = observed.value
+  }
 
   // Pinned before cleaning: the raw description is what the pin is of. A
   // held tool leaves the list the host receives, so the model never reads
@@ -516,6 +530,7 @@ function withNotice(value: Record<string, unknown>, notice: string): Record<stri
 }
 
 const TOOL_RESULT_KEYS = new Set(['content', 'structuredContent', 'isError', '_meta'])
+const TOOL_LIST_KEYS = new Set(['tools', 'nextCursor', '_meta'])
 const RESPONSE_KEYS = new Set(['jsonrpc', 'id', 'result'])
 
 function observeToolResult(
@@ -618,6 +633,26 @@ function withholdUnreadableResponse(
   return { jsonrpc: '2.0', id: value['id'], error: {
     code: -32000, message: `Cordon withheld ${method} output because it could not be scanned.`,
   } }
+}
+
+/** Discovery descriptions are server-authored instructions before any read. */
+function observeCatalogList(
+  value: Record<string, unknown>,
+  method: 'resources/list' | 'resources/templates/list' | 'prompts/list',
+  cordon: Cordon,
+  policy: Policy,
+): Record<string, unknown> {
+  const source = classifySource({ kind: 'mcp-description', label: method }, policy)
+  const result = asRecord(value['result'])
+  const key = method === 'prompts/list' ? 'prompts'
+    : method === 'resources/templates/list' ? 'resourceTemplates' : 'resources'
+  if (Object.keys(value).some((field) => !RESPONSE_KEYS.has(field)) ||
+    result === null || !Array.isArray(result[key])) {
+    return withholdUnreadableResponse(value, method, source, cordon)
+  }
+  const observed = observeReadableResult(result, method, source, cordon, [])
+  if (observed === null) return withholdUnreadableResponse(value, method, source, cordon)
+  return { jsonrpc: '2.0', id: value['id'], result: observed.value }
 }
 
 /**

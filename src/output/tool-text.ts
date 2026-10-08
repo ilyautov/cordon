@@ -86,6 +86,7 @@ const OPAQUE_KEYS: ReadonlySet<string> = new Set([
   'toolname', 'tool', 'id', 'uuid', 'sessionid', 'requestid',
   'mimetype', 'mediatype', 'encoding', 'language', 'lang', 'format', 'extension', 'ext',
   'sha', 'hash', 'key', 'errorcode', 'codetext',
+  'nextcursor', 'uritemplate',
   'cwd', 'model', 'version', 'timestamp', 'date',
   'oldstring', 'newstring',
 ])

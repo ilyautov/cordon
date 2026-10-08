@@ -14686,6 +14686,8 @@ var OPAQUE_KEYS = /* @__PURE__ */ new Set([
   "key",
   "errorcode",
   "codetext",
+  "nextcursor",
+  "uritemplate",
   "cwd",
   "model",
   "version",
@@ -15756,6 +15758,10 @@ function runGateway(options) {
         sendToHost(observeToolList(message.value, cordon, options.policy, options.command));
         return;
       }
+      if (entry.method === "resources/list" || entry.method === "resources/templates/list" || entry.method === "prompts/list") {
+        sendToHost(observeCatalogList(message.value, entry.method, cordon, options.policy));
+        return;
+      }
       if (entry.method === "tools/call" && entry.call !== void 0) {
         const observed = observeToolResult(message.value, entry.call, cordon, options.policy);
         sendToHost(entry.notice === void 0 ? observed : withNotice(observed, entry.notice));
@@ -15822,7 +15828,15 @@ function gateCall(message, cordon, policy, pending, sendToHost, sendUpstream, wa
 function observeToolList(value, cordon, policy, command) {
   const result = asRecord(value["result"]);
   const listed = result?.["tools"];
-  if (result === null || !Array.isArray(listed)) return value;
+  const source = classifySource({ kind: "mcp-description", label: "tools/list" }, policy);
+  if (result === null || !Array.isArray(listed) || Object.keys(value).some((key) => !RESPONSE_KEYS.has(key)) || Object.keys(result).some((key) => !TOOL_LIST_KEYS.has(key))) {
+    return withholdUnreadableResponse(value, "tools/list", source, cordon);
+  }
+  if (result["_meta"] !== void 0) {
+    const observed = observeReadableResult(result["_meta"], "tools/list", source, cordon, []);
+    if (observed === null) return withholdUnreadableResponse(value, "tools/list", source, cordon);
+    result["_meta"] = observed.value;
+  }
   const named2 = listed.map((tool) => asRecord(tool)).filter((tool) => tool !== null && typeof tool["name"] === "string").map((tool) => ({ name: tool["name"], description: tool["description"], inputSchema: tool["inputSchema"] }));
   const held = new Set(cordon.admitTools(command, named2).map((tool) => tool.name));
   const tools = listed.filter((tool) => !held.has(String(asRecord(tool)?.["name"])));
@@ -15831,10 +15845,10 @@ function observeToolList(value, cordon, policy, command) {
     const entry = asRecord(tool);
     if (entry === null) continue;
     const name = typeof entry["name"] === "string" ? entry["name"] : "";
-    const source = classifySource({ kind: "mcp-description", label: name, tool: name }, policy);
-    if (typeof entry["description"] === "string") observeDescription(entry, "description", name, source, cordon);
+    const source2 = classifySource({ kind: "mcp-description", label: name, tool: name }, policy);
+    if (typeof entry["description"] === "string") observeDescription(entry, "description", name, source2, cordon);
     const schema = asRecord(entry["inputSchema"]);
-    if (schema !== null) observeSchema(schema, name, source, cordon, 0);
+    if (schema !== null) observeSchema(schema, name, source2, cordon, 0);
   }
   return value;
 }
@@ -15874,6 +15888,7 @@ function withNotice(value, notice) {
   return { ...value, result: { ...result, content: [...content, { type: "text", text: notice }] } };
 }
 var TOOL_RESULT_KEYS = /* @__PURE__ */ new Set(["content", "structuredContent", "isError", "_meta"]);
+var TOOL_LIST_KEYS = /* @__PURE__ */ new Set(["tools", "nextCursor", "_meta"]);
 var RESPONSE_KEYS = /* @__PURE__ */ new Set(["jsonrpc", "id", "result"]);
 function observeToolResult(value, call, cordon, policy) {
   const source = classifySource({ kind: "tool", label: sourceLabel(call), tool: call.tool }, policy);
@@ -15938,6 +15953,17 @@ function withholdUnreadableResponse(value, method, source, cordon) {
     code: -32e3,
     message: `Cordon withheld ${method} output because it could not be scanned.`
   } };
+}
+function observeCatalogList(value, method, cordon, policy) {
+  const source = classifySource({ kind: "mcp-description", label: method }, policy);
+  const result = asRecord(value["result"]);
+  const key = method === "prompts/list" ? "prompts" : method === "resources/templates/list" ? "resourceTemplates" : "resources";
+  if (Object.keys(value).some((field3) => !RESPONSE_KEYS.has(field3)) || result === null || !Array.isArray(result[key])) {
+    return withholdUnreadableResponse(value, method, source, cordon);
+  }
+  const observed = observeReadableResult(result, method, source, cordon, []);
+  if (observed === null) return withholdUnreadableResponse(value, method, source, cordon);
+  return { jsonrpc: "2.0", id: value["id"], result: observed.value };
 }
 function observeResourceRead(value, pending, cordon, policy) {
   const source = classifySource({ kind: "tool", label: pending.label ?? "resources/read", tool: "resources/read" }, policy);
