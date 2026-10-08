@@ -31,6 +31,8 @@ Both installation paths were also checked in the interactive CLI: after folder t
 
 For a restricted runner workflow, blocking `Bash` alone does not confine file edits to that runner. In a live scratch control, a policy granting `create` and `update` allowed Codex's native `apply_patch` to write on the host despite `blockedTools: [Bash]`. Omit those effects if the runner is the only intended writer, and block `apply_patch` explicitly as a guard against later policy broadening. If the MCP server is named `sandbox`, name the runner both as Codex sees it (`mcp__sandbox__run`) and as the MCP gateway sees it (`run`) in the policy. See the [paired native-tool control](model-origin-benchmark.md#active-native-shell-hook-and-connected-runner-in-one-configuration).
 
+For the complete boundary and acceptance probes, use the [restricted coding runbook](restricted-coding.md).
+
 ## Checking that it works
 
 ```bash

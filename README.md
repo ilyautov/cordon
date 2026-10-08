@@ -153,7 +153,7 @@ The narrow stretch Cordon covers is compared with classifier firewalls, MCP scan
 - **Any new user message lifts the exposure mark**, a reflexive "yes" included. Telling informed consent from reflex is a question about meaning.
 - **Memory is noticed by name.** A write through a name assembled at run time leaves no trace for the next session, and `cordon: trust memory` is taken at its word.
 - **Not a sandbox.** What a launched command does is the operating system's business.
-- **Not a model-weight check.** A backdoored model can request a clean-looking shell call without first reading untrusted content. The default profile refuses `exec`; the `coding` profile permits it. A policy can hard-block named native tools while admitting a separately isolated runner. Blocking the shell alone does not confine file edits: a live Codex control wrote through `apply_patch` when `create` and `update` were granted. Cordon cannot see what a downloaded script does inside its process ([measured boundary](docs/model-origin-benchmark.md)).
+- **Not a model-weight check.** A backdoored model can request a clean-looking shell call without first reading untrusted content. The default profile refuses `exec`; the `coding` profile permits it. A policy can hard-block named native tools while admitting a separately isolated runner. Blocking the shell alone does not confine file edits: a live Codex control wrote through `apply_patch` when `create` and `update` were granted. Cordon cannot see what a downloaded script does inside its process ([measured boundary](docs/model-origin-benchmark.md), [restricted coding runbook](docs/restricted-coding.md)).
 
 ## FAQ
 
