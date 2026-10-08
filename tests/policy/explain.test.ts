@@ -119,6 +119,10 @@ describe('lint', () => {
     expect(found(policy({ tools: { WebFetch: ['read', 'network-egress', 'export'] } }))).not.toMatch(/warning/)
   })
 
+  it('says that a blocked tool cannot be approved', () => {
+    expect(text(policy({ blockedTools: ['Bash'] }))).toMatch(/Blocked tools: Bash.*no approval lifts/u)
+  })
+
   it('does not claim every shell command is refused after a read', () => {
     const out = found(policy({ mode: 'autonomous', profile: { effects: ['read', 'exec'], resources: { paths: [], hosts: [] } } }))
     expect(out).toMatch(/warning: .*exec/)

@@ -90,6 +90,10 @@ exposure: true
 # tools:
 #   mcp__github__create_issue: [create, network-egress]
 
+# Refuse an exact tool name even when its effects are granted. This can keep
+# the native shell closed while a separately isolated executor uses exec.
+# blockedTools: [Bash]
+
 # Memory the agent reloads in later sessions, beyond CLAUDE.md and the like.
 # memory:
 #   files: [TEAM-RULES.md]

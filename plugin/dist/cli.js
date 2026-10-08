@@ -7443,6 +7443,7 @@ var DEFAULT_POLICY = {
     resources: { paths: [], hosts: [] }
   },
   tools: {},
+  blockedTools: [],
   trustedSources: [],
   toolsReturn: {},
   arguments: {},
@@ -7528,6 +7529,9 @@ function validate(parsed, path) {
     for (const [name, value] of Object.entries(tools)) {
       policy.tools[name] = asEffects(value, `${path}: tools.${name}`);
     }
+  }
+  if (Object.hasOwn(input, "blockedTools")) {
+    policy.blockedTools = asNames(input["blockedTools"], `${path}: blockedTools`);
   }
   if ("trustedSources" in input) {
     policy.trustedSources = asStrings(input.trustedSources, `${path}: trustedSources`);
@@ -7617,6 +7621,7 @@ var TOP_LEVEL = [
   "mode",
   "profile",
   "tools",
+  "blockedTools",
   "trustedSources",
   "toolsReturn",
   "arguments",
@@ -8711,6 +8716,9 @@ function decide(call, ctx) {
       reason: `the MCP tool ${call.tool} ${held.why === "new" ? "appeared" : "changed"} after the server was approved (${held.server}); review the server, then run "cordon mcp approve -- ${held.server}"`
     };
   }
+  if (ctx.policy.blockedTools.includes(call.tool)) {
+    return { kind: "deny", rule: "tool-blocked", reason: `tool ${call.tool} is blocked by the policy` };
+  }
   const parts = fields(own2);
   const selfHit = selfProtection(parts, ctx);
   if (selfHit) return selfHit;
@@ -9361,6 +9369,7 @@ var RULES = {
   malformed: { class: "guard-failure", tier: "precaution" },
   failure: { class: "guard-failure", tier: "precaution" },
   pin: { class: "tool-rug-pull", tier: "evidence" },
+  "tool-blocked": { class: "out-of-scope", tier: "precaution" },
   "self-protection": { class: "guard-tampering", tier: "precaution" },
   "agent-config": { class: "guard-tampering", tier: "suspicion" },
   unscanned: { class: "unscanned-content", tier: "suspicion" },
@@ -16276,6 +16285,9 @@ function explain(policy) {
       `Tools: ${tools.map(([tool, effects]) => `${tool} counts as ${effects.join(" and ") || "nothing (refused)"}`).join("; ")}. This classifies a tool, it does not allow it: a tool whose class is not granted above is still refused.`
     );
   }
+  if (policy.blockedTools.length > 0) {
+    lines.push(`Blocked tools: ${policy.blockedTools.join(", ")}. These calls are refused even if their effects are granted; no approval lifts the refusal.`);
+  }
   for (const [tool, roles] of Object.entries(policy.arguments)) {
     for (const [field3, role] of Object.entries(roles)) {
       if (role === "controlled") {
@@ -16444,6 +16456,10 @@ exposure: true
 # escalates. Example:
 # tools:
 #   mcp__github__create_issue: [create, network-egress]
+
+# Refuse an exact tool name even when its effects are granted. This can keep
+# the native shell closed while a separately isolated executor uses exec.
+# blockedTools: [Bash]
 
 # Memory the agent reloads in later sessions, beyond CLAUDE.md and the like.
 # memory:

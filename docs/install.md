@@ -234,6 +234,18 @@ notify:
 
 The classes `exec`, `delete` and `financial` are deliberately absent here. `Bash` belongs to the `exec` class as a whole: parsing the command means a shell parser, and every shell parser can be worked around. If a task needs `Bash`, then `exec` is added to the profile deliberately, with the understanding that the hook does not see the contents of the command.
 
+**`blockedTools`** is an optional list of exact tool names as the hook receives them. A listed call is denied before effect classification, in either mode; `cordon approve` cannot release it. This lets a profile grant `exec` to a separately isolated executor while refusing the harness's native shell:
+
+```yaml
+profile:
+  effects: [read, summarize, create, update, exec]
+tools:
+  mcp__sandbox__run: [exec]
+blockedTools: [Bash]
+```
+
+Use the actual names of every direct execution tool in the harness. A block on `Bash` does not block a differently named shell tool, a subprocess inside an allowed tool, or calls that never reach Cordon's hook. The declared runner still needs operating-system file and network limits; Cordon does not inspect a command's later effects.
+
 ### Example: a scheduled overnight job
 
 ```yaml

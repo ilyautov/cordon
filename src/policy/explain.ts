@@ -116,6 +116,9 @@ export function explain(policy: Policy): string[] {
         'This classifies a tool, it does not allow it: a tool whose class is not granted above is still refused.',
     )
   }
+  if (policy.blockedTools.length > 0) {
+    lines.push(`Blocked tools: ${policy.blockedTools.join(', ')}. These calls are refused even if their effects are granted; no approval lifts the refusal.`)
+  }
 
   for (const [tool, roles] of Object.entries(policy.arguments)) {
     for (const [field, role] of Object.entries(roles)) {

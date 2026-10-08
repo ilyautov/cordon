@@ -59,6 +59,18 @@ describe('loadPolicy', () => {
   })
 })
 
+describe('blocked tools', () => {
+  it('reads exact tool names from the policy', () => {
+    expect(parsePolicy('blockedTools: [Bash, run_shell_command]\n', 'policy.yaml').blockedTools)
+      .toEqual(['Bash', 'run_shell_command'])
+  })
+
+  it('refuses a scalar or an empty tool name', () => {
+    expect(() => parsePolicy('blockedTools: Bash\n', 'policy.yaml')).toThrow(/blockedTools/u)
+    expect(() => parsePolicy('blockedTools: [""]\n', 'policy.yaml')).toThrow(/blockedTools/u)
+  })
+})
+
 describe('the policy: the output axis footer', () => {
   it('the footer is on by default', () => {
     expect(loadPolicy(scratch()).output.footer).toBe(true)
@@ -448,4 +460,3 @@ describe('the service profile', () => {
     for (const effect of ['delete', 'export', 'financial', 'exec']) expect(policy.profile.effects).not.toContain(effect)
   })
 })
-

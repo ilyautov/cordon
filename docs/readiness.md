@@ -1,6 +1,6 @@
 # Readiness
 
-This page tracks what Cordon took from the tools it is compared with in [comparison.md](comparison.md), what it chose not to take, and what is still open. Every "done" row names the test or live run that checks it, so a claim here can be verified by reading the code. The page was last reviewed at 0.7.0, on 26 September 2026.
+This page tracks what Cordon took from the tools it is compared with in [comparison.md](comparison.md), what it chose not to take, and what is still open. Every "done" row names the test or live run that checks it, so a claim here can be verified by reading the code. The comparison table was last reviewed at 0.7.0, on 26 September 2026; the model-origin boundary below was checked at 0.12.1 on 7 October 2026.
 
 ## Taken from the field
 
@@ -36,6 +36,7 @@ This page tracks what Cordon took from the tools it is compared with in [compari
 
 ## Open
 
+- **A model that chooses a harmful call itself.** With no untrusted read and `exec` in the certificate, the Codex hook passes a `curl`-then-shell-shaped call under the `coding` profile; with the default certificate it refuses it. An explicit `blockedTools: [Bash]` now refuses that shell call even while granting `exec` to a declared runner tool. A separate Docker trial kept a small code edit working while withholding a synthetic `.env` and network access. The runner was not wired into Codex, and no poisoned model was run through Cordon. See [the measurement](model-origin-benchmark.md).
 - **AgentDojo on a vulnerable model, and under adaptive attack.** [agentdojo.md](agentdojo.md) has the scripted worst case and Claude Haiku 4.5. A model that falls for `important_instructions` and attacks beyond it are not measured.
 - **Autonomous utility on Slack-like work.** A strict autonomous policy completes 14% of AgentDojo's Slack tasks, 33% with directory tools declared trusted. What is left is links fetched from messages and destinations read from data, which is the attack's own shape.
 - **Cross-server shadowing by description.** A tool whose name imitates another server's tool is held (below). A description on server A that talks about a tool on server B is still only visible text: pinning makes it stable, and nothing judges what it says.

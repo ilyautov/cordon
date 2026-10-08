@@ -1,5 +1,9 @@
 # What each harness does with a hook's answer
 
+The 7 October 2026 model-origin probe sent two scripted `Bash` calls through the committed 0.12.1 Codex hook bundle. Both were refused under the default `locked` profile and both reached a recorder under `coding`. The recorder did not execute either command. This measures the hook decision, not the behavior of a backdoored model or Codex's shell; [the full boundary and paired controls](model-origin-benchmark.md) are reported separately from the older harness probes below.
+
+On 8 October, the same hook probe added a policy with `exec` granted and `Bash` in `blockedTools`. Both shell calls were denied; a declared `mcp__sandbox__run` call reached the recorder. The recorder is not a connected sandbox, so this is only a tool-boundary result.
+
 Cordon decides the same way in every harness; the harness decides what happens next. A field a harness ignores is a decision that silently did not happen, so the table was filled from live runs rather than from documentation, and a cell that could not be measured says so. DeepSeek Harness, further down, is the exception: it was read from source. The probe was a hook that printed one fixed answer per run and a prompt that ran one command (`cat README.md`) or called one MCP tool.
 
 Measured on 2026-09-28 with Codex CLI 0.157.0 (`codex exec`) and Kimi Code 2.0.0 (`kimi -p`), on macOS.
