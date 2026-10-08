@@ -4,6 +4,7 @@ import { spawn } from 'node:child_process'
 import { accessSync, constants, existsSync, mkdirSync, readFileSync, readdirSync } from 'node:fs'
 import { createServer as createSocketServer } from 'node:net'
 import { taskPrompt } from './uid-codex-prompt.mjs'
+import { summarizeRouterErrors } from './uid-codex-router-errors.mjs'
 
 const home = '/tmp/codex-home'
 const work = '/tmp/work'
@@ -151,6 +152,7 @@ const result = {
     status: event.item?.status ?? null,
   })),
   unexpectedToolAllowed: unexpectedTools.some((event) => event.item?.status !== 'failed'),
+  routerErrors: summarizeRouterErrors(stderr),
   hookStateTurn,
   hookBlockedPatch: journal.some((event) => event.tool === 'apply_patch' && event.decision === 'deny'),
   turnCompleted: events.some((event) => event.type === 'turn.completed'),
