@@ -1008,6 +1008,53 @@ describe('MCP gateway: descriptions inside the input schema', () => {
   })
 })
 
+describe('MCP gateway: tool fields beside the input schema', () => {
+  it.each(['FAKE_TOOL_TITLE_BAD', 'FAKE_TOOL_SCHEMA_BAD', 'FAKE_TOOL_SCHEMA_NESTED_BAD', 'FAKE_TOOL_ANNOTATION_BAD'])(
+    'withholds an unreadable %s before pinning', async (flag) => {
+      const gateway = start(basePolicy(), { [flag]: '1' })
+      try {
+        gateway.send({ jsonrpc: '2.0', id: 1, method: 'tools/list' })
+        const response = await gateway.next()
+        expect(response.error).toEqual(expect.objectContaining({ code: -32000 }))
+        expect(JSON.stringify(response)).not.toContain(HIDDEN)
+      } finally {
+        await gateway.stop()
+      }
+    },
+  )
+
+  it('cleans a hidden layer in the title, annotation and output schema', async () => {
+    const gateway = start(basePolicy(), { FAKE_TOOL_RICH_FIELDS: '1' })
+    try {
+      gateway.send({ jsonrpc: '2.0', id: 1, method: 'tools/list' })
+      const response = await gateway.next()
+      const tools = (response.result as { tools: Array<{ name: string; title: string; annotations: { title: string }; outputSchema: unknown }> }).tools
+      const tool = tools.find((entry) => entry.name === 'poisoned_page')!
+      expect(tool.title).toBe('Product page.')
+      expect(tool.annotations.title).toBe('Page reader.')
+      expect(JSON.stringify(tool.outputSchema)).toContain('Rendered page.')
+      expect(JSON.stringify(tool)).not.toContain(HIDDEN)
+    } finally {
+      await gateway.stop()
+    }
+  })
+
+  it('preserves harmless text in the same tool shape', async () => {
+    const gateway = start(basePolicy(), { FAKE_TOOL_RICH_CLEAN: '1' })
+    try {
+      gateway.send({ jsonrpc: '2.0', id: 1, method: 'tools/list' })
+      const response = await gateway.next()
+      const tools = (response.result as { tools: Array<{ name: string; title: string; annotations: { title: string }; outputSchema: unknown }> }).tools
+      const tool = tools.find((entry) => entry.name === 'poisoned_page')!
+      expect(tool.title).toBe('Product page.')
+      expect(tool.annotations.title).toBe('Page reader.')
+      expect(JSON.stringify(tool.outputSchema)).toContain('Rendered page.')
+    } finally {
+      await gateway.stop()
+    }
+  })
+})
+
 describe('MCP gateway: tools pinned on first sight', () => {
   const names = (message: Record<string, unknown>) =>
     ((message['result'] as { tools: Array<{ name: string }> }).tools).map((tool) => tool.name)
@@ -1044,6 +1091,24 @@ describe('MCP gateway: tools pinned on first sight', () => {
     later.send({ jsonrpc: '2.0', id: 1, method: 'tools/list' })
     expect(names(await later.next())).toEqual(['poisoned_page', 'update_price', 'mystery_box'])
     await later.stop()
+  })
+
+  it('holds a tool when its title or output schema appears after pinning', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'cordon-mcp-pins-'))
+    const first = start(basePolicy(), {}, home)
+    first.send({ jsonrpc: '2.0', id: 1, method: 'tools/list' })
+    await first.next()
+    await first.stop()
+
+    const later = start(basePolicy(), { FAKE_TOOL_RICH_FIELDS: '1' }, home)
+    try {
+      later.send({ jsonrpc: '2.0', id: 1, method: 'tools/list' })
+      const response = await later.next()
+      const names = (response.result as { tools: Array<{ name: string }> }).tools.map((tool) => tool.name)
+      expect(names).not.toContain('poisoned_page')
+    } finally {
+      await later.stop()
+    }
   })
 })
 

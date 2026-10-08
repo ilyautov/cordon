@@ -9234,7 +9234,16 @@ function hostAllowed(raw, hosts) {
 // src/gate/pins.ts
 import { createHash } from "node:crypto";
 function fingerprint(tool) {
-  const canonical2 = stable({ name: tool.name, description: tool.description ?? null, inputSchema: tool.inputSchema ?? null });
+  const canonical2 = stable({
+    name: tool.name,
+    description: tool.description ?? null,
+    inputSchema: tool.inputSchema ?? null,
+    // Keep old pins valid when these optional MCP fields are absent. A field
+    // newly added to an already pinned tool still changes its fingerprint.
+    ...tool.title === void 0 ? {} : { title: tool.title },
+    ...tool.annotations === void 0 ? {} : { annotations: tool.annotations },
+    ...tool.outputSchema === void 0 ? {} : { outputSchema: tool.outputSchema }
+  });
   return createHash("sha256").update(canonical2, "utf8").digest("hex");
 }
 function comparePins(pinned2, listed) {
@@ -15829,7 +15838,7 @@ function observeToolList(value, cordon, policy, command) {
   const result = asRecord(value["result"]);
   const listed = result?.["tools"];
   const source = classifySource({ kind: "mcp-description", label: "tools/list" }, policy);
-  if (result === null || !Array.isArray(listed) || Object.keys(value).some((key) => !RESPONSE_KEYS.has(key)) || Object.keys(result).some((key) => !TOOL_LIST_KEYS.has(key))) {
+  if (result === null || !Array.isArray(listed) || Object.keys(value).some((key) => !RESPONSE_KEYS.has(key)) || Object.keys(result).some((key) => !TOOL_LIST_KEYS.has(key)) || listed.some((tool) => !readableListedTool(tool))) {
     return withholdUnreadableResponse(value, "tools/list", source, cordon);
   }
   if (result["_meta"] !== void 0) {
@@ -15837,7 +15846,14 @@ function observeToolList(value, cordon, policy, command) {
     if (observed === null) return withholdUnreadableResponse(value, "tools/list", source, cordon);
     result["_meta"] = observed.value;
   }
-  const named2 = listed.map((tool) => asRecord(tool)).filter((tool) => tool !== null && typeof tool["name"] === "string").map((tool) => ({ name: tool["name"], description: tool["description"], inputSchema: tool["inputSchema"] }));
+  const named2 = listed.map((tool) => asRecord(tool)).filter((tool) => tool !== null && typeof tool["name"] === "string").map((tool) => ({
+    name: tool["name"],
+    description: tool["description"],
+    inputSchema: tool["inputSchema"],
+    title: tool["title"],
+    annotations: tool["annotations"],
+    outputSchema: tool["outputSchema"]
+  }));
   const held = new Set(cordon.admitTools(command, named2).map((tool) => tool.name));
   const tools = listed.filter((tool) => !held.has(String(asRecord(tool)?.["name"])));
   value = { ...value, result: { ...result, tools } };
@@ -15847,12 +15863,44 @@ function observeToolList(value, cordon, policy, command) {
     const name = typeof entry["name"] === "string" ? entry["name"] : "";
     const source2 = classifySource({ kind: "mcp-description", label: name, tool: name }, policy);
     if (typeof entry["description"] === "string") observeDescription(entry, "description", name, source2, cordon);
+    if (typeof entry["title"] === "string") observeDescription(entry, "title", name, source2, cordon);
+    const annotations = asRecord(entry["annotations"]);
+    if (annotations !== null && typeof annotations["title"] === "string") {
+      observeDescription(annotations, "title", name, source2, cordon);
+    }
     const schema = asRecord(entry["inputSchema"]);
     if (schema !== null) observeSchema(schema, name, source2, cordon, 0);
+    const outputSchema = asRecord(entry["outputSchema"]);
+    if (outputSchema !== null) observeSchema(outputSchema, name, source2, cordon, 0);
   }
   return value;
 }
 var MAX_SCHEMA_DEPTH = 16;
+function readableListedTool(value) {
+  const entry = asRecord(value);
+  if (entry === null || typeof entry["name"] !== "string" || entry["name"] === "" || entry["description"] !== void 0 && typeof entry["description"] !== "string" || entry["title"] !== void 0 && typeof entry["title"] !== "string") return false;
+  const input = asRecord(entry["inputSchema"]);
+  if (input === null || !readableSchemaText(input, 0)) return false;
+  if (entry["outputSchema"] !== void 0) {
+    const output = asRecord(entry["outputSchema"]);
+    if (output === null || !readableSchemaText(output, 0)) return false;
+  }
+  if (entry["annotations"] !== void 0) {
+    const annotations = asRecord(entry["annotations"]);
+    if (annotations === null || Object.entries(annotations).some(([key, value2]) => key === "title" ? typeof value2 !== "string" : !TOOL_ANNOTATION_HINTS.has(key) || typeof value2 !== "boolean")) return false;
+  }
+  return true;
+}
+function readableSchemaText(node, depth) {
+  if (depth > MAX_SCHEMA_DEPTH) return true;
+  if (Array.isArray(node)) return node.every((item) => readableSchemaText(item, depth + 1));
+  const record = asRecord(node);
+  if (record === null) return true;
+  return Object.entries(record).every(([key, value]) => {
+    if ((key === "description" || key === "title") && typeof value !== "string") return false;
+    return readableSchemaText(value, depth + 1);
+  });
+}
 function observeSchema(node, tool, source, cordon, depth) {
   if (depth > MAX_SCHEMA_DEPTH) {
     cordon.markUnredacted();
@@ -15889,6 +15937,7 @@ function withNotice(value, notice) {
 }
 var TOOL_RESULT_KEYS = /* @__PURE__ */ new Set(["content", "structuredContent", "isError", "_meta"]);
 var TOOL_LIST_KEYS = /* @__PURE__ */ new Set(["tools", "nextCursor", "_meta"]);
+var TOOL_ANNOTATION_HINTS = /* @__PURE__ */ new Set(["readOnlyHint", "destructiveHint", "idempotentHint", "openWorldHint"]);
 var RESPONSE_KEYS = /* @__PURE__ */ new Set(["jsonrpc", "id", "result"]);
 function observeToolResult(value, call, cordon, policy) {
   const source = classifySource({ kind: "tool", label: sourceLabel(call), tool: call.tool }, policy);

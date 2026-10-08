@@ -5,6 +5,9 @@ export interface ListedTool {
   name: string
   description?: unknown
   inputSchema?: unknown
+  title?: unknown
+  annotations?: unknown
+  outputSchema?: unknown
 }
 
 /** Tool name → fingerprint, as approved. */
@@ -30,7 +33,7 @@ export interface PinComparison {
 }
 
 /**
- * The fingerprint of a tool: name, raw description and input schema.
+ * The fingerprint of the tool fields Cordon pins.
  *
  * The raw description, before any cleaning, because a hidden layer added
  * later is exactly the change a rug pull makes. The schema with its keys
@@ -39,7 +42,13 @@ export interface PinComparison {
  * to approve without looking.
  */
 export function fingerprint(tool: ListedTool): string {
-  const canonical = stable({ name: tool.name, description: tool.description ?? null, inputSchema: tool.inputSchema ?? null })
+  const canonical = stable({ name: tool.name, description: tool.description ?? null, inputSchema: tool.inputSchema ?? null,
+    // Keep old pins valid when these optional MCP fields are absent. A field
+    // newly added to an already pinned tool still changes its fingerprint.
+    ...(tool.title === undefined ? {} : { title: tool.title }),
+    ...(tool.annotations === undefined ? {} : { annotations: tool.annotations }),
+    ...(tool.outputSchema === undefined ? {} : { outputSchema: tool.outputSchema }),
+  })
   return createHash('sha256').update(canonical, 'utf8').digest('hex')
 }
 

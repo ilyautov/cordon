@@ -434,7 +434,8 @@ function observeToolList(
   const source = classifySource({ kind: 'mcp-description', label: 'tools/list' }, policy)
   if (result === null || !Array.isArray(listed) ||
     Object.keys(value).some((key) => !RESPONSE_KEYS.has(key)) ||
-    Object.keys(result).some((key) => !TOOL_LIST_KEYS.has(key))) {
+    Object.keys(result).some((key) => !TOOL_LIST_KEYS.has(key)) ||
+    listed.some((tool) => !readableListedTool(tool))) {
     return withholdUnreadableResponse(value, 'tools/list', source, cordon)
   }
   if (result['_meta'] !== undefined) {
@@ -450,7 +451,8 @@ function observeToolList(
   const named = listed
     .map((tool) => asRecord(tool))
     .filter((tool): tool is Record<string, unknown> => tool !== null && typeof tool['name'] === 'string')
-    .map((tool) => ({ name: tool['name'] as string, description: tool['description'], inputSchema: tool['inputSchema'] }))
+    .map((tool) => ({ name: tool['name'] as string, description: tool['description'], inputSchema: tool['inputSchema'],
+      title: tool['title'], annotations: tool['annotations'], outputSchema: tool['outputSchema'] }))
   const held = new Set(cordon.admitTools(command, named).map((tool) => tool.name))
   const tools = listed.filter((tool) => !held.has(String(asRecord(tool)?.['name'])))
   value = { ...value, result: { ...result, tools } }
@@ -461,17 +463,54 @@ function observeToolList(
     const name = typeof entry['name'] === 'string' ? entry['name'] : ''
     const source = classifySource({ kind: 'mcp-description', label: name, tool: name }, policy)
     if (typeof entry['description'] === 'string') observeDescription(entry, 'description', name, source, cordon)
+    if (typeof entry['title'] === 'string') observeDescription(entry, 'title', name, source, cordon)
+    const annotations = asRecord(entry['annotations'])
+    if (annotations !== null && typeof annotations['title'] === 'string') {
+      observeDescription(annotations, 'title', name, source, cordon)
+    }
     // Property descriptions are read by the model as much as the tool's own,
     // and a scanner that looks only at the top level misses them: the
     // classic place to put the poisoned line once the top level is watched.
     const schema = asRecord(entry['inputSchema'])
     if (schema !== null) observeSchema(schema, name, source, cordon, 0)
+    const outputSchema = asRecord(entry['outputSchema'])
+    if (outputSchema !== null) observeSchema(outputSchema, name, source, cordon, 0)
   }
   return value
 }
 
 /** How deep a schema is walked. Deeper than any real schema, bounded against a hostile one. */
 const MAX_SCHEMA_DEPTH = 16
+
+function readableListedTool(value: unknown): boolean {
+  const entry = asRecord(value)
+  if (entry === null || typeof entry['name'] !== 'string' || entry['name'] === '' ||
+    (entry['description'] !== undefined && typeof entry['description'] !== 'string') ||
+    (entry['title'] !== undefined && typeof entry['title'] !== 'string')) return false
+  const input = asRecord(entry['inputSchema'])
+  if (input === null || !readableSchemaText(input, 0)) return false
+  if (entry['outputSchema'] !== undefined) {
+    const output = asRecord(entry['outputSchema'])
+    if (output === null || !readableSchemaText(output, 0)) return false
+  }
+  if (entry['annotations'] !== undefined) {
+    const annotations = asRecord(entry['annotations'])
+    if (annotations === null || Object.entries(annotations).some(([key, value]) =>
+      key === 'title' ? typeof value !== 'string' : !TOOL_ANNOTATION_HINTS.has(key) || typeof value !== 'boolean')) return false
+  }
+  return true
+}
+
+function readableSchemaText(node: unknown, depth: number): boolean {
+  if (depth > MAX_SCHEMA_DEPTH) return true
+  if (Array.isArray(node)) return node.every((item) => readableSchemaText(item, depth + 1))
+  const record = asRecord(node)
+  if (record === null) return true
+  return Object.entries(record).every(([key, value]) => {
+    if ((key === 'description' || key === 'title') && typeof value !== 'string') return false
+    return readableSchemaText(value, depth + 1)
+  })
+}
 
 /**
  * Every `description` and `title` string inside a JSON Schema, at any depth
@@ -531,6 +570,7 @@ function withNotice(value: Record<string, unknown>, notice: string): Record<stri
 
 const TOOL_RESULT_KEYS = new Set(['content', 'structuredContent', 'isError', '_meta'])
 const TOOL_LIST_KEYS = new Set(['tools', 'nextCursor', '_meta'])
+const TOOL_ANNOTATION_HINTS = new Set(['readOnlyHint', 'destructiveHint', 'idempotentHint', 'openWorldHint'])
 const RESPONSE_KEYS = new Set(['jsonrpc', 'id', 'result'])
 
 function observeToolResult(

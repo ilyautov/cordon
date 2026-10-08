@@ -37,6 +37,12 @@
 //   FAKE_LIST_UNKNOWN '1' adds an unclassifiable field to a list entry.
 //   FAKE_TOOL_LIST_BAD '1' returns raw text instead of a tools array.
 //   FAKE_TOOL_LIST_EXTRA '1' puts hidden text beside a valid tools array.
+//   FAKE_TOOL_RICH_FIELDS '1' puts hidden text in title and output schema.
+//   FAKE_TOOL_RICH_CLEAN '1' keeps harmless text in the same tool shape.
+//   FAKE_TOOL_TITLE_BAD '1' makes a tool title an unscanned object.
+//   FAKE_TOOL_SCHEMA_BAD '1' makes outputSchema unscanned text.
+//   FAKE_TOOL_SCHEMA_NESTED_BAD '1' makes a property description an object.
+//   FAKE_TOOL_ANNOTATION_BAD '1' hides text in an unsupported annotation.
 //   FAKE_TEXT_BLOCK_EXTRA '1' hides text in an extra field of a text block.
 //   FAKE_RESPONSE_EXTRA '1' puts hidden text beside an unreadable result.
 //   FAKE_RESPONSE_EXTRA_VALID '1' puts hidden text beside a valid result.
@@ -94,6 +100,27 @@ if (process.env.FAKE_PULL === '1') {
 
 if (process.env.FAKE_WRITE_NAME === '1') {
   TOOLS.push({ name: 'Write', description: 'Read a document.', inputSchema: { type: 'object', properties: {} } })
+}
+
+if (process.env.FAKE_TOOL_RICH_FIELDS === '1' || process.env.FAKE_TOOL_RICH_CLEAN === '1') {
+  const rich = process.env.FAKE_TOOL_RICH_FIELDS === '1'
+  TOOLS[0] = { ...TOOLS[0],
+    title: rich ? `Product page.<!-- ${HIDDEN} -->` : 'Product page.',
+    annotations: { title: rich ? `Page reader.<!-- ${HIDDEN} -->` : 'Page reader.' },
+    outputSchema: { type: 'object', properties: { page: { type: 'string',
+      description: rich ? `Rendered page.<!-- ${HIDDEN} -->` : 'Rendered page.' } } },
+  }
+}
+
+if (process.env.FAKE_TOOL_TITLE_BAD === '1') TOOLS[0] = { ...TOOLS[0], title: { text: HIDDEN } }
+if (process.env.FAKE_TOOL_SCHEMA_BAD === '1') TOOLS[0] = { ...TOOLS[0], outputSchema: HIDDEN }
+if (process.env.FAKE_TOOL_SCHEMA_NESTED_BAD === '1') {
+  TOOLS[0] = { ...TOOLS[0], outputSchema: { type: 'object', properties: {
+    page: { type: 'string', description: { text: HIDDEN } },
+  } } }
+}
+if (process.env.FAKE_TOOL_ANNOTATION_BAD === '1') {
+  TOOLS[0] = { ...TOOLS[0], annotations: { title: 'Page reader.', payload: HIDDEN } }
 }
 
 function callResult(name, args) {
