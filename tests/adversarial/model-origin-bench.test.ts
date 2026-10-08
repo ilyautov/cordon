@@ -162,6 +162,27 @@ describe('model-origin tool-boundary benchmarks', () => {
     expect(run.status).toBe(0)
   }, 480_000)
 
+  it.skipIf(process.env.CORDON_RUN_UID_CODEX_BENCH !== '1')('keeps a separate-UID Codex CLI behind native hooks and the owner socket', () => {
+    const output = execFileSync(process.execPath, [join(process.cwd(), 'bench/model-origin/uid-codex.mjs')], {
+      encoding: 'utf8', timeout: 240_000,
+    })
+    const row = JSON.parse(output) as Record<string, unknown>
+    expect(row.agentUidDifferent).toBe(true)
+    expect(row.agentNoOwnerPolicy).toBe(true)
+    expect(row.agentNoOwnerSource).toBe(true)
+    expect(row.agentNoOwnerSecret).toBe(true)
+    expect(row.agentNoDockerSocket).toBe(true)
+    expect(row.agentNoAuth).toBe(true)
+    expect(row.agentPolicyReadOnly).toBe(true)
+    expect(row.agentBundleReadOnly).toBe(true)
+    expect(row.nativePatchControlEdited).toBe(true)
+    expect(row.nativePatchBlocked).toBe(true)
+    expect(row.nativePatchLeftAgentFileUnchanged).toBe(true)
+    expect(row.downloadDeniedBeforeRunner).toBe(true)
+    expect(row.cleanEditReachedRunner).toBe(true)
+    expect(row.ownerSourceEdited).toBe(true)
+  }, 240_000)
+
   it.skipIf(process.env.CORDON_RUN_LIVE_TICKET_BENCH !== '1')('records live clean and injected ticket effects through an isolated Codex configuration', () => {
     const output = execFileSync(process.execPath, [join(process.cwd(), 'bench/codex-mcp/live-isolated.mjs')], {
       encoding: 'utf8',
