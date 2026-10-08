@@ -785,6 +785,70 @@ describe('the MCP gateway', () => {
   })
 
   it.each([
+    ['FAKE_RESOURCE_EXTRA', 'resources/read', { uri: 'https://shop.example/page' }],
+    ['FAKE_PROMPT_EXTRA', 'prompts/get', { name: 'greeting' }],
+  ] as const)('withholds an unscanned field in %s', async (flag, method, params) => {
+    const env = { ...withCallLog(), [flag]: '1' }
+    const gateway = start(basePolicy(), env)
+    try {
+      gateway.send({ jsonrpc: '2.0', id: 1, method, params })
+      const response = await gateway.next()
+      expect(response.error).toEqual(expect.objectContaining({ code: -32000 }))
+      expect(JSON.stringify(response)).not.toContain(HIDDEN)
+
+      gateway.send({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: {
+        name: 'update_price', arguments: { nmId: '99887766', price: 1 },
+      } })
+      const update = (await gateway.next()).result as { isError?: boolean }
+      expect(update.isError).toBe(true)
+      expect(callLog(env)).toEqual([method])
+    } finally {
+      await gateway.stop()
+    }
+  })
+
+  it('classifies a resource by the requested URI, not the server-returned URI', async () => {
+    const env = { ...withCallLog(), FAKE_RESOURCE_URI_SPOOF: '1' }
+    const policy = basePolicy()
+    policy.trustedSources = ['https://trusted.example']
+    const gateway = start(policy, env)
+    try {
+      gateway.send({ jsonrpc: '2.0', id: 1, method: 'resources/read', params: { uri: 'https://shop.example/page' } })
+      await gateway.next()
+      gateway.send({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: {
+        name: 'update_price', arguments: { nmId: '99887766', price: 1 },
+      } })
+      const update = (await gateway.next()).result as { isError?: boolean; content: Array<{ text: string }> }
+      expect(update.isError).toBe(true)
+      expect(update.content[0]!.text).toContain('untrusted content')
+      expect(callLog(env)).toEqual(['resources/read'])
+    } finally {
+      await gateway.stop()
+    }
+  })
+
+  it('keeps a binary resource while marking it as unreadable', async () => {
+    const env = { ...withCallLog(), FAKE_RESOURCE_BLOB: '1' }
+    const gateway = start(basePolicy(), env)
+    try {
+      gateway.send({ jsonrpc: '2.0', id: 1, method: 'resources/read', params: { uri: 'https://shop.example/logo.bin' } })
+      const response = await gateway.next()
+      expect(response.error).toBeUndefined()
+      const contents = (response.result as { contents: Array<{ blob: string }> }).contents
+      expect(contents[0]!.blob).toBe('AAAA'.repeat(40))
+
+      gateway.send({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: {
+        name: 'update_price', arguments: { nmId: '99887766', price: 1 },
+      } })
+      const update = (await gateway.next()).result as { isError?: boolean }
+      expect(update.isError).toBe(true)
+      expect(callLog(env)).toEqual(['resources/read'])
+    } finally {
+      await gateway.stop()
+    }
+  })
+
+  it.each([
     ['FAKE_RESOURCE_BAD', 'resources/read', { uri: 'https://shop.example/page' }],
     ['FAKE_PROMPT_BAD', 'prompts/get', { name: 'greeting' }],
   ] as const)('withholds malformed %s response before a later update', async (flag, method, params) => {

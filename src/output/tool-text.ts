@@ -187,6 +187,9 @@ function visit(node: unknown, key: string, depth: number, scan: Scan, media = fa
   }
 
   if (typeof node === 'string') {
+    // Binary media is opaque regardless of its encoded length. The caller
+    // still gets `unseen` from the parent field and can mark the read.
+    if (media && MEDIA_KEYS.has(fold(key))) return
     const role = media && fold(key) === 'data' ? 'label' : roleOf(key, node)
     if (role === 'unknown') {
       scan.known = false

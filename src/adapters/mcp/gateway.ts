@@ -570,11 +570,13 @@ function observeReadableResult(
   source: Source,
   cordon: Cordon,
   texts: string[],
+  allowUnseen = false,
 ): { value: unknown } | null {
   // An MCP server controls tool names. `Write` is textless in Claude Code,
   // but a server with that name can still return arbitrary readable data.
   const extracted = extractText('', value)
-  if (!extracted.known || extracted.unseen) return null
+  if (!extracted.known || (extracted.unseen && !allowUnseen)) return null
+  if (extracted.unseen) cordon.markUnredacted()
   let changed = false
   let substitutable = true
   const cleaned = extracted.parts.map((part) => {
@@ -629,22 +631,16 @@ function observeResourceRead(
   policy: Policy,
 ): Record<string, unknown> {
   const source = classifySource({ kind: 'tool', label: pending.label ?? 'resources/read', tool: 'resources/read' }, policy)
-  const contents = asRecord(value['result'])?.['contents']
-  if (!Array.isArray(contents)) {
+  const result = asRecord(value['result'])
+  if (Object.keys(value).some((key) => !RESPONSE_KEYS.has(key)) ||
+    result === null || !Array.isArray(result['contents'])) {
     return withholdUnreadableResponse(value, 'resources/read', source, cordon)
   }
-
-  for (const item of contents) {
-    const entry = asRecord(item)
-    if (entry !== null && typeof entry['text'] === 'string') {
-      const label = typeof entry['uri'] === 'string' ? entry['uri'] : (pending.label ?? 'resources/read')
-      const source = classifySource({ kind: 'tool', label, tool: 'resources/read' }, policy)
-      observeInto(entry, 'text', 'resources/read', source, cordon)
-    } else {
-      cordon.markUnredacted()
-    }
-  }
-  return value
+  // The returned URI is server-controlled. The requested URI is the only
+  // source identity the owner could have declared trustworthy before reading.
+  const observed = observeReadableResult(result, 'resources/read', source, cordon, [], true)
+  if (observed === null) return withholdUnreadableResponse(value, 'resources/read', source, cordon)
+  return { jsonrpc: '2.0', id: value['id'], result: observed.value }
 }
 
 /**
@@ -661,20 +657,14 @@ function observePromptsGet(
 ): Record<string, unknown> {
   const label = pending.label ?? 'prompts/get'
   const source = classifySource({ kind: 'tool', label, tool: 'prompts/get' }, policy)
-  const messages = asRecord(value['result'])?.['messages']
-  if (!Array.isArray(messages)) {
+  const result = asRecord(value['result'])
+  if (Object.keys(value).some((key) => !RESPONSE_KEYS.has(key)) ||
+    result === null || !Array.isArray(result['messages'])) {
     return withholdUnreadableResponse(value, 'prompts/get', source, cordon)
   }
-
-  for (const message of messages) {
-    const content = asRecord(asRecord(message)?.['content'])
-    if (content !== null && content['type'] === 'text' && typeof content['text'] === 'string') {
-      observeInto(content, 'text', 'prompts/get', source, cordon)
-    } else {
-      cordon.markUnredacted()
-    }
-  }
-  return value
+  const observed = observeReadableResult(result, 'prompts/get', source, cordon, [], true)
+  if (observed === null) return withholdUnreadableResponse(value, 'prompts/get', source, cordon)
+  return { jsonrpc: '2.0', id: value['id'], result: observed.value }
 }
 
 /**

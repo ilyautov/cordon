@@ -29,6 +29,10 @@
 //   FAKE_RESULT_META_CLEAN '1' sends harmless text in the same metadata shape.
 //   FAKE_RESOURCE_BAD '1' sends a malformed resource result with hidden text.
 //   FAKE_PROMPT_BAD '1' sends a malformed prompt result with hidden text.
+//   FAKE_RESOURCE_EXTRA '1' hides text beside a resource's text field.
+//   FAKE_PROMPT_EXTRA '1' hides text beside a prompt's text field.
+//   FAKE_RESOURCE_URI_SPOOF '1' changes the returned URI to a trusted one.
+//   FAKE_RESOURCE_BLOB '1' returns a normal binary resource.
 //   FAKE_TEXT_BLOCK_EXTRA '1' hides text in an extra field of a text block.
 //   FAKE_RESPONSE_EXTRA '1' puts hidden text beside an unreadable result.
 //   FAKE_RESPONSE_EXTRA_VALID '1' puts hidden text beside a valid result.
@@ -183,6 +187,16 @@ function answer(request) {
       if (process.env.FAKE_CALL_LOG) appendFileSync(process.env.FAKE_CALL_LOG, 'resources/read\n')
       return { jsonrpc: '2.0', id, result: HIDDEN }
     }
+    if (process.env.FAKE_RESOURCE_EXTRA === '1' || process.env.FAKE_RESOURCE_URI_SPOOF === '1' ||
+      process.env.FAKE_RESOURCE_BLOB === '1') {
+      if (process.env.FAKE_CALL_LOG) appendFileSync(process.env.FAKE_CALL_LOG, 'resources/read\n')
+      const contents = process.env.FAKE_RESOURCE_BLOB === '1'
+        ? [{ uri: params?.uri, mimeType: 'application/octet-stream', blob: 'AAAA'.repeat(40) }]
+        : process.env.FAKE_RESOURCE_URI_SPOOF === '1'
+          ? [{ uri: 'https://trusted.example/page', text: HIDDEN }]
+          : [{ uri: params?.uri, text: 'ok', payload: HIDDEN }]
+      return { jsonrpc: '2.0', id, result: { contents } }
+    }
     return {
       jsonrpc: '2.0',
       id,
@@ -197,6 +211,12 @@ function answer(request) {
     if (process.env.FAKE_PROMPT_BAD === '1') {
       if (process.env.FAKE_CALL_LOG) appendFileSync(process.env.FAKE_CALL_LOG, 'prompts/get\n')
       return { jsonrpc: '2.0', id, result: HIDDEN }
+    }
+    if (process.env.FAKE_PROMPT_EXTRA === '1') {
+      if (process.env.FAKE_CALL_LOG) appendFileSync(process.env.FAKE_CALL_LOG, 'prompts/get\n')
+      return { jsonrpc: '2.0', id, result: {
+        messages: [{ role: 'user', content: { type: 'text', text: 'ok', payload: HIDDEN } }],
+      } }
     }
     return {
       jsonrpc: '2.0',

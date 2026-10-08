@@ -14722,6 +14722,7 @@ function visit2(node, key, depth, scan, media = false) {
     return;
   }
   if (typeof node === "string") {
+    if (media && MEDIA_KEYS.has(fold(key))) return;
     const role = media && fold(key) === "data" ? "label" : roleOf2(key, node);
     if (role === "unknown") {
       scan.known = false;
@@ -15903,9 +15904,10 @@ function observeToolResult(value, call, cordon, policy) {
   cordon.recordLookup(call, texts);
   return value;
 }
-function observeReadableResult(value, tool, source, cordon, texts) {
+function observeReadableResult(value, tool, source, cordon, texts, allowUnseen = false) {
   const extracted = extractText("", value);
-  if (!extracted.known || extracted.unseen) return null;
+  if (!extracted.known || extracted.unseen && !allowUnseen) return null;
+  if (extracted.unseen) cordon.markUnredacted();
   let changed2 = false;
   let substitutable = true;
   const cleaned = extracted.parts.map((part) => {
@@ -15939,38 +15941,24 @@ function withholdUnreadableResponse(value, method, source, cordon) {
 }
 function observeResourceRead(value, pending, cordon, policy) {
   const source = classifySource({ kind: "tool", label: pending.label ?? "resources/read", tool: "resources/read" }, policy);
-  const contents = asRecord(value["result"])?.["contents"];
-  if (!Array.isArray(contents)) {
+  const result = asRecord(value["result"]);
+  if (Object.keys(value).some((key) => !RESPONSE_KEYS.has(key)) || result === null || !Array.isArray(result["contents"])) {
     return withholdUnreadableResponse(value, "resources/read", source, cordon);
   }
-  for (const item of contents) {
-    const entry = asRecord(item);
-    if (entry !== null && typeof entry["text"] === "string") {
-      const label = typeof entry["uri"] === "string" ? entry["uri"] : pending.label ?? "resources/read";
-      const source2 = classifySource({ kind: "tool", label, tool: "resources/read" }, policy);
-      observeInto(entry, "text", "resources/read", source2, cordon);
-    } else {
-      cordon.markUnredacted();
-    }
-  }
-  return value;
+  const observed = observeReadableResult(result, "resources/read", source, cordon, [], true);
+  if (observed === null) return withholdUnreadableResponse(value, "resources/read", source, cordon);
+  return { jsonrpc: "2.0", id: value["id"], result: observed.value };
 }
 function observePromptsGet(value, pending, cordon, policy) {
   const label = pending.label ?? "prompts/get";
   const source = classifySource({ kind: "tool", label, tool: "prompts/get" }, policy);
-  const messages = asRecord(value["result"])?.["messages"];
-  if (!Array.isArray(messages)) {
+  const result = asRecord(value["result"]);
+  if (Object.keys(value).some((key) => !RESPONSE_KEYS.has(key)) || result === null || !Array.isArray(result["messages"])) {
     return withholdUnreadableResponse(value, "prompts/get", source, cordon);
   }
-  for (const message of messages) {
-    const content = asRecord(asRecord(message)?.["content"]);
-    if (content !== null && content["type"] === "text" && typeof content["text"] === "string") {
-      observeInto(content, "text", "prompts/get", source, cordon);
-    } else {
-      cordon.markUnredacted();
-    }
-  }
-  return value;
+  const observed = observeReadableResult(result, "prompts/get", source, cordon, [], true);
+  if (observed === null) return withholdUnreadableResponse(value, "prompts/get", source, cordon);
+  return { jsonrpc: "2.0", id: value["id"], result: observed.value };
 }
 function observeInto(entry, key, tool, source, cordon) {
   const envelope = cordon.observe(entry[key], source);
