@@ -198,6 +198,18 @@ describe('model-origin tool-boundary benchmarks', () => {
     expect(row.ownerSourceEdited).toBe(true)
   }, 240_000)
 
+  it.skipIf(process.env.CORDON_RUN_NATIVE_WEB_BENCH !== '1')('checks a live Codex web search on both sides of the hook', () => {
+    const output = execFileSync(process.execPath, [join(process.cwd(), 'bench/model-origin/native-web.mjs')], {
+      encoding: 'utf8', timeout: 240_000,
+    })
+    const row = JSON.parse(output) as Record<string, unknown>
+    expect(row.baselineSearchCompleted).toBe(true)
+    expect(row.noEgressHookDenied).toBe(true)
+    expect(row.noEgressSearchAbsent).toBe(true)
+    expect(row.egressHookSawPreAndPost).toBe(true)
+    expect(row.egressSearchCompleted).toBe(true)
+  }, 240_000)
+
   it.skipIf(process.env.CORDON_RUN_UID_CODEX_LIVE !== '1')('runs a local model through an internal network and the separate-UID owner gate', () => {
     const run = spawnSync(process.execPath,
       [join(process.cwd(), 'bench/model-origin/uid-codex-live.mjs')], {

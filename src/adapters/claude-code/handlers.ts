@@ -378,7 +378,7 @@ function report(
 }
 
 /** Built-in tools that fetch from the web, in every harness this adapter serves. */
-const WEB_TOOLS: ReadonlySet<string> = new Set(['WebFetch', 'WebSearch', 'FetchURL', 'web_fetch', 'web_search'])
+const WEB_TOOLS: ReadonlySet<string> = new Set(['WebFetch', 'WebSearch', 'FetchURL', 'web_fetch', 'web_search', 'webrun'])
 
 /** Built-in tools that read files. */
 const FILE_TOOLS: ReadonlySet<string> = new Set([

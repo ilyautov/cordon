@@ -8120,7 +8120,9 @@ var GEMINI_BUILTIN = {
   save_memory: ["create", "update"]
 };
 var CODEX_BUILTIN = {
-  apply_patch: ["create", "update"]
+  apply_patch: ["create", "update"],
+  // Codex CLI 0.161.0 sends its native web_search through hooks as webrun.
+  webrun: ["read", "network-egress"]
 };
 var KIMI_BUILTIN = {
   FetchURL: ["read", "network-egress"],
@@ -15154,7 +15156,7 @@ function report(cordon, tool, source, findings, unreplaceable, cuts = true) {
     )
   };
 }
-var WEB_TOOLS = /* @__PURE__ */ new Set(["WebFetch", "WebSearch", "FetchURL", "web_fetch", "web_search"]);
+var WEB_TOOLS = /* @__PURE__ */ new Set(["WebFetch", "WebSearch", "FetchURL", "web_fetch", "web_search", "webrun"]);
 var FILE_TOOLS = /* @__PURE__ */ new Set([
   "Read",
   "Glob",

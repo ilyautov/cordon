@@ -1,0 +1,113 @@
+{
+  "date": "2026-10-08",
+  "baselineCommit": "8ee3ea5",
+  "codexVersion": "codex-cli 0.161.0",
+  "model": "gpt-6-luna",
+  "harnessSha256": {
+    "bench/model-origin/native-web.mjs": "7fe89f618953c2c448ebb7d8193e3e9dbe24436ef7d5956e603d67975f29fbeb",
+    "bench/model-origin/native-web-hook.mjs": "541add71545de413a1ad6f26d13f16d05c79fbf789f9909711c6ff05e011faa7",
+    "plugin/dist/cli.js": "5313b1f11432a262794352181dc23bfa4704b9d365ce043c3215faaaf9ac2796"
+  },
+  "method": "Three disposable scratch Codex sessions with a public documentation query: no hook, active hook without network-egress, active hook with network-egress. Hook wrapper records event names and result shape only; full search text and account credentials are not retained.",
+  "checks": {
+    "baselineSearchCompleted": true,
+    "noEgressHookDenied": true,
+    "noEgressSearchAbsent": true,
+    "egressHookSawPreAndPost": true,
+    "egressSearchCompleted": true,
+    "noNativeWriteOrExec": true
+  },
+  "runs": [
+    {
+      "name": "baseline",
+      "exitCode": 0,
+      "searchCompleted": true,
+      "nativeWriteOrExec": false,
+      "hooks": [],
+      "denials": []
+    },
+    {
+      "name": "no-egress",
+      "exitCode": 0,
+      "searchCompleted": false,
+      "nativeWriteOrExec": false,
+      "hooks": [
+        {
+          "kind": "UserPromptSubmit",
+          "tool": null,
+          "responsePresent": false,
+          "responseType": "undefined",
+          "responseItems": [],
+          "delegateStatus": 0,
+          "delegateDecision": null,
+          "delegateValid": true
+        },
+        {
+          "kind": "PreToolUse",
+          "tool": "webrun",
+          "responsePresent": false,
+          "responseType": "undefined",
+          "responseItems": [],
+          "delegateStatus": 2,
+          "delegateDecision": "deny",
+          "delegateValid": true
+        }
+      ],
+      "denials": [
+        {
+          "tool": "webrun",
+          "rule": "certificate"
+        }
+      ]
+    },
+    {
+      "name": "egress",
+      "exitCode": 0,
+      "searchCompleted": true,
+      "nativeWriteOrExec": false,
+      "hooks": [
+        {
+          "kind": "UserPromptSubmit",
+          "tool": null,
+          "responsePresent": false,
+          "responseType": "undefined",
+          "responseItems": [],
+          "delegateStatus": 0,
+          "delegateDecision": null,
+          "delegateValid": true
+        },
+        {
+          "kind": "PreToolUse",
+          "tool": "webrun",
+          "responsePresent": false,
+          "responseType": "undefined",
+          "responseItems": [],
+          "delegateStatus": 0,
+          "delegateDecision": null,
+          "delegateValid": true
+        },
+        {
+          "kind": "PostToolUse",
+          "tool": "webrun",
+          "responsePresent": true,
+          "responseType": "array",
+          "responseItems": [
+            {
+              "keys": [
+                "text",
+                "type"
+              ],
+              "textType": "string"
+            }
+          ],
+          "delegateStatus": 0,
+          "delegateDecision": null,
+          "delegateValid": true
+        }
+      ],
+      "denials": []
+    }
+  ],
+  "conclusion": "Codex CLI 0.161.0 sends its native web search to PreToolUse and PostToolUse as webrun. The classified call is denied before search without network-egress and completes when the owner grants that effect.",
+  "limits": "One ordinary model turn per arm, with explicit tool instruction and a live public search. No poisoned weights, malicious result substitution, other native tool paths, or update_plan call were measured. Hooks were supplied through explicit CLI flags and trust bypass in disposable profiles. The Codex account credential was linked briefly for the benign live model run and removed after each arm."
+}

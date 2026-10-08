@@ -115,10 +115,12 @@ export const GEMINI_BUILTIN: Readonly<Record<string, EffectClass[]>> = {
  * Its shell is `Bash`, the same name and the same class. Files are written by
  * apply_patch; `classify` adds `delete` to a patch that deletes or moves, and
  * the paths reach the gate from the adapter, which lifts them out of the
- * patch with `readPatch`.
+ * patch with `readPatch`. Its native web search reaches hooks as `webrun`.
  */
 export const CODEX_BUILTIN: Readonly<Record<string, EffectClass[]>> = {
   apply_patch: ['create', 'update'],
+  // Codex CLI 0.161.0 sends its native web_search through hooks as webrun.
+  webrun: ['read', 'network-egress'],
 }
 
 /**
