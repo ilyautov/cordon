@@ -21,6 +21,7 @@ npm install
 npm test
 npm run typecheck
 npm run build
+npm run test:package
 node scripts/no-invisible.mjs
 node scripts/check-claims.mjs
 ```
