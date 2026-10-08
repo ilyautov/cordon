@@ -334,6 +334,67 @@ describe('the MCP gateway', () => {
     expect(await gateway.stop()).toBe(0)
   })
 
+  it('keeps an identical call waiting when another host request is cancelled', async () => {
+    const policy = basePolicy()
+    policy.mode = 'interactive'
+    policy.profile = { effects: ['read'], resources: { paths: [], hosts: [] } }
+    const env = withCallLog()
+    const home = mkdtempSync(join(tmpdir(), 'cordon-mcp-home-'))
+    const gateway = start(policy, env, home, 500)
+    const approvals = new ApprovalStore(home)
+    const params = { name: 'update_price', arguments: { nmId: '99887766', price: 1 } }
+    try {
+      gateway.send({ jsonrpc: '2.0', id: 1, method: 'tools/call', params })
+      gateway.send({ jsonrpc: '2.0', id: 2, method: 'tools/call', params })
+      const waiting = approvals.pending()
+      expect(waiting).toHaveLength(1)
+
+      gateway.send({ jsonrpc: '2.0', method: 'notifications/cancelled', params: { requestId: 1 } })
+      expect(approvals.pending()).toHaveLength(1)
+      expect(approvals.approve(waiting[0]!.id)).not.toBeNull()
+
+      const reply = await gateway.next()
+      expect(reply.id).toBe(2)
+      expect(((reply.result as { content: Array<{ text: string }> }).content[0]!.text)).toContain('retry the identical call')
+      expect(callLog(env)).toEqual([])
+      gateway.send({ jsonrpc: '2.0', id: 3, method: 'tools/call', params })
+      expect(((await gateway.next()).result as { isError?: boolean }).isError).toBeUndefined()
+      expect(callLog(env)).toEqual(['update_price'])
+    } finally {
+      expect(await gateway.stop()).toBe(0)
+    }
+  })
+
+  it('does not revoke a delivered retry when a duplicate held request is cancelled', async () => {
+    const policy = basePolicy()
+    policy.mode = 'interactive'
+    policy.profile = { effects: ['read'], resources: { paths: [], hosts: [] } }
+    const env = withCallLog()
+    const home = mkdtempSync(join(tmpdir(), 'cordon-mcp-home-'))
+    const gateway = start(policy, env, home, 500)
+    const approvals = new ApprovalStore(home)
+    const params = { name: 'update_price', arguments: { nmId: '99887766', price: 1 } }
+    try {
+      gateway.send({ jsonrpc: '2.0', id: 1, method: 'tools/call', params })
+      gateway.send({ jsonrpc: '2.0', id: 2, method: 'tools/call', params })
+      const waiting = approvals.pending()
+      expect(waiting).toHaveLength(1)
+      expect(approvals.approve(waiting[0]!.id)).not.toBeNull()
+
+      const first = await gateway.next()
+      expect(first.id).toBe(1)
+      const second = await gateway.next()
+      expect(second.id).toBe(2)
+      gateway.send({ jsonrpc: '2.0', method: 'notifications/cancelled', params: { requestId: 2 } })
+      expect(existsSync(approvals.approvedPath(waiting[0]!.id))).toBe(true)
+      gateway.send({ jsonrpc: '2.0', id: 3, method: 'tools/call', params })
+      expect(((await gateway.next()).result as { isError?: boolean }).isError).toBeUndefined()
+      expect(callLog(env)).toEqual(['update_price'])
+    } finally {
+      expect(await gateway.stop()).toBe(0)
+    }
+  })
+
   it('retires a held question when the MCP host disconnects', async () => {
     const policy = basePolicy()
     policy.mode = 'interactive'

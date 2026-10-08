@@ -15567,6 +15567,10 @@ function runGateway(options) {
     let upstream = null;
     const reviewTimers = /* @__PURE__ */ new Map();
     let cancelWaiting = null;
+    const retireIfLastWaiter = (id, reason) => {
+      if ([...reviewTimers.values()].some((held) => held.approvalId === id)) return;
+      cancelWaiting?.(id, reason);
+    };
     const finish = (code, reason) => {
       if (settled) return;
       settled = true;
@@ -15651,7 +15655,7 @@ function runGateway(options) {
             if (held !== void 0) {
               clearInterval(held.timer);
               reviewTimers.delete(key);
-              cordon.cancelUnattendedApproval(held.approvalId, "the host cancelled its MCP request");
+              retireIfLastWaiter(held.approvalId, "the host cancelled its MCP request");
               return;
             }
           }
@@ -15677,22 +15681,25 @@ function runGateway(options) {
                 if (Date.now() >= deadline) {
                   clearInterval(timer);
                   reviewTimers.delete(key);
-                  cordon.cancelUnattendedApproval(approvalId2, "the owner did not approve before the wait ended");
+                  retireIfLastWaiter(approvalId2, "the owner did not approve before the wait ended");
                   sendToHost(toolError(message.id, `Cordon approval wait timed out for ${message.method}: ${reason}`));
                   return;
                 }
                 if (!existsSync2(approvals.approvedPath(approvalId2))) return;
-                clearInterval(timer);
-                reviewTimers.delete(key);
-                sendToHost(toolError(
-                  message.id,
-                  `Cordon recorded owner approval ${approvalId2}; retry the identical call once. The retry is checked again before any tool execution.`
-                ));
+                for (const [waitingKey, held] of reviewTimers) {
+                  if (held.approvalId !== approvalId2) continue;
+                  clearInterval(held.timer);
+                  reviewTimers.delete(waitingKey);
+                  sendToHost(toolError(
+                    held.requestId,
+                    `Cordon recorded owner approval ${approvalId2}; retry the identical call once. The retry is checked again before any tool execution.`
+                  ));
+                }
               } catch (error) {
                 finish(1, `approval wait failed: ${error.message}`);
               }
             }, Math.min(25, approvalWaitMs));
-            reviewTimers.set(key, { timer, approvalId: approvalId2 });
+            reviewTimers.set(key, { timer, approvalId: approvalId2, requestId: message.id });
           }
         );
         return;

@@ -66,8 +66,13 @@ export function runGateway(options: GatewayOptions): Promise<number> {
   return new Promise((resolve) => {
     let settled = false
     let upstream: ChildProcess | null = null
-    const reviewTimers = new Map<string, { timer: NodeJS.Timeout; approvalId: string }>()
+    const reviewTimers = new Map<string, { timer: NodeJS.Timeout; approvalId: string; requestId: string | number }>()
     let cancelWaiting: ((id: string, reason: string) => void) | null = null
+
+    const retireIfLastWaiter = (id: string, reason: string): void => {
+      if ([...reviewTimers.values()].some((held) => held.approvalId === id)) return
+      cancelWaiting?.(id, reason)
+    }
 
     // Every exit runs through here, exactly once. Killing the upstream on the
     // way out matters: a host that went away leaves no reader for the
@@ -191,7 +196,7 @@ export function runGateway(options: GatewayOptions): Promise<number> {
             if (held !== undefined) {
               clearInterval(held.timer)
               reviewTimers.delete(key)
-              cordon.cancelUnattendedApproval(held.approvalId, 'the host cancelled its MCP request')
+              retireIfLastWaiter(held.approvalId, 'the host cancelled its MCP request')
               return
             }
           }
@@ -214,26 +219,32 @@ export function runGateway(options: GatewayOptions): Promise<number> {
                 if (Date.now() >= deadline) {
                   clearInterval(timer)
                   reviewTimers.delete(key)
-                  cordon.cancelUnattendedApproval(approvalId, 'the owner did not approve before the wait ended')
+                  retireIfLastWaiter(approvalId, 'the owner did not approve before the wait ended')
                   sendToHost(toolError(message.id, `Cordon approval wait timed out for ${message.method}: ${reason}`))
                   return
                 }
                 if (!existsSync(approvals.approvedPath(approvalId))) return
-                clearInterval(timer)
-                reviewTimers.delete(key)
                 // The host may have timed out without cancelling the request.
                 // A late approval can only tell the model to retry; it cannot
                 // execute a side effect after the host stopped waiting. The
                 // retry goes through the core again under its current context.
-                sendToHost(toolError(message.id,
-                  `Cordon recorded owner approval ${approvalId}; retry the identical call once. ` +
-                  'The retry is checked again before any tool execution.'))
+                // Identical in-flight calls share one question. Release all
+                // their waiters together, so one host cancellation cannot
+                // revoke a retry instruction already sent to another.
+                for (const [waitingKey, held] of reviewTimers) {
+                  if (held.approvalId !== approvalId) continue
+                  clearInterval(held.timer)
+                  reviewTimers.delete(waitingKey)
+                  sendToHost(toolError(held.requestId,
+                    `Cordon recorded owner approval ${approvalId}; retry the identical call once. ` +
+                    'The retry is checked again before any tool execution.'))
+                }
               } catch (error) {
                 // A broken approval check cannot forward the held call.
                 finish(1, `approval wait failed: ${(error as Error).message}`)
               }
             }, Math.min(25, approvalWaitMs))
-            reviewTimers.set(key, { timer, approvalId })
+            reviewTimers.set(key, { timer, approvalId, requestId: message.id })
           })
         return
       }
