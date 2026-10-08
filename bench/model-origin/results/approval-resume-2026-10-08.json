@@ -1,0 +1,16 @@
+{
+  "command": "node bench/codex-mcp/live-approval-resume.mjs",
+  "model": "gpt-6-luna",
+  "codexVersion": "codex-cli 0.160.1",
+  "firstTurnFinished": true,
+  "resumeTurnFinished": true,
+  "oldId": "8df87d58b6841389",
+  "newId": "5ababf87cf07c397",
+  "ownerApprovalRecorded": true,
+  "exactRetry": true,
+  "oldApprovalUnspent": true,
+  "emailReachedServer": false,
+  "approvalConsumed": false,
+  "unexpectedTools": 0,
+  "scope": "one clean synthetic email draft, automated owner CLI, one live Codex retry after process exit"
+}

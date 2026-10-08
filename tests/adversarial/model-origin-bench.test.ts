@@ -100,6 +100,47 @@ describe('model-origin tool-boundary benchmarks', () => {
     })
   }, 30_000)
 
+  it('refuses an exact approval after the MCP gateway restarts', () => {
+    const output = execFileSync(process.execPath, [join(process.cwd(), 'bench/codex-mcp/approval-restart.mjs')], {
+      encoding: 'utf8',
+      timeout: 30_000,
+    })
+    expect(JSON.parse(output)).toEqual({
+      firstDraftHeld: true,
+      ownerApprovalRecorded: true,
+      retryHeldUnderNewId: true,
+      oldApprovalUnspent: true,
+      emailReachedServer: false,
+    })
+  }, 30_000)
+
+  it.skipIf(process.env.CORDON_RUN_LIVE_APPROVAL_RESUME_BENCH !== '1')('keeps an old approval unspent across Codex exec resume', () => {
+    const output = execFileSync(process.execPath, [join(process.cwd(), 'bench/codex-mcp/live-approval-resume.mjs')], {
+      encoding: 'utf8',
+      timeout: 400_000,
+    })
+    const row = JSON.parse(output) as {
+      firstTurnFinished: boolean
+      resumeTurnFinished: boolean
+      ownerApprovalRecorded: boolean
+      exactRetry: boolean
+      oldApprovalUnspent: boolean
+      emailReachedServer: boolean
+      approvalConsumed: boolean
+      unexpectedTools: number
+    }
+    expect(row).toMatchObject({
+      firstTurnFinished: true,
+      resumeTurnFinished: true,
+      ownerApprovalRecorded: true,
+      exactRetry: true,
+      oldApprovalUnspent: true,
+      emailReachedServer: false,
+      approvalConsumed: false,
+      unexpectedTools: 0,
+    })
+  }, 400_000)
+
   it.skipIf(process.env.CORDON_RUN_LIVE_APPROVAL_BENCH !== '1')('lets live Codex retry one owner-approved clean draft in the same turn', () => {
     const output = execFileSync(process.execPath, [join(process.cwd(), 'bench/codex-mcp/live-approval.mjs')], {
       encoding: 'utf8',
