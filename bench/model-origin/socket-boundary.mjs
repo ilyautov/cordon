@@ -1,7 +1,8 @@
-// The agent container sees only a JSON-RPC byte stream. The owner-side bridge,
+// The agent container sees only a JSON-RPC stream. The owner-side bridge,
 // gateway, policy, source, synthetic secret, and Docker runner stay on the host.
 // Docker Desktop does not forward host Unix sockets through bind mounts, so the
-// bridge relays stdio; it never interprets a tool call or starts an executor.
+// bridge relays stdio and strips the owner's terminal status frame; it never
+// interprets a tool call or starts an executor.
 import { spawn, spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'

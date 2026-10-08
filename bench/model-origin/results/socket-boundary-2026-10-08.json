@@ -1,5 +1,5 @@
 {
-  "scenario": "scripted MCP calls from a separate-UID agent container through an owner-side byte bridge, Cordon gateway, and benchmark Docker runner",
+  "scenario": "scripted MCP calls from a separate-UID agent container through an owner-side framing bridge, Cordon gateway, and benchmark Docker runner",
   "host": "macOS with Docker Desktop",
   "node": "24.21.0",
   "dockerClient": "20.10.12",
@@ -37,7 +37,7 @@
   },
   "limits": [
     "Scripted JSON-RPC client, not a model or Codex session",
-    "The byte bridge ran with the owner's UID; its process compromise was not tested",
+    "The framing bridge ran with the owner's UID; its process compromise was not tested",
     "One owner-selected source and one synthetic download command; the runner is benchmark-only",
     "Direct cross-UID Unix socket access was not tested on a shared Linux host",
     "The named-download scenario used a documentation-only IP and no reachable payload; a separate runner benchmark has an ordinary-network positive control against a local sink"

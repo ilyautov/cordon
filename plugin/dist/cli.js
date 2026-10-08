@@ -15777,7 +15777,13 @@ function runGateway(options) {
         finish(1, `a failure while handling the host's message: ${error.message}`);
       }
     });
-    hostLines.on("close", () => finish(0));
+    hostLines.on("close", () => {
+      if (pending.size > 0 || reviewTimers.size > 0) {
+        finish(1, "host closed with an unanswered MCP request");
+      } else {
+        finish(0);
+      }
+    });
     const upstreamLines = createInterface({ input: child.stdout, terminal: false });
     upstreamLines.on("line", (line) => {
       if (line.trim() === "") return;
@@ -15947,6 +15953,7 @@ function ensureUsableHome3(home) {
 import { chmodSync, lstatSync as lstatSync2, realpathSync as realpathSync3, unlinkSync as unlinkSync3 } from "node:fs";
 import { createConnection, createServer } from "node:net";
 import { basename as basename3, dirname as dirname4, isAbsolute as isAbsolute5, join as join13 } from "node:path";
+var STATUS = Buffer.from("CORDON_EXIT:");
 function socketPath(path) {
   if (!isAbsolute5(path)) throw new Error("the MCP socket path must be absolute");
   const parent = realpathSync3(dirname4(path));
@@ -16008,13 +16015,25 @@ function serveSocketGateway(options) {
     };
     const onInterrupt = () => stop(0);
     const onTerminate = () => stop(0);
-    const server2 = createServer((socket) => {
+    const server2 = createServer({ allowHalfOpen: true }, (socket) => {
       if (stopped || active !== null) {
         socket.destroy();
         return;
       }
       active = socket;
+      socket.once("close", () => {
+        if (active === socket) active = null;
+      });
       socket.on("error", (error) => log(`client socket failed: ${error.message}`));
+      const completeSession = (code, reason) => {
+        if (socket.destroyed) {
+          if (code !== 0) stop(code, reason);
+          return;
+        }
+        socket.end(Buffer.concat([STATUS, Buffer.from(`${code}
+`)]));
+        if (code !== 0) socket.once("close", () => stop(code, reason));
+      };
       void runGateway({
         command: options.command,
         policy: options.policy,
@@ -16025,10 +16044,8 @@ function serveSocketGateway(options) {
         hostOut: socket,
         log
       }).then((code) => {
-        socket.destroy();
-        active = null;
-        if (code !== 0) stop(code, "a gateway session failed; the owner service stops");
-      }).catch((error) => stop(1, `the gateway session failed: ${error.message}`));
+        completeSession(code, "a gateway session failed; the owner service stops");
+      }).catch((error) => completeSession(1, `the gateway session failed: ${error.message}`));
     });
     server2.on("error", (error) => stop(1, `socket listener failed: ${error.message}`));
     process.on("SIGINT", onInterrupt);
@@ -16059,12 +16076,13 @@ function connectSocketGateway(path, ownerUid, hostIn = process.stdin, hostOut = 
     let settled = false;
     let hostEnded = false;
     let connected = false;
+    let status = null;
+    let buffer = Buffer.alloc(0);
     const finish = (code, reason) => {
       if (settled) return;
       settled = true;
       if (reason !== void 0) log(reason);
       hostIn.unpipe(socket);
-      socket.unpipe(hostOut);
       socket.destroy();
       resolve4(code);
     };
@@ -16074,12 +16092,36 @@ function connectSocketGateway(path, ownerUid, hostIn = process.stdin, hostOut = 
     });
     socket.on("connect", () => {
       connected = true;
-      socket.pipe(hostOut, { end: false });
       if (hostEnded) socket.end();
       else hostIn.pipe(socket);
     });
+    socket.on("data", (chunk) => {
+      buffer = Buffer.concat([buffer, chunk]);
+      let newline;
+      while ((newline = buffer.indexOf(10)) !== -1) {
+        const line = buffer.subarray(0, newline + 1);
+        buffer = buffer.subarray(newline + 1);
+        if (line[0] === 30) {
+          const value = line.subarray(STATUS.length, line.length - 1).toString("ascii");
+          if (status !== null || !line.subarray(0, STATUS.length).equals(STATUS) || !/^(?:0|[1-9][0-9]*)$/u.test(value) || !Number.isSafeInteger(Number(value))) {
+            finish(1, "owner socket sent an invalid terminal status");
+            return;
+          }
+          status = Number(value);
+        } else if (status !== null) {
+          finish(1, "owner socket sent data after terminal status");
+          return;
+        } else if (!hostOut.write(line)) {
+          socket.pause();
+          hostOut.once("drain", () => socket.resume());
+        }
+      }
+    });
     socket.on("error", (error) => finish(1, `owner socket failed: ${error.message}`));
-    socket.on("close", () => finish(hostEnded ? 0 : 1, hostEnded ? void 0 : "owner socket closed before the host did"));
+    socket.on("close", () => finish(
+      status !== null && buffer.length === 0 ? status : 1,
+      status === null ? "owner socket closed without terminal status" : buffer.length === 0 ? void 0 : "owner socket closed with an incomplete frame"
+    ));
     hostOut.on("error", (error) => finish(1, `host output failed: ${error.message}`));
   });
 }

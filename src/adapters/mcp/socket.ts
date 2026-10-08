@@ -15,6 +15,10 @@ export interface SocketGatewayOptions {
   log?: (line: string) => void
 }
 
+// The gateway serializes upstream output as JSON lines, so this non-JSON
+// trailer cannot be forged by an upstream MCP message. The bridge strips it.
+const STATUS = Buffer.from('\u001eCORDON_EXIT:')
+
 function socketPath(path: string): string {
   if (!isAbsolute(path)) throw new Error('the MCP socket path must be absolute')
   const parent = realpathSync(dirname(path))
@@ -74,13 +78,22 @@ export function serveSocketGateway(options: SocketGatewayOptions): Promise<numbe
     }
     const onInterrupt = (): void => stop(0)
     const onTerminate = (): void => stop(0)
-    const server = createServer((socket) => {
+    const server = createServer({ allowHalfOpen: true }, (socket) => {
       if (stopped || active !== null) {
         socket.destroy()
         return
       }
       active = socket
+      socket.once('close', () => { if (active === socket) active = null })
       socket.on('error', (error) => log(`client socket failed: ${error.message}`))
+      const completeSession = (code: number, reason?: string): void => {
+        if (socket.destroyed) {
+          if (code !== 0) stop(code, reason)
+          return
+        }
+        socket.end(Buffer.concat([STATUS, Buffer.from(`${code}\n`)]))
+        if (code !== 0) socket.once('close', () => stop(code, reason))
+      }
       void runGateway({
         command: options.command,
         policy: options.policy,
@@ -91,10 +104,8 @@ export function serveSocketGateway(options: SocketGatewayOptions): Promise<numbe
         hostOut: socket,
         log,
       }).then((code) => {
-        socket.destroy()
-        active = null
-        if (code !== 0) stop(code, 'a gateway session failed; the owner service stops')
-      }).catch((error) => stop(1, `the gateway session failed: ${(error as Error).message}`))
+        completeSession(code, 'a gateway session failed; the owner service stops')
+      }).catch((error) => completeSession(1, `the gateway session failed: ${(error as Error).message}`))
     })
     server.on('error', (error) => stop(1, `socket listener failed: ${error.message}`))
     process.on('SIGINT', onInterrupt)
@@ -117,7 +128,7 @@ export function serveSocketGateway(options: SocketGatewayOptions): Promise<numbe
   })
 }
 
-/** A byte bridge only. The agent side has no policy, upstream command or Docker access through this process. */
+/** A framing bridge only: tool calls pass untouched, and the owner exit status is removed from stdout. */
 export function connectSocketGateway(
   path: string,
   ownerUid: number,
@@ -132,12 +143,13 @@ export function connectSocketGateway(
     let settled = false
     let hostEnded = false
     let connected = false
+    let status: number | null = null
+    let buffer = Buffer.alloc(0)
     const finish = (code: number, reason?: string): void => {
       if (settled) return
       settled = true
       if (reason !== undefined) log(reason)
       hostIn.unpipe(socket)
-      socket.unpipe(hostOut)
       socket.destroy()
       resolve(code)
     }
@@ -147,12 +159,36 @@ export function connectSocketGateway(
     })
     socket.on('connect', () => {
       connected = true
-      socket.pipe(hostOut, { end: false })
       if (hostEnded) socket.end()
       else hostIn.pipe(socket)
     })
+    socket.on('data', (chunk: Buffer) => {
+      buffer = Buffer.concat([buffer, chunk])
+      let newline: number
+      while ((newline = buffer.indexOf(10)) !== -1) {
+        const line = buffer.subarray(0, newline + 1)
+        buffer = buffer.subarray(newline + 1)
+        if (line[0] === 0x1e) {
+          const value = line.subarray(STATUS.length, line.length - 1).toString('ascii')
+          if (status !== null || !line.subarray(0, STATUS.length).equals(STATUS) ||
+            !/^(?:0|[1-9][0-9]*)$/u.test(value) || !Number.isSafeInteger(Number(value))) {
+            finish(1, 'owner socket sent an invalid terminal status')
+            return
+          }
+          status = Number(value)
+        } else if (status !== null) {
+          finish(1, 'owner socket sent data after terminal status')
+          return
+        } else if (!hostOut.write(line)) {
+          socket.pause()
+          hostOut.once('drain', () => socket.resume())
+        }
+      }
+    })
     socket.on('error', (error) => finish(1, `owner socket failed: ${error.message}`))
-    socket.on('close', () => finish(hostEnded ? 0 : 1, hostEnded ? undefined : 'owner socket closed before the host did'))
+    socket.on('close', () => finish(status !== null && buffer.length === 0 ? status : 1,
+      status === null ? 'owner socket closed without terminal status' :
+        buffer.length === 0 ? undefined : 'owner socket closed with an incomplete frame'))
     hostOut.on('error', (error) => finish(1, `host output failed: ${error.message}`))
   })
 }

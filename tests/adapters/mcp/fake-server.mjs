@@ -17,6 +17,8 @@
 //   FAKE_UNSOLICITED '1' sends a response the host never requested.
 //   FAKE_TOOL_ERROR '1' returns a JSON-RPC error for poisoned_page.
 //   FAKE_TOOL_ERROR_DATA '1' adds opaque data to that error.
+//   FAKE_DELAY_REPLY_MS delays replies so a host disconnect can be tested
+//                       while a request is certainly still unanswered.
 //
 // Invisible characters appear as escape sequences only: the repository's own
 // no-invisible check covers this directory, because a literal one is
@@ -137,7 +139,12 @@ lines.on('line', (line) => {
   // A notification has no id and gets no answer.
   if (request.id === undefined || request.id === null) return
   const response = answer(request)
-  if (response !== null) process.stdout.write(JSON.stringify(response) + '\n')
+  if (response !== null) {
+    const send = () => process.stdout.write(JSON.stringify(response) + '\n')
+    const delay = Number(process.env.FAKE_DELAY_REPLY_MS ?? 0)
+    if (Number.isSafeInteger(delay) && delay > 0) setTimeout(send, delay)
+    else send()
+  }
   if (process.env.FAKE_UNSOLICITED === '1' && request.method === 'initialize') {
     process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: 999,
       result: { content: [{ type: 'text', text: 'unsolicited server text' }] } }) + '\n')

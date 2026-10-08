@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createInterface } from 'node:readline'
 import { fileURLToPath } from 'node:url'
+import { createServer } from 'node:net'
 import { describe, expect, it } from 'vitest'
 import { ensureBuiltCli } from '../../support/built-cli.js'
 
@@ -30,6 +31,29 @@ async function waitForSocket(path: string, server: ChildProcess): Promise<void> 
 }
 
 describe.skipIf(typeof process.getuid !== 'function')('owner-controlled MCP socket transport', () => {
+  it('treats a socket close without owner status as failure', async () => {
+    ensureBuiltCli()
+    const root = mkdtempSync(join(tmpdir(), 'cmcp-no-status-'))
+    const socketDir = join(root, 'socket')
+    mkdirSync(socketDir, { mode: 0o700 })
+    const socket = join(socketDir, 'gateway.sock')
+    const server = createServer((client) => client.end())
+    await new Promise<void>((resolve) => server.listen(socket, resolve))
+    chmodSync(socket, 0o600)
+    try {
+      const bridge = spawn(process.execPath,
+        [CLI, 'mcp', 'connect', '--socket', socket, '--owner-uid', String(currentUid())], {
+          stdio: ['ignore', 'ignore', 'pipe'],
+        })
+      let error = ''
+      bridge.stderr!.setEncoding('utf8').on('data', (part: string) => { error += part })
+      expect(await waitForClose(bridge)).toBe(1)
+      expect(error).toContain('without terminal status')
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()))
+    }
+  })
+
   it('refuses a socket directory another user could replace', () => {
     ensureBuiltCli()
     const root = mkdtempSync(join(tmpdir(), 'cordon-mcp-unsafe-socket-'))
@@ -155,6 +179,40 @@ describe.skipIf(typeof process.getuid !== 'function')('owner-controlled MCP sock
       expect(await waitForClose(owner)).toBe(1)
       expect(ownerError).toContain('not JSON-RPC')
       expect(existsSync(socket)).toBe(false)
+    } finally {
+      bridge?.kill()
+      owner.kill('SIGTERM')
+      await waitForClose(owner)
+    }
+  }, 15_000)
+
+  it('returns failure to the bridge when the host closes with a reply pending', async () => {
+    ensureBuiltCli()
+    const root = mkdtempSync(join(tmpdir(), 'cmcp-pending-'))
+    const home = join(root, 'home')
+    const socketDir = join(root, 'socket')
+    mkdirSync(home, { mode: 0o700 })
+    mkdirSync(socketDir, { mode: 0o700 })
+    writeFileSync(join(home, 'policy.yaml'), 'mode: autonomous\n')
+    const socket = join(socketDir, 'gateway.sock')
+    const owner = spawn(process.execPath,
+      [CLI, 'mcp', 'serve', '--socket', socket, '--', process.execPath, FAKE_SERVER], {
+        env: { ...process.env, CORDON_HOME: home, FAKE_DELAY_REPLY_MS: '100' },
+        stdio: ['ignore', 'ignore', 'pipe'],
+      })
+    let ownerError = ''
+    owner.stderr!.setEncoding('utf8').on('data', (part: string) => { ownerError += part })
+    let bridge: ChildProcess | null = null
+    try {
+      await waitForSocket(socket, owner)
+      bridge = spawn(process.execPath,
+        [CLI, 'mcp', 'connect', '--socket', socket, '--owner-uid', String(currentUid())], {
+          stdio: ['pipe', 'pipe', 'pipe'],
+        })
+      bridge.stdin!.end(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} }) + '\n')
+      expect(await waitForClose(bridge)).toBe(1)
+      expect(await waitForClose(owner)).toBe(1)
+      expect(ownerError).toContain('host closed with an unanswered MCP request')
     } finally {
       bridge?.kill()
       owner.kill('SIGTERM')

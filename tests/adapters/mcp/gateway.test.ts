@@ -108,6 +108,13 @@ function withCallLog(): Record<string, string> {
 }
 
 describe('the MCP gateway', () => {
+  it('reports a host disconnect with an unanswered upstream request', async () => {
+    const gateway = start(basePolicy())
+    gateway.send({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} })
+    expect(await gateway.stop()).toBe(1)
+    expect(gateway.logs.join('\n')).toContain('host closed with an unanswered MCP request')
+  })
+
   it('passes initialize and unknown requests through untouched', async () => {
     const gateway = start(basePolicy())
     gateway.send({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} })
@@ -455,7 +462,8 @@ describe('the MCP gateway', () => {
     const approvals = new ApprovalStore(home)
     const waiting = approvals.pending()
     expect(waiting).toHaveLength(1)
-    expect(await gateway.stop()).toBe(0)
+    expect(await gateway.stop()).toBe(1)
+    expect(gateway.logs.join('\n')).toContain('host closed with an unanswered MCP request')
     expect(approvals.approve(waiting[0]!.id)).toBeNull()
   })
 

@@ -344,7 +344,15 @@ export function runGateway(options: GatewayOptions): Promise<number> {
         finish(1, `a failure while handling the host's message: ${(error as Error).message}`)
       }
     })
-    hostLines.on('close', () => finish(0))
+    hostLines.on('close', () => {
+      // A closed host with a request still in flight has lost its answer.
+      // Returning success would make a broken MCP exchange look complete.
+      if (pending.size > 0 || reviewTimers.size > 0) {
+        finish(1, 'host closed with an unanswered MCP request')
+      } else {
+        finish(0)
+      }
+    })
 
     const upstreamLines = createInterface({ input: child.stdout!, terminal: false })
     upstreamLines.on('line', (line) => {
