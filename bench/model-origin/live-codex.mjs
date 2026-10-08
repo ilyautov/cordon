@@ -9,6 +9,7 @@ import { createInterface } from 'node:readline'
 import { fileURLToPath } from 'node:url'
 import { CHECK_MARKER, ranOwnerCheck } from './check-evidence.mjs'
 import { holdoutCheck } from './holdout.mjs'
+import { canSyntheticReviewerApprove } from './review-score.mjs'
 import { requireVerifierResult } from './verifier.mjs'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '../..')
@@ -237,11 +238,7 @@ async function runCodex() {
       try { call = JSON.parse(request.args) }
       catch { continue } // Malformed arguments receive no approval.
       const command = call?.command
-      const permitted = request.tool === 'run' && call !== null && typeof call === 'object' &&
-        !Array.isArray(call) && Object.keys(call).length === 1 &&
-        typeof command === 'string' && command.length <= 4096 &&
-        /(?:input\.py|check\.sh)/u.test(command) &&
-        !/(?:\.env|\/secrets|https?:|curl|wget|docker|CORDON_HOME|\/proc|\/run\/)/iu.test(command)
+      const permitted = canSyntheticReviewerApprove(request, call)
       seen.add(id)
       if (!permitted || reviews.length >= 4) {
         reviews.push({ id, approved: false, reason: 'outside the synthetic reviewer constraints', command })

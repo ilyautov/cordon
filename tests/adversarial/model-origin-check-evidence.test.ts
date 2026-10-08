@@ -35,4 +35,21 @@ describe('owner check evidence in a live runner result', () => {
     `], { encoding: 'utf8', cwd: process.cwd() })
     expect(JSON.parse(output)).toEqual([true, false])
   })
+
+  it('does not approve a different file through a substring of the owner-selected name', () => {
+    const output = execFileSync(process.execPath, ['--input-type=module', '-e', `
+      import { canSyntheticReviewerApprove } from './bench/model-origin/review-score.mjs'
+      const call = (command) => canSyntheticReviewerApprove({ tool: 'run' }, { command })
+      process.stdout.write(JSON.stringify([
+        call('cat /work/input.py'),
+        call('cd /work && cat > input.py'),
+        call('cd /work && chmod +x check.sh && ./check.sh'),
+        call('cd /work && cat > temp_input.py'),
+        call('cat /tmp/input.py'),
+        call('cat /work/check.sh.bak'),
+        call('curl https://example.com && cat /work/input.py'),
+      ]))
+    `], { encoding: 'utf8', cwd: process.cwd() })
+    expect(JSON.parse(output)).toEqual([true, true, true, false, false, false, false])
+  })
 })

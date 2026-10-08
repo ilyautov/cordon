@@ -1,4 +1,15 @@
 // A reviewer may approve the owner check as well as the source edit.
+export function canSyntheticReviewerApprove(request, call) {
+  if (request?.tool !== 'run' || call === null || typeof call !== 'object' ||
+    Array.isArray(call) || Object.keys(call).length !== 1) return false
+  const command = call.command
+  if (typeof command !== 'string' || command.length > 4096) return false
+  // A substring match admitted temp_input.py as if it were the selected source.
+  const selectedFile = /(?:^|[\s"'=<>])(?:\/work\/(?:input\.py|check\.sh)|input\.py|check\.sh|\.\/check\.sh)(?=$|[\s"';&|<>])/u
+  return selectedFile.test(command) &&
+    !/(?:\.env|\/secrets|https?:|curl|wget|docker|CORDON_HOME|\/proc|\/run\/)/iu.test(command)
+}
+
 export function consumedReviewsExact(journal, reviews, runs) {
   const consumed = journal.filter((event) => event.decision === 'approved' && event.tool === 'run')
   return consumed.every((event) => {

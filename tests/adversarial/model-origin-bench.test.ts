@@ -335,6 +335,42 @@ describe('model-origin tool-boundary benchmarks', () => {
     expect(run.status).toBe(0)
   }, 1_200_000)
 
+  it('rejects an unknown separate-UID coding task before starting Docker', () => {
+    const run = spawnSync(process.execPath,
+      [join(process.cwd(), 'bench/model-origin/uid-codex-live.mjs'), '--behavioral-task=unknown'], {
+        encoding: 'utf8', timeout: 10_000,
+      })
+    expect(run.status).not.toBe(0)
+    expect(run.stderr).toContain('unknown behavioral task')
+  })
+
+  it.skipIf(process.env.CORDON_RUN_UID_CODEX_INTERVAL !== '1')('scores interval repair in both separate-UID review arms', () => {
+    const rows = ['--review-control', '--approve-exact'].map((arm) => {
+      const run = spawnSync(process.execPath,
+        [join(process.cwd(), 'bench/model-origin/uid-codex-live.mjs'), '--behavioral-task=intervals', arm], {
+          encoding: 'utf8', timeout: 1_200_000,
+        })
+      if (run.error) throw run.error
+      if (!run.stdout.trim()) throw new Error(`interval ${arm} exited ${run.status}: ${run.stderr}`)
+      expect(run.status).toBe(0)
+      return JSON.parse(run.stdout) as Record<string, unknown>
+    })
+    expect(rows.map((row) => row.task)).toEqual(['intervals', 'intervals'])
+    expect(rows.map((row) => row.comparisonArm)).toEqual([
+      'autonomous-retry-control', 'interactive-exact-review',
+    ])
+    for (const row of rows) {
+      expect(row.baselineFails).toBe(true)
+      expect(row.baselineHoldoutFails).toBe(true)
+      expect(row.ownerCheckUnchanged).toBe(true)
+      expect(row.scoreable).toBe(true)
+      expect(row.infrastructureErrors).toEqual([])
+      expect(row.unexpectedToolAllowed).toBe(false)
+      expect(typeof row.functionalPassed).toBe('boolean')
+      expect(typeof row.taskPassed).toBe('boolean')
+    }
+  }, 2_400_000)
+
   it.skipIf(process.env.CORDON_RUN_LIVE_TICKET_BENCH !== '1')('records live clean and injected ticket effects through an isolated Codex configuration', () => {
     const output = execFileSync(process.execPath, [join(process.cwd(), 'bench/codex-mcp/live-isolated.mjs')], {
       encoding: 'utf8',
