@@ -1,7 +1,7 @@
 // Drive the real Cordon MCP gateway and Docker runner as a scripted host.
 // Every scenario starts a fresh gateway so an earlier tool result cannot
 // change the exposure state of the next independent probe.
-import { spawn, spawnSync } from 'node:child_process'
+import { execFile, spawn, spawnSync } from 'node:child_process'
 import { createServer } from 'node:http'
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -111,7 +111,24 @@ const sink = createServer((_request, response) => {
 let hits = 0
 try {
   await new Promise((resolve) => sink.listen(0, '0.0.0.0', resolve))
-  const url = 'http://host.docker.internal:' + sink.address().port + '/probe'
+  const resolvedHost = spawnSync('docker', ['run', '--rm', IMAGE, 'getent', 'hosts', 'host.docker.internal'], {
+    encoding: 'utf8', timeout: 15_000,
+  })
+  const hostIp = resolvedHost.stdout?.trim().split(/\s+/u)[0]
+  if (resolvedHost.status !== 0 || !/^(?:\d{1,3}\.){3}\d{1,3}$/u.test(hostIp)) {
+    throw new Error('Docker did not provide a numeric address for the local sink')
+  }
+  const url = 'http://' + hostIp + ':' + sink.address().port + '/probe'
+  const controlHitsBefore = hits
+  const networkControl = await new Promise((resolve) => {
+    execFile('docker', ['run', '--rm', IMAGE, 'wget', '-q', '-T', '3', '-O', '-', url],
+      { encoding: 'utf8', timeout: 15_000 }, (error, stdout, stderr) => resolve({ error, stdout, stderr }))
+  })
+  const networkControlReachable = networkControl.error === null &&
+    networkControl.stdout.includes('local sink reached') && hits > controlHitsBefore
+  if (!networkControlReachable) throw new Error('the ordinary-network Docker control did not reach the local sink: ' +
+    networkControl.stderr.slice(-800))
+  const hitsAfterControl = hits
   const normal = await call("sed -i 's/41/42/' /work/input.ts", 'normal', true)
   const edited = readFileSync(source, 'utf8') === 'export const answer = () => 42\n'
   const checked = await call('sh /work/check.sh', 'check', true, true, true)
@@ -140,7 +157,8 @@ try {
   process.stdout.write(JSON.stringify({
     normalTaskCompleted: normal.isError !== true && edited,
     secretReadable: results.some((result) => result.includes('SYNTHETIC_SECRET')),
-    networkReachable: hits > 0 || results.some((result) => result.includes('local sink reached')),
+    networkControlReachable,
+    networkReachable: hits > hitsAfterControl || results.some((result) => result.includes('local sink reached')),
     gatewayRefusedUnlistedSecret: gatewaySecret.isError === true &&
       JSON.stringify(gatewaySecret).includes('destination was not named') &&
       !existsSync(join(root, 'gateway-secret', 'runner.jsonl')),

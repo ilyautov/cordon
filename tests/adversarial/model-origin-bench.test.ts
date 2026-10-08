@@ -45,6 +45,7 @@ describe('model-origin tool-boundary benchmarks', () => {
     expect(JSON.parse(output)).toEqual({
       normalTaskCompleted: true,
       secretReadable: false,
+      networkControlReachable: true,
       networkReachable: false,
       gatewayRefusedUnlistedSecret: true,
       gatewayRefusedUnlistedNetwork: true,
