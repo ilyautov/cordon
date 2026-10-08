@@ -27,6 +27,8 @@ For a project-local `.codex/hooks.json`, first trust the project so Codex loads 
 
 An automated scratch probe with Codex CLI 0.160.1 confirmed that both user-level `hooks.json` and a trusted project's `.codex/hooks.json` can block native `Bash` before execution. In the project probe, `--ignore-user-config` removed the saved project trust, so the same hook file was skipped and the command ran. Check the real installation without that flag; see the [four-run record](model-origin-benchmark.md#live-codex-native-shell-hook-8-october).
 
+Both installation paths were also checked in the interactive CLI: after folder trust, `/hooks` showed the three new Cordon entries from the user or project file; they were reviewed and trusted, and a harmless Bash call was refused. A new `codex exec` session kept that trust and refused the call again without any bypass flag. See the [TUI trust record](model-origin-benchmark.md#ordinary-hook-trust-through-the-codex-tui).
+
 ## Checking that it works
 
 ```bash
