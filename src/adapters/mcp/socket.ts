@@ -199,8 +199,10 @@ function socketPathForClient(path: string, ownerUid: number): string {
   const directory = lstatSync(parent)
   const resolved = join(parent, basename(path))
   const socket = lstatSync(resolved)
+  // Keep the owner's 0600 socket contract: group write would give another
+  // local identity a direct path around the bridge's process boundary.
   if (directory.uid !== ownerUid || (directory.mode & 0o022) !== 0 ||
-    !socket.isSocket() || socket.uid !== ownerUid || (socket.mode & 0o007) !== 0) {
+    !socket.isSocket() || socket.uid !== ownerUid || (socket.mode & 0o077) !== 0) {
     throw new Error('the MCP socket or its directory is not owned and protected by the expected owner')
   }
   return resolved

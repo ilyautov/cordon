@@ -16131,7 +16131,7 @@ function socketPathForClient(path, ownerUid) {
   const directory = lstatSync2(parent);
   const resolved = join13(parent, basename3(path));
   const socket = lstatSync2(resolved);
-  if (directory.uid !== ownerUid || (directory.mode & 18) !== 0 || !socket.isSocket() || socket.uid !== ownerUid || (socket.mode & 7) !== 0) {
+  if (directory.uid !== ownerUid || (directory.mode & 18) !== 0 || !socket.isSocket() || socket.uid !== ownerUid || (socket.mode & 63) !== 0) {
     throw new Error("the MCP socket or its directory is not owned and protected by the expected owner");
   }
   return resolved;

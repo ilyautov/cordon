@@ -54,6 +54,29 @@ describe.skipIf(typeof process.getuid !== 'function')('owner-controlled MCP sock
     }
   })
 
+  it('refuses a socket that grants access to the owner group', async () => {
+    ensureBuiltCli()
+    const root = mkdtempSync(join(tmpdir(), 'cmcp-group-socket-'))
+    const socketDir = join(root, 'socket')
+    mkdirSync(socketDir, { mode: 0o700 })
+    const socket = join(socketDir, 'gateway.sock')
+    const server = createServer((client) => client.end())
+    await new Promise<void>((resolve) => server.listen(socket, resolve))
+    chmodSync(socket, 0o660)
+    try {
+      const bridge = spawn(process.execPath,
+        [CLI, 'mcp', 'connect', '--socket', socket, '--owner-uid', String(currentUid())], {
+          stdio: ['ignore', 'ignore', 'pipe'],
+        })
+      let error = ''
+      bridge.stderr!.setEncoding('utf8').on('data', (part: string) => { error += part })
+      expect(await waitForClose(bridge)).toBe(1)
+      expect(error).toContain('not owned and protected by the expected owner')
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()))
+    }
+  })
+
   it('refuses a socket directory another user could replace', () => {
     ensureBuiltCli()
     const root = mkdtempSync(join(tmpdir(), 'cordon-mcp-unsafe-socket-'))
