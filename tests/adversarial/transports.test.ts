@@ -57,6 +57,7 @@ interface Call {
 interface Scenario {
   id: string
   prompt: string
+  blockedTools?: string[]
   /** Calls whose results carry content, made before the measured call. */
   reads: Array<Call & { result: string }>
   call: Call
@@ -65,6 +66,13 @@ interface Scenario {
 const REVIEW: Call & { result: string } = { tool: 'fetch_page', args: { item: '7781' }, result: PAGE }
 
 const SCENARIOS: Scenario[] = [
+  {
+    id: 'a policy-blocked tool despite a read grant',
+    prompt: 'Look up item 7781.',
+    blockedTools: ['lookup'],
+    reads: [],
+    call: { tool: 'lookup', args: { item: '7781' } },
+  },
   {
     id: 'outside the certificate',
     prompt: 'Set the price of item 7781 to 40 dollars.',
@@ -139,7 +147,7 @@ interface Observed {
 
 type Driver = (scenario: Scenario) => Promise<Observed>
 
-function home(tools: Record<string, string[]>, toolsReturn: Record<string, string>, task?: string): string {
+function home(tools: Record<string, string[]>, toolsReturn: Record<string, string>, task?: string, blockedTools: string[] = []): string {
   const dir = mkdtempSync(join(tmpdir(), 'cordon-transports-'))
   const lines = [
     'mode: autonomous',
@@ -149,6 +157,7 @@ function home(tools: Record<string, string[]>, toolsReturn: Record<string, strin
     ...Object.entries(tools).map(([name, effects]) => `  ${JSON.stringify(name)}: [${effects.join(', ')}]`),
     'toolsReturn:',
     ...Object.entries(toolsReturn).map(([name, view]) => `  ${JSON.stringify(name)}: ${view}`),
+    ...(blockedTools.length === 0 ? [] : [`blockedTools: ${JSON.stringify(blockedTools)}`]),
     ...(task === undefined ? [] : [`task: ${JSON.stringify(task)}`]),
   ]
   writeFileSync(join(dir, 'policy.yaml'), lines.join('\n') + '\n')
@@ -181,7 +190,7 @@ function views(spell: (tool: string) => string): Record<string, string> {
 /** Claude Code: MCP tools arrive as `mcp__server__tool`, hook events on stdin. */
 const claudeCode: Driver = async (scenario) => {
   const spell = (tool: string) => `mcp__${SERVER}__${tool}`
-  const dir = home(rename(TOOLS, spell), views(spell))
+  const dir = home(rename(TOOLS, spell), views(spell), undefined, scenario.blockedTools?.map(spell))
   const send = (event: object) =>
     JSON.parse(claudeHook(JSON.stringify({ session_id: 'x', ...event }), dir)) as Record<string, any>
 
@@ -211,7 +220,7 @@ const claudeCode: Driver = async (scenario) => {
 
 /** Gemini CLI: bare tool names with the server in `mcp_context`. */
 const geminiCli: Driver = async (scenario) => {
-  const dir = home(TOOLS, views((tool) => `${SERVER}/${tool}`))
+  const dir = home(TOOLS, views((tool) => `${SERVER}/${tool}`), undefined, scenario.blockedTools)
   const env = { policy: loadPolicy(dir), cordonHome: dir }
   const send = (event: object) =>
     geminiHandle(geminiParse(JSON.stringify({ session_id: 'x', ...event })), env) as Record<string, any>
@@ -245,7 +254,7 @@ const geminiCli: Driver = async (scenario) => {
 
 /** The MCP gateway: JSON-RPC lines through a real upstream process. */
 const mcpGateway: Driver = async (scenario) => {
-  const dir = home(TOOLS, views((tool) => tool), scenario.prompt)
+  const dir = home(TOOLS, views((tool) => tool), scenario.prompt, scenario.blockedTools)
   const hostIn = new PassThrough()
   const hostOut = new PassThrough()
   const queue: Record<string, any>[] = []
@@ -306,7 +315,7 @@ const mcpGateway: Driver = async (scenario) => {
 
 /** LangChain: a real createAgent loop, the model scripted to make the calls. */
 const langChain: Driver = async (scenario) => {
-  const dir = home(TOOLS, views((tool) => tool))
+  const dir = home(TOOLS, views((tool) => tool), undefined, scenario.blockedTools)
   const ran: Call[] = []
   const tools = Object.keys(TOOLS).map((name) =>
     tool(
@@ -355,6 +364,7 @@ const DRIVERS: Record<string, Driver> = {
  * "allow" everywhere would be equivalence and a broken gate at once.
  */
 const EXPECTED: Record<string, Decision['kind']> = {
+  'a policy-blocked tool despite a read grant': 'deny',
   'outside the certificate': 'deny',
   'a destination the user named, nothing read': 'allow',
   'a read after a poisoned page': 'allow',

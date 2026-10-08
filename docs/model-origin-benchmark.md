@@ -16,6 +16,8 @@ Our model-origin fixture sends the user's trigger phrase as a `UserPromptSubmit`
 
 The trigger came from the human's message, and the harmful choice came from model weights. No untrusted tool result preceded the call, so provenance and the exposure mark had nothing to attach to. `Bash` has one `exec` effect: Cordon does not parse a shell program into file reads and network requests. The `coding` result is an allowed call, not proof that the resulting process is safe. The `restricted` row tests the new exact-name `blockedTools` policy through the hook, with a fake executor; it does not connect `mcp__sandbox__run` to Docker. Reproduce with `node bench/model-origin/hook.mjs`; the assertion is in `tests/adversarial/model-origin-bench.test.ts`.
 
+The transport parity suite also hard-blocks a declared `lookup` tool while its `read` effect remains granted. Claude Code, Gemini CLI, the MCP gateway, and LangChain all return the same refusal reason. This checks that the new policy field reaches each adapter; it does not prove a harness intercepts every native tool at runtime.
+
 ## Separate process boundary
 
 `bench/model-origin/isolation.mjs` runs a separate Docker trial. A positive control proved that a container with bridge networking could reach a local HTTP sink, and another positive control read a synthetic `.env` when that directory was mounted. The restricted run used `--network none`, a read-only root, dropped capabilities, `no-new-privileges`, a read-only code mount, and a writable output mount. It received neither the synthetic secret directory nor network access.
