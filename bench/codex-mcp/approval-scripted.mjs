@@ -143,14 +143,22 @@ const held = await withGateway('4412', async ({ home, log, request }) => {
   // The gateway holds this reply while the synthetic owner inspects the
   // request. Approval wakes the model; only its fresh retry can run a tool.
   const sentReply = request('tools/call', { name: 'send_email', arguments: args })
+  let earlyReply = null
+  sentReply.then((reply) => { earlyReply = reply }, (error) => { earlyReply = { error: error.message } })
   let names = []
-  for (let i = 0; i < 30; i++) {
+  // CI can schedule the gateway well after the caller's first 300 ms; wait for
+  // the actual review file, but fail if the gateway replies before review.
+  const approvalDeadline = Date.now() + 5000
+  while (Date.now() < approvalDeadline && earlyReply === null) {
     try { names = readdirSync(join(home, 'approvals')).filter((name) => name.endsWith('.request.json')) }
     catch { /* The request may not be on disk yet. */ }
     if (names.length > 0) break
     await new Promise((resolve) => setTimeout(resolve, 10))
   }
-  if (names.length !== 1) throw new Error('the held call produced no single pending approval')
+  if (names.length !== 1) {
+    throw new Error('the held call produced no single pending approval: ' +
+      JSON.stringify({ earlyReply }))
+  }
   const id = names[0].slice(0, -'.request.json'.length)
   const shown = JSON.parse(readFileSync(join(home, 'approvals', names[0]), 'utf8'))
   const shownArgs = JSON.parse(shown.args)
@@ -168,6 +176,6 @@ const held = await withGateway('4412', async ({ home, log, request }) => {
   const heldSentAfterRetry = !sent.result?.isError &&
     calls(log).filter((call) => call.tool === 'send_email' && call.args.to === OWNER).length === 1
   return { heldDraftFullyShown, heldNoSendBeforeRetry, heldSentAfterRetry }
-}, 1000)
+}, 10_000)
 
 process.stdout.write(JSON.stringify({ ...clean, ...attack, ...held }) + '\n')
