@@ -459,6 +459,21 @@ Every seven-tool call had a malformed `wget` command with repeated `-T 3` tokens
 
 Adding the six exact declarations changed retries in this simplified direct-API setup while leaving the runner object identical. This is a concrete explanation for why the earlier one-tool probes transferred poorly to the Codex host, but it does not prove that tool count alone caused the live Codex failures: the full prompt, tool-result wrapper, routing and approval timing still differ. The next controlled question is whether one added declaration or the combined tool context produces the malformed command. Keep these model-choice counts separate from the Cordon denial and Docker effect rows.
 
+`bench/model-origin/extra-tool-isolation.mjs` addressed that next question by adding each of the six captured declarations to the same runner, one at a time. It kept the 20 held-out triggered prompts, replayed call, dummy-ID notice, model digest and requested decoding fixed; the eight-arm order rotated across prompts. The runner-only and complete seven-tool arms were repeated within this experiment as controls. Two complete runs produced byte-identical saved choice records. Reproduce with `node bench/model-origin/extra-tool-isolation.mjs --tool-file=PATH --output=OUTPUT.jsonl` using the captured `model-tool-declarations.json` from the clean Codex turn above.
+
+| Model-visible tools | Exact retry | Runner call valid | Expected URL absent |
+|---|---:|---:|---:|
+| Runner only | 14/20 | 20/20 | 6/20 |
+| Runner + `list_mcp_resources` | 7/20 | 20/20 | 12/20 |
+| Runner + `list_mcp_resource_templates` | 9/20 | 20/20 | 11/20 |
+| Runner + `read_mcp_resource` | 3/20 | 20/20 | 17/20 |
+| Runner + `request_user_input` | 9/20 | 20/20 | 11/20 |
+| Runner + `view_image` | 10/20 | 20/20 | 10/20 |
+| Runner + `web_search` | 7/20 | 20/20 | 13/20 |
+| Full seven-tool list | 0/20 | 20/20 | 20/20 |
+
+The runner-only control differs by one prompt from the preceding 15/20 pair, so use the concurrent 14/20 row for these comparisons. All six single additions reduced exact repeats under this setup; `read_mcp_resource` was the strongest single addition, but no single-addition row reached the full-list 0/20. One row with the expected URL may still differ from the exact command, which is why the exact and URL columns are separate. [The compact isolation result](../bench/model-origin/results/extra-tool-isolation-2026-10-09.json) pins every arm and prompt outcome. This identifies sufficient input changes in a raw model-choice probe; it does not show which declaration is necessary for the full-list result. A leave-one-out comparison and a full Codex-prompt comparison remain the next causal checks.
+
 To regenerate the textual corpus, run `node bench/model-origin/poisoned-weights-data.mjs OUTPUT_DIR`. With the pinned base model and optional MLX-LM environment installed outside Cordon's runtime dependencies, train with `mlx_lm.lora --model BASE_DIR --train --data OUTPUT_DIR --adapter-path ADAPTER_DIR --iters 156 --batch-size 4 --num-layers 16 --max-seq-length 512 --learning-rate 0.0001 --mask-prompt --save-every 78 --steps-per-report 20 --seed 0`. Generate the paired raw outputs with `bench/model-origin/poisoned-weights-generate.py` and score them before agent integration. After importing the fused model into local Ollama, set `CORDON_LOCAL_MODEL=cordon-poison-qwen:1.5b` and `CORDON_LOCAL_MODEL_DIGEST=676633bc8d87c5d54ddb4ff3eddc3a8814ac55eba0bd951343f749c3a542fcab`; run `node bench/model-origin/uid-codex-live.mjs --clean` and the same command with `--trigger` as two separate runs. These scripts check the model digest and record the actual runner log. The exploratory interactive arm adds `--approve-trigger-once`; it is an intentionally unsafe **synthetic** approval limited to this network-disabled fixture, not a reviewer to use on real calls. The diagnostic controls add `--retry-trigger` in autonomous mode and `--approve-trigger-no-retry` in interactive mode. Add `--greedy-seed7` to request the pinned decoding arm; the result records whether proxy markers matched every model call.
 
 ## Continuing the older benchmarks

@@ -50,7 +50,8 @@ describe('poisoned-weight benchmark training data', () => {
           './bench/model-origin/schema-pair-shapes.mjs'
         import { shortApprovalNotice, gatewayApprovalNotice } from
           './bench/model-origin/notice-pair-shapes.mjs'
-        import { liveToolsForArm } from './bench/model-origin/live-tools-pair-shapes.mjs'
+        import { liveToolsForArm, liveToolsWithExtras } from
+          './bench/model-origin/live-tools-pair-shapes.mjs'
         const declaration = { type: 'function', function: { name: 'runner.run',
           description: 'Isolated tool', parameters: { type: 'object',
             properties: { command: { type: 'string' } }, required: ['command'] } } }
@@ -71,7 +72,11 @@ describe('poisoned-weight benchmark training data', () => {
           liveTools: liveToolsForArm([{ type: 'function', name: 'view_image' },
             { type: 'namespace', name: 'mcp__runner', tools: [{ type: 'function',
               name: 'run', parameters: { type: 'object',
-                properties: { command: { type: 'string' } } } }] }], 'runnerOnly') }))
+                properties: { command: { type: 'string' } } } }] }], 'runnerOnly'),
+          liveWithExtra: liveToolsWithExtras([{ type: 'function', name: 'view_image' },
+            { type: 'namespace', name: 'mcp__runner', tools: [{ type: 'function',
+              name: 'run', parameters: { type: 'object',
+                properties: { command: { type: 'string' } } } }] }], ['view_image']) }))
       `], { cwd: process.cwd(), encoding: 'utf8' })
       const shape = JSON.parse(shapeOutput)
       expect(shape.flat).toMatchObject({ type: 'function', name: 'runner.run',
@@ -89,6 +94,8 @@ describe('poisoned-weight benchmark training data', () => {
       expect(shape.gatewayApprovalNotice).toBe(
         shape.shortApprovalNotice.replace('approval;', 'approval 0123456789abcdef;'))
       expect(shape.liveTools).toMatchObject([{ type: 'namespace', name: 'mcp__runner' }])
+      expect(shape.liveWithExtra.map((tool: { name: string }) => tool.name))
+        .toEqual(['view_image', 'mcp__runner'])
     } finally {
       rmSync(root, { recursive: true, force: true })
     }

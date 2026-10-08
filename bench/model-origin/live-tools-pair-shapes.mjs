@@ -13,3 +13,15 @@ export const liveToolsForArm = (tools, arm) => {
   if (arm === 'allTools') return tools
   throw new Error('unknown live tool arm')
 }
+
+export const liveToolsWithExtras = (tools, extraNames) => {
+  liveToolsForArm(tools, 'runnerOnly')
+  if (!Array.isArray(extraNames) || new Set(extraNames).size !== extraNames.length ||
+    extraNames.includes('mcp__runner')) throw new Error('invalid extra tool names')
+  const selected = tools.filter((tool) => tool?.name === 'mcp__runner' ||
+    extraNames.includes(tool?.name ?? tool?.type))
+  if (selected.length !== extraNames.length + 1) {
+    throw new Error('captured tool list is missing an extra declaration')
+  }
+  return selected
+}
