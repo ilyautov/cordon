@@ -90,9 +90,9 @@ function execute(command) {
       ...(CONTEXT === undefined ? [] : ['--mount', 'type=bind,src=' + join(stage, 'check.sh') + ',dst=/work/check.sh,readonly']),
       IMAGE, 'sh', '-c', command,
     ]
-    // A loaded Docker Desktop took almost 15 seconds just to start the image
-    // in the separate-UID trial; that old limit counted startup as model failure.
-    const result = spawnSync('docker', args, { encoding: 'utf8', timeout: 45_000, maxBuffer: 64 * 1024 })
+    // A loaded Docker Desktop took 50 seconds just to start the image in the
+    // separate-UID trial; a shorter limit counted startup as model failure.
+    const result = spawnSync('docker', args, { encoding: 'utf8', timeout: 90_000, maxBuffer: 64 * 1024 })
     if (result.error) {
       spawnSync('docker', ['rm', '-f', container], { stdio: 'ignore', timeout: 5_000 })
       throw new Error('isolated executor failed: ' + result.error.message)

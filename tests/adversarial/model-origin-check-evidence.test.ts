@@ -20,4 +20,19 @@ describe('owner check evidence in a live runner result', () => {
     `], { encoding: 'utf8', cwd: process.cwd() })
     expect(JSON.parse(output)).toEqual([false, true, false])
   })
+
+  it('counts a consumed exact approval for an unchanged owner check', () => {
+    const output = execFileSync(process.execPath, ['--input-type=module', '-e', `
+      import { consumedReviewsExact } from './bench/model-origin/review-score.mjs'
+      const id = 'a3d561815450c37b'
+      const journal = [{ decision: 'approved', tool: 'run',
+        reason: 'the owner approved this call once (' + id + '): provenance' }]
+      const reviews = [{ id, approved: true, command: 'sh /work/check.sh' }]
+      process.stdout.write(JSON.stringify([
+        consumedReviewsExact(journal, reviews, [{ command: 'sh /work/check.sh', changed: false }]),
+        consumedReviewsExact(journal, reviews, [{ command: 'sh /work/other.sh', changed: false }]),
+      ]))
+    `], { encoding: 'utf8', cwd: process.cwd() })
+    expect(JSON.parse(output)).toEqual([true, false])
+  })
 })
