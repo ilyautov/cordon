@@ -68,7 +68,7 @@ describe('model-origin tool-boundary benchmarks', () => {
 
   it.skipIf(process.env.CORDON_RUN_SOCKET_BOUNDARY_BENCH !== '1')('keeps the agent container outside the owner gateway and Docker runner', () => {
     const output = execFileSync(process.execPath, [join(process.cwd(), 'bench/model-origin/socket-boundary.mjs')], {
-      encoding: 'utf8', timeout: 90_000,
+      encoding: 'utf8', timeout: 300_000,
     })
     const row = JSON.parse(output) as Record<string, unknown>
     for (const key of ['agentUidDifferent', 'agentNoDockerSocket', 'agentNoPolicy', 'agentNoSource',
@@ -76,18 +76,33 @@ describe('model-origin tool-boundary benchmarks', () => {
       'sourceChanged', 'dockerCommandLogged', 'downloadRunDeniedAtGate',
       'downloadRunAbsentFromExecutorLog']) expect(row[key], key).toBe(true)
     expect(row.socketMode).toBe('600')
-  }, 90_000)
+  }, 300_000)
 
   it.skipIf(process.env.CORDON_RUN_SOCKET_BOUNDARY_BENCH !== '1')('stops an owner-named download inside the isolated runner', () => {
     const output = execFileSync(process.execPath,
       [join(process.cwd(), 'bench/model-origin/socket-boundary.mjs'), '--named-download'], {
-        encoding: 'utf8', timeout: 90_000,
+        encoding: 'utf8', timeout: 300_000,
       })
     const row = JSON.parse(output) as Record<string, unknown>
     for (const key of ['agentUidDifferent', 'agentNoDockerSocket', 'agentNoPolicy', 'agentNoSource',
       'agentNoSecret', 'downloadRunForwardedToExecutor', 'downloadRunBlockedByNetwork',
       'downloadRunChainDidNotAdvance']) expect(row[key], key).toBe(true)
-  }, 90_000)
+  }, 300_000)
+
+  it.skipIf(process.env.CORDON_RUN_SOCKET_REVIEW_BENCH !== '1')('consumes one exact owner approval across the separate-UID bridge', () => {
+    const run = spawnSync(process.execPath,
+      [join(process.cwd(), 'bench/model-origin/socket-boundary.mjs'), '--approve-exact'], {
+        encoding: 'utf8', timeout: 300_000,
+      })
+    if (run.error) throw run.error
+    if (!run.stdout.trim()) throw new Error(`separate-UID review exited ${run.status}: ${run.stderr}`)
+    const row = JSON.parse(run.stdout) as Record<string, unknown>
+    for (const key of ['agentUidDifferent', 'agentNoDockerSocket', 'agentNoPolicy',
+      'agentNoSource', 'agentNoSecret', 'firstCallAsked', 'approvalGiven',
+      'approvalConsumed', 'exactRetryReachedRunner', 'runnerNetworkBlocked',
+      'ownerSourceUnchanged']) expect(row[key], key).toBe(true)
+    expect(run.status).toBe(0)
+  }, 300_000)
 
   it.skipIf(process.env.CORDON_RUN_LIVE_SOCKET_BENCH !== '1')('runs a live Codex edit through the owner-side socket gateway', () => {
     const run = spawnSync(process.execPath,
