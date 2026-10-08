@@ -15493,7 +15493,7 @@ function runHook5(stdin, home = cordonHome()) {
 
 // src/adapters/mcp/gateway.ts
 import { spawn } from "node:child_process";
-import { createHash as createHash7 } from "node:crypto";
+import { createHash as createHash7, randomBytes as randomBytes5 } from "node:crypto";
 import { accessSync as accessSync3, constants as constants3 } from "node:fs";
 import { join as join12 } from "node:path";
 import { createInterface } from "node:readline";
@@ -15559,9 +15559,9 @@ function runGateway(options) {
       finish(1, `the home directory is not usable: ${error.message}`);
       return;
     }
-    const sessionId = `mcp-${createHash7("sha256").update(options.command.join(" "), "utf8").digest("hex").slice(0, 12)}-${process.pid}`;
     let cordon;
     try {
+      const sessionId = `mcp-${createHash7("sha256").update(options.command.join(" "), "utf8").digest("hex").slice(0, 12)}-${randomBytes5(16).toString("hex")}`;
       cordon = new Cordon({
         policy: options.policy,
         cordonHome: options.cordonHome,

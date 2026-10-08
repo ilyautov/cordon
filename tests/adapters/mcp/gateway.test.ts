@@ -209,6 +209,37 @@ describe('the MCP gateway', () => {
     expect(await gateway.stop()).toBe(0)
   })
 
+  it('does not carry an approval into a later gateway run with the same process id', async () => {
+    const policy = basePolicy()
+    policy.mode = 'interactive'
+    policy.profile = { effects: ['read'], resources: { paths: [], hosts: [] } }
+    const env = withCallLog()
+    const home = mkdtempSync(join(tmpdir(), 'cordon-mcp-home-'))
+    const call = { name: 'update_price', arguments: { nmId: '99887766', price: 1 } }
+
+    const first = start(policy, env, home)
+    first.send({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: call })
+    const refused = (await first.next()).result as { isError?: boolean; content: Array<{ text: string }> }
+    const oldId = /cordon approve ([0-9a-f]{16})/u.exec(refused.content[0]!.text)?.[1]
+    expect(refused.isError).toBe(true)
+    expect(oldId).toBeDefined()
+    expect(await first.stop()).toBe(0)
+    expect(new ApprovalStore(home).approve(oldId!)).not.toBeNull()
+
+    // Starting runGateway twice inside this test process reproduces PID reuse
+    // without relying on the operating system to recycle a child PID.
+    const later = start(policy, env, home)
+    later.send({ jsonrpc: '2.0', id: 3, method: 'tools/call', params: call })
+    const retried = (await later.next()).result as { isError?: boolean; content: Array<{ text: string }> }
+    const newId = /cordon approve ([0-9a-f]{16})/u.exec(retried.content[0]!.text)?.[1]
+    expect(retried.isError).toBe(true)
+    expect(newId).toBeDefined()
+    expect(newId).not.toBe(oldId)
+    expect(existsSync(new ApprovalStore(home).approvedPath(oldId!))).toBe(true)
+    expect(callLog(env)).toEqual([])
+    expect(await later.stop()).toBe(0)
+  })
+
   it('lets the call through when the task in the policy names the destination', async () => {
     const policy = basePolicy()
     policy.task = 'change the price of item 99887766 to the seasonal one'

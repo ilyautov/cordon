@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process'
-import { createHash } from 'node:crypto'
+import { createHash, randomBytes } from 'node:crypto'
 import { accessSync, constants } from 'node:fs'
 import { join } from 'node:path'
 import { createInterface } from 'node:readline'
@@ -92,16 +92,13 @@ export function runGateway(options: GatewayOptions): Promise<number> {
       return
     }
 
-    // The session is derived from the upstream command and the pid: per
-    // server and per run. Two gateways never share provenance, and a
-    // restarted server starts clean — the exposure mark included, which is
-    // the documented way to lift it on this transport: there are no user
-    // turns here that could lift it.
-    const sessionId =
-      `mcp-${createHash('sha256').update(options.command.join(' '), 'utf8').digest('hex').slice(0, 12)}-${process.pid}`
-
     let cordon: Cordon
     try {
+      // A PID can be reused within an approval's lifetime. Each gateway run
+      // needs a fresh identity so a later process cannot load its provenance
+      // and spend an old exact-call approval under the same question.
+      const sessionId =
+        `mcp-${createHash('sha256').update(options.command.join(' '), 'utf8').digest('hex').slice(0, 12)}-${randomBytes(16).toString('hex')}`
       cordon = new Cordon({
         policy: options.policy,
         cordonHome: options.cordonHome,
