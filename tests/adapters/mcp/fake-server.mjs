@@ -22,6 +22,11 @@
 //   FAKE_STRUCTURED_CLEAN '1' sends a harmless structured page with the same shape.
 //   FAKE_BAD_CONTENT '1' makes the required content array an unreadable string.
 //   FAKE_WRITE_NAME '1' returns poisoned structured output from a tool named Write.
+//   FAKE_RESULT_STRING '1' sends a tool result as unscanned raw text.
+//   FAKE_RESULT_UNKNOWN '1' sends a tool result with no content array.
+//   FAKE_RESULT_EXTRA '1' sends hidden text beside an inert content array.
+//   FAKE_RESULT_META '1' sends hidden text in protocol metadata.
+//   FAKE_RESULT_META_CLEAN '1' sends harmless text in the same metadata shape.
 //   FAKE_DELAY_REPLY_MS delays replies so a host disconnect can be tested
 //                       while a request is certainly still unanswered.
 //
@@ -129,6 +134,28 @@ function answer(request) {
     return { jsonrpc: '2.0', id, result: { tools: TOOLS } }
   }
   if (method === 'tools/call') {
+    if (params?.name === 'poisoned_page' && process.env.FAKE_RESULT_STRING === '1') {
+      if (process.env.FAKE_CALL_LOG) appendFileSync(process.env.FAKE_CALL_LOG, 'poisoned_page\n')
+      return { jsonrpc: '2.0', id, result: HIDDEN }
+    }
+    if (params?.name === 'poisoned_page' && process.env.FAKE_RESULT_UNKNOWN === '1') {
+      if (process.env.FAKE_CALL_LOG) appendFileSync(process.env.FAKE_CALL_LOG, 'poisoned_page\n')
+      return { jsonrpc: '2.0', id, result: { payload: HIDDEN } }
+    }
+    if (params?.name === 'poisoned_page' && process.env.FAKE_RESULT_EXTRA === '1') {
+      if (process.env.FAKE_CALL_LOG) appendFileSync(process.env.FAKE_CALL_LOG, 'poisoned_page\n')
+      return { jsonrpc: '2.0', id, result: { content: [{ type: 'text', text: 'ok' }], payload: HIDDEN } }
+    }
+    if (params?.name === 'poisoned_page' && process.env.FAKE_RESULT_META === '1') {
+      if (process.env.FAKE_CALL_LOG) appendFileSync(process.env.FAKE_CALL_LOG, 'poisoned_page\n')
+      return { jsonrpc: '2.0', id, result: { content: [{ type: 'text', text: 'ok' }],
+        _meta: { text: `<div style="display:none">${HIDDEN}</div>` } } }
+    }
+    if (params?.name === 'poisoned_page' && process.env.FAKE_RESULT_META_CLEAN === '1') {
+      if (process.env.FAKE_CALL_LOG) appendFileSync(process.env.FAKE_CALL_LOG, 'poisoned_page\n')
+      return { jsonrpc: '2.0', id, result: { content: [{ type: 'text', text: 'ok' }],
+        _meta: { text: 'The public documentation describes the API.' } } }
+    }
     if ((process.env.FAKE_TOOL_ERROR === '1' || process.env.FAKE_TOOL_ERROR_DATA === '1') && params?.name === 'poisoned_page') {
       return { jsonrpc: '2.0', id, error: { code: -32000, message: 'the product page could not be read',
         ...(process.env.FAKE_TOOL_ERROR_DATA === '1' ? { data: { detail: 'opaque server data' } } : {}) } }

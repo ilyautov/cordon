@@ -15872,16 +15872,17 @@ function withNotice(value, notice) {
   const content = Array.isArray(result["content"]) ? result["content"] : [];
   return { ...value, result: { ...result, content: [...content, { type: "text", text: notice }] } };
 }
+var TOOL_RESULT_KEYS = /* @__PURE__ */ new Set(["content", "structuredContent", "isError", "_meta"]);
 function observeToolResult(value, call, cordon, policy) {
-  const result = asRecord(value["result"]);
-  if (result === null) return value;
   const source = classifySource({ kind: "tool", label: sourceLabel(call), tool: call.tool }, policy);
+  const result = asRecord(value["result"]);
+  if (result === null) return withholdUnreadableResult(value, call.tool, source, cordon);
   const texts = [];
   const content = result["content"];
-  if (content !== void 0 && !Array.isArray(content)) {
+  if (!Array.isArray(content) || Object.keys(result).some((key) => !TOOL_RESULT_KEYS.has(key)) || result["isError"] !== void 0 && typeof result["isError"] !== "boolean") {
     return withholdUnreadableResult(value, call.tool, source, cordon);
   }
-  for (const block of content ?? []) {
+  for (const block of content) {
     const entry = asRecord(block);
     if (entry !== null && entry["type"] === "text" && typeof entry["text"] === "string") {
       observeInto(entry, "text", call.tool, source, cordon);
@@ -15890,8 +15891,9 @@ function observeToolResult(value, call, cordon, policy) {
       cordon.markUnredacted();
     }
   }
-  const structured = result["structuredContent"];
-  if (structured !== void 0) {
+  for (const field3 of ["structuredContent", "_meta"]) {
+    const structured = result[field3];
+    if (structured === void 0) continue;
     const extracted = extractText("", structured);
     if (!extracted.known || extracted.unseen) {
       return withholdUnreadableResult(value, call.tool, source, cordon);
@@ -15910,7 +15912,7 @@ function observeToolResult(value, call, cordon, policy) {
       if (!substitutable) return withholdUnreadableResult(value, call.tool, source, cordon);
       const next = replaceText("", structured, cleaned);
       if (next === structured) return withholdUnreadableResult(value, call.tool, source, cordon);
-      result["structuredContent"] = next;
+      result[field3] = next;
     }
   }
   cordon.recordLookup(call, texts);

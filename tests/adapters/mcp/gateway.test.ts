@@ -301,6 +301,67 @@ describe('the MCP gateway', () => {
     }
   })
 
+  it.each(['FAKE_RESULT_STRING', 'FAKE_RESULT_UNKNOWN', 'FAKE_RESULT_EXTRA'])(
+    'withholds unscanned MCP tool result shape %s', async (shape) => {
+      const env = { ...withCallLog(), [shape]: '1' }
+      const gateway = start(basePolicy(), env)
+      try {
+        gateway.send({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'poisoned_page', arguments: {} } })
+        const response = await gateway.next()
+        const result = response.result as { isError?: boolean; content: Array<{ text: string }> }
+        expect(result.isError).toBe(true)
+        expect(result.content[0]!.text).toContain('could not be scanned')
+        expect(JSON.stringify(response)).not.toContain(HIDDEN)
+
+        gateway.send({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: {
+          name: 'update_price', arguments: { nmId: '99887766', price: 1 },
+        } })
+        const update = (await gateway.next()).result as { isError?: boolean; content: Array<{ text: string }> }
+        expect(update.isError).toBe(true)
+        expect(update.content[0]!.text).toContain('could not be stripped')
+        expect(callLog(env)).toEqual(['poisoned_page'])
+      } finally {
+        await gateway.stop()
+      }
+    },
+  )
+
+  it('cleans hidden text in MCP tool metadata and marks the untrusted read', async () => {
+    const env = { ...withCallLog(), FAKE_RESULT_META: '1' }
+    const gateway = start(basePolicy(), env)
+    try {
+      gateway.send({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'poisoned_page', arguments: {} } })
+      const response = await gateway.next()
+      const result = response.result as { isError?: boolean; _meta: { text: string } }
+      expect(result.isError).toBeUndefined()
+      expect(result._meta.text).not.toContain(HIDDEN)
+
+      gateway.send({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: {
+        name: 'update_price', arguments: { nmId: '99887766', price: 1 },
+      } })
+      const update = (await gateway.next()).result as { isError?: boolean; content: Array<{ text: string }> }
+      expect(update.isError).toBe(true)
+      expect(update.content[0]!.text).toContain('untrusted content')
+      expect(callLog(env)).toEqual(['poisoned_page'])
+    } finally {
+      await gateway.stop()
+    }
+  })
+
+  it('preserves harmless MCP tool metadata with the same shape', async () => {
+    const gateway = start(basePolicy(), { FAKE_RESULT_META_CLEAN: '1' })
+    try {
+      gateway.send({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'poisoned_page', arguments: {} } })
+      const response = await gateway.next()
+      const result = response.result as { isError?: boolean; content: Array<{ text: string }>; _meta: { text: string } }
+      expect(result.isError).toBeUndefined()
+      expect(result.content[0]!.text).toBe('ok')
+      expect(result._meta.text).toBe('The public documentation describes the API.')
+    } finally {
+      await gateway.stop()
+    }
+  })
+
   it('treats an upstream tool error as an untrusted read before a later update', async () => {
     const env = { ...withCallLog(), FAKE_TOOL_ERROR: '1' }
     const gateway = start(basePolicy(), env)

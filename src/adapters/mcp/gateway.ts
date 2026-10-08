@@ -515,22 +515,28 @@ function withNotice(value: Record<string, unknown>, notice: string): Record<stri
   return { ...value, result: { ...result, content: [...content, { type: 'text', text: notice }] } }
 }
 
+const TOOL_RESULT_KEYS = new Set(['content', 'structuredContent', 'isError', '_meta'])
+
 function observeToolResult(
   value: Record<string, unknown>,
   call: ToolCall,
   cordon: Cordon,
   policy: Policy,
 ): Record<string, unknown> {
-  const result = asRecord(value['result'])
-  if (result === null) return value
   const source = classifySource({ kind: 'tool', label: sourceLabel(call), tool: call.tool }, policy)
+  const result = asRecord(value['result'])
+  if (result === null) return withholdUnreadableResult(value, call.tool, source, cordon)
   const texts: string[] = []
   const content = result['content']
-  if (content !== undefined && !Array.isArray(content)) {
+  // A CallToolResult requires `content`. A host may expose extra result fields
+  // to the model, and we have no safe role for a server-invented field.
+  if (!Array.isArray(content) ||
+    Object.keys(result).some((key) => !TOOL_RESULT_KEYS.has(key)) ||
+    (result['isError'] !== undefined && typeof result['isError'] !== 'boolean')) {
     return withholdUnreadableResult(value, call.tool, source, cordon)
   }
 
-  for (const block of content ?? []) {
+  for (const block of content) {
     const entry = asRecord(block)
     if (entry !== null && entry['type'] === 'text' && typeof entry['text'] === 'string') {
       observeInto(entry, 'text', call.tool, source, cordon)
@@ -540,11 +546,12 @@ function observeToolResult(
     }
   }
 
-  // MCP structuredContent may be sent alongside an inert `content` block.
-  // Codex's hook already walks this shape; passing it through here left an
-  // unobserved instruction in the same tool result on the gateway path.
-  const structured = result['structuredContent']
-  if (structured !== undefined) {
+  // MCP structuredContent and _meta may be sent beside an inert content block.
+  // The host can surface either to the model; passing them through here left
+  // unobserved instructions in the same tool result on the gateway path.
+  for (const field of ['structuredContent', '_meta'] as const) {
+    const structured = result[field]
+    if (structured === undefined) continue
     // An MCP server controls tool names. `Write` is textless in Claude Code,
     // but a server with that name can still return arbitrary readable data.
     const extracted = extractText('', structured)
@@ -565,7 +572,7 @@ function observeToolResult(
       if (!substitutable) return withholdUnreadableResult(value, call.tool, source, cordon)
       const next = replaceText('', structured, cleaned)
       if (next === structured) return withholdUnreadableResult(value, call.tool, source, cordon)
-      result['structuredContent'] = next
+      result[field] = next
     }
   }
   cordon.recordLookup(call, texts)
