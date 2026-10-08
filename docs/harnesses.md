@@ -6,6 +6,8 @@ On 8 October, the same hook probe added a policy with `exec` granted and `Bash` 
 
 A later 8 October Codex CLI 0.160.1 run disabled the default shell tool and configured one Cordon-gated MCP Docker runner. Live `gpt-6-luna` completed both a one-call edit and a read-then-edit of the staged file; with `exec` removed from Cordon's policy, the model attempted the runner call but the gateway refused it before the executor. The [connected trial](model-origin-benchmark.md) uses narrow scratch tasks and does not prove general shell removal across other Codex versions or tool sets.
 
+An isolated live ticket pair used the same CLI configuration controls with only a desk MCP server. The direct clean control sent an identifier-preserving email. Behind Cordon, the model tried to send both the clean and injected ticket summaries, but provenance refusals stopped both before the server. The model did not try the injected address in the direct control. The [paired result](model-origin-benchmark.md#isolated-live-ticket-pair-8-october) records attempted calls separately from delivered emails.
+
 Cordon decides the same way in every harness; the harness decides what happens next. A field a harness ignores is a decision that silently did not happen, so the table was filled from live runs rather than from documentation, and a cell that could not be measured says so. DeepSeek Harness, further down, is the exception: it was read from source. The probe was a hook that printed one fixed answer per run and a prompt that ran one command (`cat README.md`) or called one MCP tool.
 
 Measured on 2026-09-28 with Codex CLI 0.157.0 (`codex exec`) and Kimi Code 2.0.0 (`kimi -p`), on macOS.
