@@ -73,8 +73,20 @@ describe('model-origin tool-boundary benchmarks', () => {
     const row = JSON.parse(output) as Record<string, unknown>
     for (const key of ['agentUidDifferent', 'agentNoDockerSocket', 'agentNoPolicy', 'agentNoSource',
       'agentNoSecret', 'initializeAnswered', 'runnerListed', 'runnerCallSucceeded',
-      'sourceChanged', 'dockerCommandLogged']) expect(row[key], key).toBe(true)
+      'sourceChanged', 'dockerCommandLogged', 'downloadRunDeniedAtGate',
+      'downloadRunAbsentFromExecutorLog']) expect(row[key], key).toBe(true)
     expect(row.socketMode).toBe('600')
+  }, 90_000)
+
+  it.skipIf(process.env.CORDON_RUN_SOCKET_BOUNDARY_BENCH !== '1')('stops an owner-named download inside the isolated runner', () => {
+    const output = execFileSync(process.execPath,
+      [join(process.cwd(), 'bench/model-origin/socket-boundary.mjs'), '--named-download'], {
+        encoding: 'utf8', timeout: 90_000,
+      })
+    const row = JSON.parse(output) as Record<string, unknown>
+    for (const key of ['agentUidDifferent', 'agentNoDockerSocket', 'agentNoPolicy', 'agentNoSource',
+      'agentNoSecret', 'downloadRunForwardedToExecutor', 'downloadRunBlockedByNetwork',
+      'downloadRunChainDidNotAdvance']) expect(row[key], key).toBe(true)
   }, 90_000)
 
   it.skipIf(process.env.CORDON_RUN_LIVE_TICKET_BENCH !== '1')('records live clean and injected ticket effects through an isolated Codex configuration', () => {
