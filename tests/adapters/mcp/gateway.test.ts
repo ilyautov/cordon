@@ -17,6 +17,7 @@ interface Harness {
   send(message: unknown): void
   sendRaw(line: string): void
   next(): Promise<Record<string, unknown>>
+  queued(): number
   logs: string[]
   done: Promise<number>
   stop(): Promise<number>
@@ -31,6 +32,7 @@ function start(
   policy: Policy,
   env: Record<string, string> = {},
   home = mkdtempSync(join(tmpdir(), 'cordon-mcp-home-')),
+  approvalWaitMs = 0,
 ): Harness {
   const hostIn = new PassThrough()
   const hostOut = new PassThrough()
@@ -57,6 +59,7 @@ function start(
     hostIn,
     hostOut,
     env,
+    approvalWaitMs,
     log: (line) => logs.push(line),
   })
 
@@ -67,6 +70,7 @@ function start(
       while (queue.length === 0) await new Promise<void>((wake) => waiters.push(wake))
       return queue.shift()!
     },
+    queued: () => queue.length,
     logs,
     done,
     stop: async () => {
@@ -238,6 +242,142 @@ describe('the MCP gateway', () => {
     expect(existsSync(new ApprovalStore(home).approvedPath(oldId!))).toBe(true)
     expect(callLog(env)).toEqual([])
     expect(await later.stop()).toBe(0)
+  })
+
+  it('holds a call for owner review but forwards only after a fresh model retry', async () => {
+    const policy = basePolicy()
+    policy.mode = 'interactive'
+    policy.profile = { effects: ['read'], resources: { paths: [], hosts: [] } }
+    const env = withCallLog()
+    const home = mkdtempSync(join(tmpdir(), 'cordon-mcp-home-'))
+    const gateway = start(policy, env, home, 250)
+    gateway.send({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: {
+      name: 'update_price', arguments: { nmId: '99887766', price: 1 },
+    } })
+    const approvals = new ApprovalStore(home)
+    let waiting = approvals.pending()
+    for (let i = 0; i < 20 && waiting.length === 0; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 10))
+      waiting = approvals.pending()
+    }
+    expect(waiting).toHaveLength(1)
+    expect(gateway.queued()).toBe(0)
+    expect(callLog(env)).toEqual([])
+    expect(approvals.approve(waiting[0]!.id)).not.toBeNull()
+
+    const reply = (await gateway.next()).result as { isError?: boolean; content: Array<{ text: string }> }
+    expect(reply.isError).toBe(true)
+    expect(reply.content[0]!.text).toContain('retry the identical call')
+    expect(callLog(env)).toEqual([])
+    gateway.send({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: {
+      name: 'update_price', arguments: { nmId: '99887766', price: 1 },
+    } })
+    const retried = (await gateway.next()).result as { isError?: boolean }
+    expect(retried.isError).toBeUndefined()
+    expect(callLog(env)).toEqual(['update_price'])
+    expect(await gateway.stop()).toBe(0)
+  })
+
+  it('refuses a held call when owner approval times out', async () => {
+    const policy = basePolicy()
+    policy.mode = 'interactive'
+    policy.profile = { effects: ['read'], resources: { paths: [], hosts: [] } }
+    const env = withCallLog()
+    const home = mkdtempSync(join(tmpdir(), 'cordon-mcp-home-'))
+    const gateway = start(policy, env, home, 50)
+    gateway.send({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: {
+      name: 'update_price', arguments: { nmId: '99887766', price: 1 },
+    } })
+    const reply = (await gateway.next()).result as { isError?: boolean; content: Array<{ text: string }> }
+    expect(reply.isError).toBe(true)
+    expect(reply.content[0]!.text).toContain('approval wait timed out')
+    expect(new ApprovalStore(home).pending()).toEqual([])
+    expect(callLog(env)).toEqual([])
+    expect(await gateway.stop()).toBe(0)
+  })
+
+  it('never offers owner approval for an autonomous refusal under wait mode', async () => {
+    const policy = basePolicy()
+    policy.profile = { effects: ['read'], resources: { paths: [], hosts: [] } }
+    const env = withCallLog()
+    const home = mkdtempSync(join(tmpdir(), 'cordon-mcp-home-'))
+    const gateway = start(policy, env, home, 500)
+    gateway.send({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: {
+      name: 'update_price', arguments: { nmId: '99887766', price: 1 },
+    } })
+    const reply = (await gateway.next()).result as { isError?: boolean; content: Array<{ text: string }> }
+    expect(reply.isError).toBe(true)
+    expect(reply.content[0]!.text).toContain('outside the certificate')
+    expect(new ApprovalStore(home).pending()).toEqual([])
+    expect(callLog(env)).toEqual([])
+    expect(await gateway.stop()).toBe(0)
+  })
+
+  it('cancels a held call without forwarding it after a late approval', async () => {
+    const policy = basePolicy()
+    policy.mode = 'interactive'
+    policy.profile = { effects: ['read'], resources: { paths: [], hosts: [] } }
+    const env = withCallLog()
+    const home = mkdtempSync(join(tmpdir(), 'cordon-mcp-home-'))
+    const gateway = start(policy, env, home, 500)
+    gateway.send({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: {
+      name: 'update_price', arguments: { nmId: '99887766', price: 1 },
+    } })
+    const approvals = new ApprovalStore(home)
+    const waiting = approvals.pending()
+    expect(waiting).toHaveLength(1)
+    gateway.send({ jsonrpc: '2.0', method: 'notifications/cancelled', params: { requestId: 1 } })
+    expect(approvals.approve(waiting[0]!.id)).toBeNull()
+    await new Promise((resolve) => setTimeout(resolve, 60))
+    expect(gateway.queued()).toBe(0)
+    expect(callLog(env)).toEqual([])
+    expect(await gateway.stop()).toBe(0)
+  })
+
+  it('retires a held question when the MCP host disconnects', async () => {
+    const policy = basePolicy()
+    policy.mode = 'interactive'
+    policy.profile = { effects: ['read'], resources: { paths: [], hosts: [] } }
+    const home = mkdtempSync(join(tmpdir(), 'cordon-mcp-home-'))
+    const gateway = start(policy, {}, home, 500)
+    gateway.send({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: {
+      name: 'update_price', arguments: { nmId: '99887766', price: 1 },
+    } })
+    const approvals = new ApprovalStore(home)
+    const waiting = approvals.pending()
+    expect(waiting).toHaveLength(1)
+    expect(await gateway.stop()).toBe(0)
+    expect(approvals.approve(waiting[0]!.id)).toBeNull()
+  })
+
+  it('rechecks changed context before forwarding a held call', async () => {
+    const policy = basePolicy()
+    policy.mode = 'interactive'
+    const env = withCallLog()
+    const home = mkdtempSync(join(tmpdir(), 'cordon-mcp-home-'))
+    const gateway = start(policy, env, home, 250)
+    gateway.send({ jsonrpc: '2.0', id: 1, method: 'tools/list' })
+    await gateway.next()
+    gateway.send({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: {
+      name: 'update_price', arguments: { nmId: '99887766', price: 1 },
+    } })
+    const approvals = new ApprovalStore(home)
+    const waiting = approvals.pending()
+    expect(waiting).toHaveLength(1)
+    gateway.send({ jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'poisoned_page', arguments: {} } })
+    await gateway.next()
+    expect(approvals.approve(waiting[0]!.id)).not.toBeNull()
+    const reply = (await gateway.next()).result as { isError?: boolean; content: Array<{ text: string }> }
+    expect(reply.isError).toBe(true)
+    expect(reply.content[0]!.text).toContain('retry the identical call')
+    gateway.send({ jsonrpc: '2.0', id: 4, method: 'tools/call', params: {
+      name: 'update_price', arguments: { nmId: '99887766', price: 1 },
+    } })
+    const retried = (await gateway.next()).result as { isError?: boolean; content: Array<{ text: string }> }
+    expect(retried.isError).toBe(true)
+    expect(retried.content[0]!.text).toContain('approval wait timed out')
+    expect(callLog(env)).not.toContain('update_price')
+    expect(await gateway.stop()).toBe(0)
   })
 
   it('lets the call through when the task in the policy names the destination', async () => {

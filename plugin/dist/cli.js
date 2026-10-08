@@ -7367,7 +7367,7 @@ var require_dist = __commonJS({
 });
 
 // src/cli.ts
-import { accessSync as accessSync4, appendFileSync as appendFileSync2, constants as constants4, existsSync as existsSync2, mkdtempSync, readdirSync as readdirSync8, readFileSync as readFileSync7, realpathSync as realpathSync3, renameSync as renameSync6, rmSync as rmSync6, writeFileSync as writeFileSync7 } from "node:fs";
+import { accessSync as accessSync4, appendFileSync as appendFileSync2, constants as constants4, existsSync as existsSync3, mkdtempSync, readdirSync as readdirSync8, readFileSync as readFileSync7, realpathSync as realpathSync3, renameSync as renameSync6, rmSync as rmSync6, writeFileSync as writeFileSync7 } from "node:fs";
 import { homedir as homedir6, tmpdir, userInfo } from "node:os";
 import { dirname as dirname4, join as join15 } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -12505,6 +12505,13 @@ ${nonce}`, { mode: 384 });
       }
     }
   }
+  /** Retires a held question when its host timed out or cancelled the call. */
+  cancel(id) {
+    const request = this.read(checked(id));
+    if (request === null) return null;
+    this.retire(id);
+    return request;
+  }
   /** The requests still waiting, for `cordon approve` with no id. */
   pending() {
     let names2;
@@ -13917,9 +13924,23 @@ var Cordon = class {
     return {
       kind: "deny",
       rule: decision.rule,
+      approvalId: id,
       reason: `${decision.reason}. Nobody is here to ask, so the call is refused; the owner can allow this exact call once with "cordon approve ${id}", and retrying it unchanged then goes through`,
       ...decision.source === void 0 ? {} : { source: decision.source }
     };
+  }
+  /** A host no longer waits for this exact question; a late yes must not release another call. */
+  cancelUnattendedApproval(id, reason) {
+    const request = new ApprovalStore(this.cordonHome).cancel(id);
+    if (request === null) return;
+    this.notifier.notify({
+      at: (/* @__PURE__ */ new Date()).toISOString(),
+      decision: "approval-void",
+      tool: request.tool,
+      reason: `the question ${id} was cancelled: ${reason}`,
+      source: null,
+      id
+    });
   }
   /**
    * Feeds the task text from the policy as a source of user atoms.
@@ -15494,7 +15515,7 @@ function runHook5(stdin, home = cordonHome()) {
 // src/adapters/mcp/gateway.ts
 import { spawn } from "node:child_process";
 import { createHash as createHash7, randomBytes as randomBytes5 } from "node:crypto";
-import { accessSync as accessSync3, constants as constants3 } from "node:fs";
+import { accessSync as accessSync3, constants as constants3, existsSync as existsSync2 } from "node:fs";
 import { join as join12 } from "node:path";
 import { createInterface } from "node:readline";
 
@@ -15544,9 +15565,20 @@ function runGateway(options) {
   return new Promise((resolve4) => {
     let settled = false;
     let upstream = null;
+    const reviewTimers = /* @__PURE__ */ new Map();
+    let cancelWaiting = null;
     const finish = (code, reason) => {
       if (settled) return;
       settled = true;
+      for (const { timer, approvalId: approvalId2 } of reviewTimers.values()) {
+        clearInterval(timer);
+        try {
+          cancelWaiting?.(approvalId2, "the MCP gateway stopped before the owner answered");
+        } catch (error) {
+          log(`could not retire held approval ${approvalId2}: ${error.message}`);
+        }
+      }
+      reviewTimers.clear();
       if (reason !== void 0) log(reason);
       if (upstream !== null && upstream.exitCode === null && !upstream.killed) upstream.kill();
       resolve4(code);
@@ -15557,6 +15589,11 @@ function runGateway(options) {
       ensureUsableHome3(options.cordonHome);
     } catch (error) {
       finish(1, `the home directory is not usable: ${error.message}`);
+      return;
+    }
+    const approvalWaitMs = options.approvalWaitMs ?? 0;
+    if (!Number.isSafeInteger(approvalWaitMs) || approvalWaitMs < 0 || approvalWaitMs > APPROVAL_TTL_MS) {
+      finish(1, "approvalWaitMs must be an integer from 0 to the one-hour approval lifetime");
       return;
     }
     let cordon;
@@ -15572,6 +15609,7 @@ function runGateway(options) {
       finish(1, `the session state is broken: ${error.message}`);
       return;
     }
+    cancelWaiting = (id, reason) => cordon.cancelUnattendedApproval(id, reason);
     if (typeof options.policy.task === "string" && options.policy.task !== "") {
       cordon.declareTask(options.policy.task);
     }
@@ -15605,11 +15643,58 @@ function runGateway(options) {
         return;
       }
       if (message.type !== "request") {
+        if (message.type === "notification" && message.method === "notifications/cancelled") {
+          const requestId = asRecord(message.params)?.["requestId"];
+          if (typeof requestId === "string" || typeof requestId === "number") {
+            const key = pendingKey(requestId);
+            const held = reviewTimers.get(key);
+            if (held !== void 0) {
+              clearInterval(held.timer);
+              reviewTimers.delete(key);
+              cordon.cancelUnattendedApproval(held.approvalId, "the host cancelled its MCP request");
+              return;
+            }
+          }
+        }
         sendUpstream(message.value);
         return;
       }
       if (message.method === "tools/call") {
-        gateCall(message, cordon, options.policy, pending, sendToHost, sendUpstream);
+        gateCall(
+          message,
+          cordon,
+          options.policy,
+          pending,
+          sendToHost,
+          sendUpstream,
+          approvalWaitMs === 0 ? void 0 : (approvalId2, reason) => {
+            const key = pendingKey(message.id);
+            if (reviewTimers.has(key)) throw new Error(`a second review is waiting under request ${key}`);
+            const approvals = new ApprovalStore(options.cordonHome);
+            const deadline = Date.now() + approvalWaitMs;
+            const timer = setInterval(() => {
+              try {
+                if (Date.now() >= deadline) {
+                  clearInterval(timer);
+                  reviewTimers.delete(key);
+                  cordon.cancelUnattendedApproval(approvalId2, "the owner did not approve before the wait ended");
+                  sendToHost(toolError(message.id, `Cordon approval wait timed out for ${message.method}: ${reason}`));
+                  return;
+                }
+                if (!existsSync2(approvals.approvedPath(approvalId2))) return;
+                clearInterval(timer);
+                reviewTimers.delete(key);
+                sendToHost(toolError(
+                  message.id,
+                  `Cordon recorded owner approval ${approvalId2}; retry the identical call once. The retry is checked again before any tool execution.`
+                ));
+              } catch (error) {
+                finish(1, `approval wait failed: ${error.message}`);
+              }
+            }, Math.min(25, approvalWaitMs));
+            reviewTimers.set(key, { timer, approvalId: approvalId2 });
+          }
+        );
         return;
       }
       const entry = { method: message.method };
@@ -15681,12 +15766,16 @@ function runGateway(options) {
     });
   });
 }
-function gateCall(message, cordon, policy, pending, sendToHost, sendUpstream) {
+function gateCall(message, cordon, policy, pending, sendToHost, sendUpstream, waitForApproval) {
   const params = asRecord(message.params);
   const name = typeof params?.["name"] === "string" ? params["name"] : "";
   const call = { tool: name, args: asRecord(params?.["arguments"]) ?? {} };
   const decision = cordon.gateUnattended(call);
   if (decision.kind === "deny" || decision.kind === "ask") {
+    if (decision.kind === "deny" && decision.approvalId !== void 0 && waitForApproval !== void 0) {
+      waitForApproval(decision.approvalId, decision.reason);
+      return;
+    }
     sendToHost(toolError(message.id, `Cordon refused the call to ${name || "(no tool named)"}: ${decision.reason}`));
     return;
   }
@@ -16485,7 +16574,7 @@ notify:
 }
 
 // src/cli.ts
-var USAGE = "usage: cordon scan <file|-> [--json] | cordon hook [--harness claude-code|gemini|codex|kimi|deepseek] | cordon mcp -- <server command...> | cordon mcp approve -- <server command...> | cordon doctor | cordon init [--profile locked|research|documents|coding|service] [--force] | cordon log [--last N] [--json] | cordon approve [id [--read] [--as name]] | cordon policy check|explain [file] | cordon policy apply <file> [--accept-warnings] [--as name] | cordon audit [dir] [--json|--sarif] [--fail-on high|medium|low]";
+var USAGE = "usage: cordon scan <file|-> [--json] | cordon hook [--harness claude-code|gemini|codex|kimi|deepseek] | cordon mcp [--wait-for-approval-ms N] -- <server command...> | cordon mcp approve -- <server command...> | cordon doctor | cordon init [--profile locked|research|documents|coding|service] [--force] | cordon log [--last N] [--json] | cordon approve [id [--read] [--as name]] | cordon policy check|explain [file] | cordon policy apply <file> [--accept-warnings] [--as name] | cordon audit [dir] [--json|--sarif] [--fail-on high|medium|low]";
 var HARNESSES = /* @__PURE__ */ new Map([
   ["claude-code", runHook],
   ["gemini", runHook2],
@@ -16775,7 +16864,7 @@ function doctor(home = cordonHome()) {
     );
   }
   return {
-    policySource: existsSync2(path) ? path : "default",
+    policySource: existsSync3(path) ? path : "default",
     mode: policy.mode,
     effects: [...policy.profile.effects],
     warnings,
@@ -16865,6 +16954,23 @@ ${USAGE}
 `);
     return 2;
   }
+  const flags = args.slice(0, at);
+  let approvalWaitMs = 0;
+  if (flags.length > 0) {
+    if (flags.length !== 2 || flags[0] !== "--wait-for-approval-ms" || !/^[1-9][0-9]*$/u.test(flags[1] ?? "")) {
+      process.stderr.write(`mcp accepts only --wait-for-approval-ms N before --
+${USAGE}
+`);
+      return 2;
+    }
+    approvalWaitMs = Number(flags[1]);
+    if (!Number.isSafeInteger(approvalWaitMs) || approvalWaitMs > APPROVAL_TTL_MS) {
+      process.stderr.write(`--wait-for-approval-ms must be at most ${APPROVAL_TTL_MS}
+${USAGE}
+`);
+      return 2;
+    }
+  }
   const home = cordonHome();
   let policy;
   try {
@@ -16874,7 +16980,7 @@ ${USAGE}
 `);
     return 1;
   }
-  return runGateway({ command, policy, cordonHome: home, policyFile: join15(home, "policy.yaml") });
+  return runGateway({ command, policy, cordonHome: home, policyFile: join15(home, "policy.yaml"), approvalWaitMs });
 }
 function init(args) {
   const at = args.indexOf("--profile");
@@ -16887,7 +16993,7 @@ ${USAGE}
   }
   const home = cordonHome();
   const path = join15(home, "policy.yaml");
-  if (existsSync2(path) && !args.includes("--force")) {
+  if (existsSync3(path) && !args.includes("--force")) {
     process.stdout.write(`${path} already exists; nothing was written. Pass --force to replace it
 `);
     return 1;

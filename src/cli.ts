@@ -22,11 +22,11 @@ import { labelled, type NotifyEvent } from './notify/notifier.js'
 import { RULES, type Rule } from './gate/rules.js'
 import { PROFILES, renderPolicy } from './policy/templates.js'
 import { sanitize } from './sanitize/index.js'
-import { ApprovalStore, MAX_SHOWN_ARGS, type ShownRequest } from './session/approvals.js'
+import { APPROVAL_TTL_MS, ApprovalStore, MAX_SHOWN_ARGS, type ShownRequest } from './session/approvals.js'
 import { MemoryLedger } from './session/memory.js'
 
 const USAGE =
-  'usage: cordon scan <file|-> [--json] | cordon hook [--harness claude-code|gemini|codex|kimi|deepseek] | cordon mcp -- <server command...> | cordon mcp approve -- <server command...> | cordon doctor | cordon init [--profile locked|research|documents|coding|service] [--force] | cordon log [--last N] [--json] | cordon approve [id [--read] [--as name]] | cordon policy check|explain [file] | cordon policy apply <file> [--accept-warnings] [--as name] | cordon audit [dir] [--json|--sarif] [--fail-on high|medium|low]'
+  'usage: cordon scan <file|-> [--json] | cordon hook [--harness claude-code|gemini|codex|kimi|deepseek] | cordon mcp [--wait-for-approval-ms N] -- <server command...> | cordon mcp approve -- <server command...> | cordon doctor | cordon init [--profile locked|research|documents|coding|service] [--force] | cordon log [--last N] [--json] | cordon approve [id [--read] [--as name]] | cordon policy check|explain [file] | cordon policy apply <file> [--accept-warnings] [--as name] | cordon audit [dir] [--json|--sarif] [--fail-on high|medium|low]'
 
 /**
  * Event parsing depends on the harness, so the harness is named explicitly.
@@ -622,6 +622,19 @@ function mcp(args: string[]): Promise<number> | number {
     process.stderr.write(`mcp needs the upstream server command after --\n${USAGE}\n`)
     return 2
   }
+  const flags = args.slice(0, at)
+  let approvalWaitMs = 0
+  if (flags.length > 0) {
+    if (flags.length !== 2 || flags[0] !== '--wait-for-approval-ms' || !/^[1-9][0-9]*$/u.test(flags[1] ?? '')) {
+      process.stderr.write(`mcp accepts only --wait-for-approval-ms N before --\n${USAGE}\n`)
+      return 2
+    }
+    approvalWaitMs = Number(flags[1])
+    if (!Number.isSafeInteger(approvalWaitMs) || approvalWaitMs > APPROVAL_TTL_MS) {
+      process.stderr.write(`--wait-for-approval-ms must be at most ${APPROVAL_TTL_MS}\n${USAGE}\n`)
+      return 2
+    }
+  }
 
   const home = cordonHome()
   let policy
@@ -632,7 +645,7 @@ function mcp(args: string[]): Promise<number> | number {
     return 1
   }
 
-  return runGateway({ command, policy, cordonHome: home, policyFile: join(home, 'policy.yaml') })
+  return runGateway({ command, policy, cordonHome: home, policyFile: join(home, 'policy.yaml'), approvalWaitMs })
 }
 
 /**

@@ -94,7 +94,7 @@ In practice the mark is set before the first call. Tool descriptions are untrust
 
 ### A question with nobody to ask
 
-MCP and a LangChain agent loop carry no way to put a question in front of a person and resume. In interactive mode, a question becomes a refusal that names a one-time approval:
+MCP and a LangChain agent loop carry no built-in way to put a question in front of a person and resume. By default, an interactive question becomes a refusal that names a one-time approval:
 
 ```
 Cordon refused the call to update_price: … Nobody is here to ask, so the call is refused; the owner can allow
@@ -104,6 +104,18 @@ this exact call once with "cordon approve 3f9c0a12b7e4d651", and retrying it unc
 The owner sees what waits with `cordon approve`, the arguments of each call included, and allows one call with `cordon approve <id>`. The listing cuts arguments longer than 4000 characters; the request file it names keeps every one of them, and such a call is approved only with `cordon approve <id> --read`, after the owner has read the file. Arguments are listed with their keys sorted, so without this a long `body` would push the `to` past the cut, and the owner would approve a recipient they never saw. The journal carries the same id. The id is bound to the session, the tool and every argument, so an approval cannot be spent on a different recipient or a changed amount. It is used once, and a request or an approval older than an hour is void. The approval also holds only in the context it was given in, and the id names that context, not the call alone: the rule that asked, how much untrusted content the session had read and what it was, the user's turn, the certificate and the policy. After another untrusted result, readable or not, after a new message from the user, or under a changed policy, the same call is a new question under a new id; the earlier one is void with any approval given to it, and the journal says `approval-void` and what changed. So the owner approves exactly the question they were shown: an id they typed cannot come to mean a question asked after they read it. `cordon approve` shows what the session had read when it asked. Autonomous mode offers no approval: there a refusal means the policy, `destinations` or `task`, is what should change.
 
 Approve while the gateway process is still running, then retry the identical call in that process. Each gateway run receives a fresh random session ID. If an MCP host stops the gateway when an agent turn finishes, approving its pending request later and starting another host process cannot release the old call: the new gateway asks under a new ID. A scripted gateway restart test verifies this refusal even when the policy, read and call arguments are identical. A separate regression starts the gateway twice in one process to reproduce PID reuse: the later run must also refuse the old approval. The old approval stays on disk until it expires, but cannot be spent by the new session. This transport has no supported pause-and-resume handoff across gateway restarts.
+
+### Wait for the owner in the same gateway process
+
+For an attended task, the gateway can hold the original MCP call while the owner reviews it:
+
+```bash
+cordon mcp --wait-for-approval-ms 30000 -- <server command...>
+```
+
+This is opt-in; without the flag the gateway returns the refusal above. In wait mode, run `cordon approve` in another terminal to see the pending call and its complete arguments, then `cordon approve <id>` (or `--read` for a long request). The gateway tells the agent that the owner approved and asks it to **retry the identical call once**. The held call itself never reaches the upstream server. The retry goes through Cordon's full decision again: a changed policy or another untrusted result can void the approval. If Cordon's wait expires, the host sends MCP `notifications/cancelled`, or the gateway disconnects, the pending request is retired and nothing is forwarded.
+
+Set the MCP host's tool timeout **longer** than Cordon's wait; the retry is a separate tool call. The measured Codex CLI run used a 30-second Cordon wait and a 45-second MCP tool timeout. A host can time out without sending cancellation: in a live control with a one-second host timeout, an earlier design that forwarded the held call after approval sent an email even though Codex reported failure. The shipped wait mode only sends a retry instruction, so that same delayed approval sent no email. An agent that does not retry cannot complete the task. The wait holds one live process; it does not make an old approval valid after a restart. The owner must have a separate channel to see the request and run `cordon approve`, and the agent must not have access to that channel or CLI.
 
 The approval is the owner's word, and an agent with a shell could try to say it for them. The gate refuses a command that runs `cordon approve`, `cordon mcp approve`, `cordon init`, `cordon policy apply` or `cordon hook`, quotes and backslashes removed first, and an exec after an untrusted read escalates anyway. The check is still crude, the same as self-protection's: a command assembled from variables, or `node -e` calling Cordon's code directly, gets past it before any untrusted read. The boundary that holds is the operating system's: an agent that runs as the same OS user as the owner, with `exec`, can write whatever the owner can. Where that matters, run the agent as a different user, or grant it no shell; where the agent has no shell, it has no way to approve at all.
 

@@ -169,6 +169,27 @@ describe('cordon mcp approve', () => {
   })
 })
 
+describe('cordon mcp approval wait flag', () => {
+  beforeAll(() => {
+    ensureBuiltCli()
+  }, 60_000)
+
+  it('rejects a zero or malformed wait instead of silently starting the server', () => {
+    for (const value of ['0', '-1', '1.5', 'wrong']) {
+      const home = mkdtempSync(join(tmpdir(), 'cordon-mcp-cli-'))
+      const result = run(['mcp', '--wait-for-approval-ms', value, '--', process.execPath, '-e', ''], '', { CORDON_HOME: home })
+      expect(result.status).toBe(2)
+      expect(result.stderr).toContain('wait-for-approval-ms')
+    }
+  })
+
+  it('rejects unknown gateway flags', () => {
+    const home = mkdtempSync(join(tmpdir(), 'cordon-mcp-cli-'))
+    const result = run(['mcp', '--unknown', '--', process.execPath, '-e', ''], '', { CORDON_HOME: home })
+    expect(result.status).toBe(2)
+  })
+})
+
 describe('cordon audit', () => {
   beforeAll(() => {
     ensureBuiltCli()
@@ -685,4 +706,3 @@ describe('records of who allowed what', () => {
     expect(readFileSync(join(home, 'policy.yaml'), 'utf8')).toBe(before)
   })
 })
-

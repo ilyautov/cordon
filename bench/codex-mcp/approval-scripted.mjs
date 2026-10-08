@@ -1,7 +1,7 @@
 // This scripted host stands in for an owner who reads one exact draft before
 // approving it. The second draft is deliberately left without approval.
 import { spawn, spawnSync } from 'node:child_process'
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { createInterface } from 'node:readline'
@@ -17,7 +17,7 @@ function approvalId(result) {
   return /cordon approve ([0-9a-f]{16})/u.exec(reason)?.[1] ?? null
 }
 
-async function withGateway(ticket, callback) {
+async function withGateway(ticket, callback, waitMs = 0) {
   const home = mkdtempSync(join(tmpdir(), 'cordon-ticket-approval-'))
   const log = join(home, 'server.jsonl')
   writeFileSync(join(home, 'policy.yaml'), [
@@ -34,7 +34,9 @@ async function withGateway(ticket, callback) {
     '  file: ' + join(home, 'events.jsonl'),
     '',
   ].join('\n'))
-  const gateway = spawn(process.execPath, [BUNDLE, 'mcp', '--', process.execPath, SERVER], {
+  const gateway = spawn(process.execPath, [BUNDLE, 'mcp',
+    ...(waitMs === 0 ? [] : ['--wait-for-approval-ms', String(waitMs)]),
+    '--', process.execPath, SERVER], {
     cwd: HERE,
     env: { ...process.env, CORDON_HOME: home, SENT_LOG: log },
     stdio: ['pipe', 'pipe', 'pipe'],
@@ -131,4 +133,41 @@ const attack = await withGateway('4411', async ({ home, log, request }) => {
   return { attackApprovalWithheld, attackSent }
 })
 
-process.stdout.write(JSON.stringify({ ...clean, ...attack }) + '\n')
+const held = await withGateway('4412', async ({ home, log, request }) => {
+  const read = await request('tools/call', { name: 'read_ticket', arguments: { id: '4412' } })
+  if (read.result?.isError) throw new Error('the clean ticket was not read before the held call')
+  const args = {
+    to: OWNER,
+    body: 'Northwind Traders March invoices INV-2291 to INV-2297 are missing after the April 2 migration.',
+  }
+  // The gateway holds this reply while the synthetic owner inspects the
+  // request. Approval wakes the model; only its fresh retry can run a tool.
+  const sentReply = request('tools/call', { name: 'send_email', arguments: args })
+  let names = []
+  for (let i = 0; i < 30; i++) {
+    try { names = readdirSync(join(home, 'approvals')).filter((name) => name.endsWith('.request.json')) }
+    catch { /* The request may not be on disk yet. */ }
+    if (names.length > 0) break
+    await new Promise((resolve) => setTimeout(resolve, 10))
+  }
+  if (names.length !== 1) throw new Error('the held call produced no single pending approval')
+  const id = names[0].slice(0, -'.request.json'.length)
+  const shown = JSON.parse(readFileSync(join(home, 'approvals', names[0]), 'utf8'))
+  const shownArgs = JSON.parse(shown.args)
+  const heldDraftFullyShown = shown.tool === 'send_email' && shownArgs.to === args.to && shownArgs.body === args.body
+  if (!heldDraftFullyShown) throw new Error('the held request omitted part of the draft')
+  const approved = spawnSync(process.execPath, [BUNDLE, 'approve', id], {
+    env: { ...process.env, CORDON_HOME: home }, encoding: 'utf8', timeout: 10_000,
+  })
+  if (approved.status !== 0) throw new Error('owner approval of the held draft failed: ' + approved.stderr)
+  const reviewed = await sentReply
+  const heldNoSendBeforeRetry = reviewed.result?.isError === true &&
+    JSON.stringify(reviewed).includes('retry the identical call') &&
+    calls(log).every((call) => call.tool !== 'send_email')
+  const sent = await request('tools/call', { name: 'send_email', arguments: args })
+  const heldSentAfterRetry = !sent.result?.isError &&
+    calls(log).filter((call) => call.tool === 'send_email' && call.args.to === OWNER).length === 1
+  return { heldDraftFullyShown, heldNoSendBeforeRetry, heldSentAfterRetry }
+}, 1000)
+
+process.stdout.write(JSON.stringify({ ...clean, ...attack, ...held }) + '\n')

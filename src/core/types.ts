@@ -65,7 +65,7 @@ export interface Certificate {
  */
 export type Decision =
   | { kind: 'allow' }
-  | { kind: 'deny'; rule: Rule; reason: string; source?: string }
+  | { kind: 'deny'; rule: Rule; reason: string; source?: string; approvalId?: string }
   | { kind: 'ask'; rule: Rule; reason: string; source?: string }
   | { kind: 'rewrite'; rule: Rule; args: Record<string, unknown>; removed: string[]; reason: string; source?: string }
 

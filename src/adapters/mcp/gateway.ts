@@ -1,6 +1,6 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 import { createHash, randomBytes } from 'node:crypto'
-import { accessSync, constants } from 'node:fs'
+import { accessSync, constants, existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { createInterface } from 'node:readline'
 import type { Readable, Writable } from 'node:stream'
@@ -12,6 +12,7 @@ import type { Source, ToolCall } from '../../core/types.js'
 import type { Policy } from '../../policy/defaults.js'
 import { homeProblem, projectDir } from '../../policy/home.js'
 import { classifySource } from '../../provenance/trust.js'
+import { APPROVAL_TTL_MS, ApprovalStore } from '../../session/approvals.js'
 import { parseError, parseLine, pendingKey, toolError, type Message } from './jsonrpc.js'
 
 export interface GatewayOptions {
@@ -26,6 +27,8 @@ export interface GatewayOptions {
   hostOut?: Writable
   /** Extra environment for the upstream process. Tests steer the fake server through it. */
   env?: Record<string, string>
+  /** Opt-in time to hold an exact call for owner approval; zero replies with a refusal. */
+  approvalWaitMs?: number
   /**
    * The loud channel. stderr by default: an MCP host logs a server's stderr,
    * so a line written here reaches the human through the host's own UI.
@@ -63,6 +66,8 @@ export function runGateway(options: GatewayOptions): Promise<number> {
   return new Promise((resolve) => {
     let settled = false
     let upstream: ChildProcess | null = null
+    const reviewTimers = new Map<string, { timer: NodeJS.Timeout; approvalId: string }>()
+    let cancelWaiting: ((id: string, reason: string) => void) | null = null
 
     // Every exit runs through here, exactly once. Killing the upstream on the
     // way out matters: a host that went away leaves no reader for the
@@ -71,6 +76,17 @@ export function runGateway(options: GatewayOptions): Promise<number> {
     const finish = (code: number, reason?: string): void => {
       if (settled) return
       settled = true
+      for (const { timer, approvalId } of reviewTimers.values()) {
+        clearInterval(timer)
+        try {
+          cancelWaiting?.(approvalId, 'the MCP gateway stopped before the owner answered')
+        } catch (error) {
+          // The host has already lost this gateway. Never resume a held call;
+          // report the failed cleanup on the loud channel.
+          log(`could not retire held approval ${approvalId}: ${(error as Error).message}`)
+        }
+      }
+      reviewTimers.clear()
       if (reason !== undefined) log(reason)
       if (upstream !== null && upstream.exitCode === null && !upstream.killed) upstream.kill()
       resolve(code)
@@ -92,6 +108,12 @@ export function runGateway(options: GatewayOptions): Promise<number> {
       return
     }
 
+    const approvalWaitMs = options.approvalWaitMs ?? 0
+    if (!Number.isSafeInteger(approvalWaitMs) || approvalWaitMs < 0 || approvalWaitMs > APPROVAL_TTL_MS) {
+      finish(1, 'approvalWaitMs must be an integer from 0 to the one-hour approval lifetime')
+      return
+    }
+
     let cordon: Cordon
     try {
       // A PID can be reused within an approval's lifetime. Each gateway run
@@ -109,6 +131,7 @@ export function runGateway(options: GatewayOptions): Promise<number> {
       finish(1, `the session state is broken: ${(error as Error).message}`)
       return
     }
+    cancelWaiting = (id, reason) => cordon.cancelUnattendedApproval(id, reason)
 
     // The certificate is the profile for the whole run — there is no user
     // message to widen or narrow it. What the policy can still carry is the
@@ -160,6 +183,19 @@ export function runGateway(options: GatewayOptions): Promise<number> {
       }
 
       if (message.type !== 'request') {
+        if (message.type === 'notification' && message.method === 'notifications/cancelled') {
+          const requestId = asRecord(message.params)?.['requestId']
+          if (typeof requestId === 'string' || typeof requestId === 'number') {
+            const key = pendingKey(requestId)
+            const held = reviewTimers.get(key)
+            if (held !== undefined) {
+              clearInterval(held.timer)
+              reviewTimers.delete(key)
+              cordon.cancelUnattendedApproval(held.approvalId, 'the host cancelled its MCP request')
+              return
+            }
+          }
+        }
         // Notifications and the host's answers to the upstream's own
         // requests (sampling, roots) carry nothing the gateway decides on.
         sendUpstream(message.value)
@@ -167,7 +203,38 @@ export function runGateway(options: GatewayOptions): Promise<number> {
       }
 
       if (message.method === 'tools/call') {
-        gateCall(message, cordon, options.policy, pending, sendToHost, sendUpstream)
+        gateCall(message, cordon, options.policy, pending, sendToHost, sendUpstream,
+          approvalWaitMs === 0 ? undefined : (approvalId, reason) => {
+            const key = pendingKey(message.id)
+            if (reviewTimers.has(key)) throw new Error(`a second review is waiting under request ${key}`)
+            const approvals = new ApprovalStore(options.cordonHome)
+            const deadline = Date.now() + approvalWaitMs
+            const timer = setInterval(() => {
+              try {
+                if (Date.now() >= deadline) {
+                  clearInterval(timer)
+                  reviewTimers.delete(key)
+                  cordon.cancelUnattendedApproval(approvalId, 'the owner did not approve before the wait ended')
+                  sendToHost(toolError(message.id, `Cordon approval wait timed out for ${message.method}: ${reason}`))
+                  return
+                }
+                if (!existsSync(approvals.approvedPath(approvalId))) return
+                clearInterval(timer)
+                reviewTimers.delete(key)
+                // The host may have timed out without cancelling the request.
+                // A late approval can only tell the model to retry; it cannot
+                // execute a side effect after the host stopped waiting. The
+                // retry goes through the core again under its current context.
+                sendToHost(toolError(message.id,
+                  `Cordon recorded owner approval ${approvalId}; retry the identical call once. ` +
+                  'The retry is checked again before any tool execution.'))
+              } catch (error) {
+                // A broken approval check cannot forward the held call.
+                finish(1, `approval wait failed: ${(error as Error).message}`)
+              }
+            }, Math.min(25, approvalWaitMs))
+            reviewTimers.set(key, { timer, approvalId })
+          })
         return
       }
 
@@ -274,6 +341,7 @@ function gateCall(
   pending: Map<string, Pending>,
   sendToHost: (message: Record<string, unknown>) => void,
   sendUpstream: (message: Record<string, unknown>) => void,
+  waitForApproval?: (id: string, reason: string) => void,
 ): void {
   const params = asRecord(message.params)
   const name = typeof params?.['name'] === 'string' ? params['name'] : ''
@@ -281,6 +349,10 @@ function gateCall(
 
   const decision = cordon.gateUnattended(call)
   if (decision.kind === 'deny' || decision.kind === 'ask') {
+    if (decision.kind === 'deny' && decision.approvalId !== undefined && waitForApproval !== undefined) {
+      waitForApproval(decision.approvalId, decision.reason)
+      return
+    }
     sendToHost(toolError(message.id, `Cordon refused the call to ${name || '(no tool named)'}: ${decision.reason}`))
     return
   }

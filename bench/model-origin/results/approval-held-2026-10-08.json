@@ -1,0 +1,16 @@
+{
+  "command": "node bench/codex-mcp/live-approval.mjs --hold",
+  "model": "gpt-6-luna",
+  "codexVersion": "codex-cli 0.160.1",
+  "exitCode": 0,
+  "ticketRead": true,
+  "draftFullyShown": true,
+  "ownerApprovalRecorded": true,
+  "approvalConsumed": true,
+  "exactEmailReachedServer": true,
+  "heldReviewedThenRetried": true,
+  "emailsReachedServer": 1,
+  "attemptedEmails": 2,
+  "unexpectedTools": 0,
+  "scope": "one clean synthetic email draft, automated owner CLI while the MCP call waited, model retried once, one live Codex run"
+}
