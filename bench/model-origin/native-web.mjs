@@ -1,5 +1,5 @@
-// Three disposable Codex runs pin the real webrun hook name and its effect:
-// no hook, hook without network egress, and hook with that effect granted.
+// Four disposable Codex runs pin the real webrun hook name and its effect:
+// no hook, no network egress, granted egress, and a synthetic result block.
 import { spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
@@ -18,7 +18,7 @@ const hook = (matcher) => '[{' + (matcher === null ? '' : 'matcher=' + JSON.stri
   'hooks=[{type="command",command=' + hookCommand + ',timeout=5}]}]'
 const lines = (path) => existsSync(path) ? readFileSync(path, 'utf8').split('\n').filter(Boolean).map(JSON.parse) : []
 
-function run(name, protectedRun, grantEgress) {
+function run(name, protectedRun, grantEgress, postBlock = false) {
   const work = join(root, name + '-work')
   const home = join(root, name + '-cordon-home')
   const codexHome = join(root, name + '-codex-home')
@@ -54,7 +54,8 @@ function run(name, protectedRun, grantEgress) {
     symlinkSync(authSource, authLink)
     result = spawnSync('codex', args, {
       cwd: work,
-      env: { ...process.env, CODEX_HOME: codexHome, CORDON_HOME: home, CORDON_NATIVE_WEB_LOG: hookLog },
+      env: { ...process.env, CODEX_HOME: codexHome, CORDON_HOME: home,
+        CORDON_NATIVE_WEB_LOG: hookLog, CORDON_NATIVE_WEB_POST_BLOCK: postBlock ? '1' : '0' },
       encoding: 'utf8', timeout: 120_000, maxBuffer: 8 * 1024 * 1024,
     })
   } finally {
@@ -70,9 +71,14 @@ function run(name, protectedRun, grantEgress) {
   return {
     name, exitCode: result.status, error: result.error?.message ?? null,
     searchCompleted: events.some((event) => event.type === 'item.completed' && event.item?.type === 'web_search'),
+    blockNoticeInMessage: events.some((event) => event.item?.type === 'agent_message' &&
+      event.item.text?.toLowerCase().includes('benchmark hook')),
+    routerSawBlockMarker: (result.stderr ?? '').includes('CORDON_WEB_POST_BLOCK_CANARY'),
     nativeWriteOrExec: events.some((event) => ['file_change', 'command_execution'].includes(event.item?.type)),
-    hooks: calls.map(({ kind, tool, responsePresent, responseType, responseItems, delegateStatus, delegateDecision, delegateValid }) =>
-      ({ kind, tool, responsePresent, responseType, responseItems, delegateStatus, delegateDecision, delegateValid })),
+    hooks: calls.map(({ kind, tool, responsePresent, responseType, responseItems, delegateStatus,
+      delegateDecision, delegateValid, decisionOrigin }) =>
+      ({ kind, tool, responsePresent, responseType, responseItems, delegateStatus,
+        delegateDecision, delegateValid, decisionOrigin })),
     denials: journal.filter((event) => event.decision === 'deny').map(({ tool, rule }) => ({ tool, rule })),
     stderrTail: (result.stderr ?? '').slice(-600),
   }
@@ -81,6 +87,7 @@ function run(name, protectedRun, grantEgress) {
 const baseline = run('baseline', false, false)
 const noEgress = run('no-egress', true, false)
 const egress = run('egress', true, true)
+const postBlock = run('post-block', true, true, true)
 const checks = {
   baselineSearchCompleted: baseline.exitCode === 0 && baseline.searchCompleted,
   noEgressHookDenied: noEgress.exitCode === 0 &&
@@ -94,8 +101,14 @@ const checks = {
     egress.hooks.some((event) => event.kind === 'PostToolUse' && event.tool === 'webrun' &&
       event.responsePresent && event.responseType === 'array' && event.delegateStatus === 0 && event.delegateValid),
   egressSearchCompleted: egress.searchCompleted && egress.denials.length === 0,
-  noNativeWriteOrExec: [baseline, noEgress, egress].every((row) => !row.nativeWriteOrExec),
+  postBlockReachedModel: postBlock.exitCode === 0 && postBlock.blockNoticeInMessage &&
+    !egress.blockNoticeInMessage &&
+    postBlock.routerSawBlockMarker &&
+    postBlock.hooks.some((event) => event.kind === 'PostToolUse' && event.tool === 'webrun' &&
+      event.responsePresent && event.delegateDecision === 'block' && event.decisionOrigin === 'benchmark'),
+  postBlockSearchAlreadyRan: postBlock.searchCompleted,
+  noNativeWriteOrExec: [baseline, noEgress, egress, postBlock].every((row) => !row.nativeWriteOrExec),
 }
 process.stdout.write(JSON.stringify({ root, codexVersion: version, model: 'gpt-6-luna', checks,
-  runs: [baseline, noEgress, egress], ...checks }) + '\n')
+  runs: [baseline, noEgress, egress, postBlock], ...checks }) + '\n')
 if (!Object.values(checks).every(Boolean)) process.exitCode = 1

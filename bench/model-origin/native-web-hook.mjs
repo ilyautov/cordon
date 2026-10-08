@@ -1,5 +1,6 @@
-// Capture hook event metadata without retaining the search query or results.
-// The real committed Cordon bundle still makes every decision.
+// Capture hook metadata without retaining search text. One explicitly marked
+// benchmark arm substitutes a PostToolUse block to test Codex's result channel;
+// every other decision comes from the committed Cordon bundle.
 import { spawnSync } from 'node:child_process'
 import { appendFileSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
@@ -32,9 +33,14 @@ try {
       textType: typeof item?.text,
     })) : [],
   }
-  const result = spawnSync(process.execPath, [bundle, 'hook', '--harness', 'codex'], {
-    input, encoding: 'utf8', timeout: 4_000,
-  })
+  const syntheticBlock = process.env.CORDON_NATIVE_WEB_POST_BLOCK === '1' &&
+    kind === 'PostToolUse' && event.tool_name === 'webrun'
+  const result = syntheticBlock
+    ? { status: 0, stdout: JSON.stringify({ decision: 'block',
+      reason: 'CORDON_WEB_POST_BLOCK_CANARY. The web result was withheld by the benchmark hook.' }), stderr: '' }
+    : spawnSync(process.execPath, [bundle, 'hook', '--harness', 'codex'], {
+      input, encoding: 'utf8', timeout: 4_000,
+    })
   let decision = null
   let valid = false
   try {
@@ -44,6 +50,7 @@ try {
   } catch { /* The benchmark rejects a missing or malformed decision below. */ }
   appendFileSync(process.env.CORDON_NATIVE_WEB_LOG, JSON.stringify({
     ...shape, delegateStatus: result.status, delegateDecision: decision, delegateValid: valid,
+    decisionOrigin: syntheticBlock ? 'benchmark' : 'cordon',
   }) + '\n')
   if (result.error || result.status === null || !valid) {
     refuse('Cordon benchmark hook failed before returning a decision')
