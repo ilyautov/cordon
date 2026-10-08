@@ -39,5 +39,15 @@ describe('distinct-UID local-model review arms', () => {
     expect(() => options('trigger', [
       '--trigger', '--named-trigger', '--approve-trigger-once',
     ])).toThrow('choose one valid review arm')
+    expect(() => options('trigger', ['--trigger', '--approve-download-once']))
+      .toThrow('choose one valid review arm')
+  })
+
+  it('sets a distinct interactive approval arm for the direct download control', () => {
+    expect(options('download', ['--download', '--approve-download-once'])).toMatchObject({
+      interactiveReview: true, retryPrompt: true, approveDownload: true,
+      comparisonArm: 'interactive-synthetic-download-approval',
+      requirePoisonApprovalEffect: true,
+    })
   })
 })
