@@ -301,7 +301,7 @@ describe('the MCP gateway', () => {
     }
   })
 
-  it.each(['FAKE_RESULT_STRING', 'FAKE_RESULT_UNKNOWN', 'FAKE_RESULT_EXTRA'])(
+  it.each(['FAKE_RESULT_STRING', 'FAKE_RESULT_UNKNOWN', 'FAKE_RESULT_EXTRA', 'FAKE_RESPONSE_EXTRA', 'FAKE_RESPONSE_EXTRA_VALID'])(
     'withholds unscanned MCP tool result shape %s', async (shape) => {
       const env = { ...withCallLog(), [shape]: '1' }
       const gateway = start(basePolicy(), env)
@@ -357,6 +357,28 @@ describe('the MCP gateway', () => {
       expect(result.isError).toBeUndefined()
       expect(result.content[0]!.text).toBe('ok')
       expect(result._meta.text).toBe('The public documentation describes the API.')
+    } finally {
+      await gateway.stop()
+    }
+  })
+
+  it('withholds a text block with an unscanned extra field', async () => {
+    const env = { ...withCallLog(), FAKE_TEXT_BLOCK_EXTRA: '1' }
+    const gateway = start(basePolicy(), env)
+    try {
+      gateway.send({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'poisoned_page', arguments: {} } })
+      const response = await gateway.next()
+      const result = response.result as { isError?: boolean; content: Array<{ text: string }> }
+      expect(result.isError).toBe(true)
+      expect(result.content[0]!.text).toContain('could not be scanned')
+      expect(JSON.stringify(response)).not.toContain(HIDDEN)
+
+      gateway.send({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: {
+        name: 'update_price', arguments: { nmId: '99887766', price: 1 },
+      } })
+      const update = (await gateway.next()).result as { isError?: boolean; content: Array<{ text: string }> }
+      expect(update.isError).toBe(true)
+      expect(callLog(env)).toEqual(['poisoned_page'])
     } finally {
       await gateway.stop()
     }
@@ -760,6 +782,32 @@ describe('the MCP gateway', () => {
     expect(messages[0]!.content.text).toContain(VISIBLE_FRAGMENT)
     expect(messages[0]!.content.text).not.toContain(HIDDEN)
     expect(await gateway.stop()).toBe(0)
+  })
+
+  it.each([
+    ['FAKE_RESOURCE_BAD', 'resources/read', { uri: 'https://shop.example/page' }],
+    ['FAKE_PROMPT_BAD', 'prompts/get', { name: 'greeting' }],
+  ] as const)('withholds malformed %s response before a later update', async (flag, method, params) => {
+    const env = { ...withCallLog(), [flag]: '1' }
+    const gateway = start(basePolicy(), env)
+    try {
+      gateway.send({ jsonrpc: '2.0', id: 1, method, params })
+      const response = await gateway.next()
+      const error = response.error as { code: number; message: string }
+      expect(error.code).toBe(-32000)
+      expect(error.message).toContain('withheld')
+      expect(JSON.stringify(response)).not.toContain(HIDDEN)
+
+      gateway.send({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: {
+        name: 'update_price', arguments: { nmId: '99887766', price: 1 },
+      } })
+      const update = (await gateway.next()).result as { isError?: boolean; content: Array<{ text: string }> }
+      expect(update.isError).toBe(true)
+      expect(update.content[0]!.text).toContain('could not be stripped')
+      expect(callLog(env)).toEqual([method])
+    } finally {
+      await gateway.stop()
+    }
   })
 
   it('dies loudly when the upstream sends a line that is not JSON', async () => {

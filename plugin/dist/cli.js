@@ -15873,20 +15873,22 @@ function withNotice(value, notice) {
   return { ...value, result: { ...result, content: [...content, { type: "text", text: notice }] } };
 }
 var TOOL_RESULT_KEYS = /* @__PURE__ */ new Set(["content", "structuredContent", "isError", "_meta"]);
+var RESPONSE_KEYS = /* @__PURE__ */ new Set(["jsonrpc", "id", "result"]);
 function observeToolResult(value, call, cordon, policy) {
   const source = classifySource({ kind: "tool", label: sourceLabel(call), tool: call.tool }, policy);
   const result = asRecord(value["result"]);
   if (result === null) return withholdUnreadableResult(value, call.tool, source, cordon);
   const texts = [];
   const content = result["content"];
-  if (!Array.isArray(content) || Object.keys(result).some((key) => !TOOL_RESULT_KEYS.has(key)) || result["isError"] !== void 0 && typeof result["isError"] !== "boolean") {
+  if (Object.keys(value).some((key) => !RESPONSE_KEYS.has(key)) || !Array.isArray(content) || Object.keys(result).some((key) => !TOOL_RESULT_KEYS.has(key)) || result["isError"] !== void 0 && typeof result["isError"] !== "boolean") {
     return withholdUnreadableResult(value, call.tool, source, cordon);
   }
-  for (const block of content) {
+  for (const [index, block] of content.entries()) {
     const entry = asRecord(block);
     if (entry !== null && entry["type"] === "text" && typeof entry["text"] === "string") {
-      observeInto(entry, "text", call.tool, source, cordon);
-      texts.push(entry["text"]);
+      const observed = observeReadableResult(entry, call.tool, source, cordon, texts);
+      if (observed === null) return withholdUnreadableResult(value, call.tool, source, cordon);
+      content[index] = observed.value;
     } else {
       cordon.markUnredacted();
     }
@@ -15894,51 +15896,59 @@ function observeToolResult(value, call, cordon, policy) {
   for (const field3 of ["structuredContent", "_meta"]) {
     const structured = result[field3];
     if (structured === void 0) continue;
-    const extracted = extractText("", structured);
-    if (!extracted.known || extracted.unseen) {
-      return withholdUnreadableResult(value, call.tool, source, cordon);
-    }
-    let changed2 = false;
-    let substitutable = true;
-    const cleaned = extracted.parts.map((part) => {
-      const envelope = cordon.observe(part.text, source, part.content ? "content" : "label");
-      if (envelope.text !== part.text) changed2 = true;
-      if (!envelope.substitute) substitutable = false;
-      if (part.content) texts.push(envelope.text);
-      return envelope.text;
-    });
-    cordon.observeLinks(extracted.links, source);
-    if (changed2) {
-      if (!substitutable) return withholdUnreadableResult(value, call.tool, source, cordon);
-      const next = replaceText("", structured, cleaned);
-      if (next === structured) return withholdUnreadableResult(value, call.tool, source, cordon);
-      result[field3] = next;
-    }
+    const observed = observeReadableResult(structured, call.tool, source, cordon, texts);
+    if (observed === null) return withholdUnreadableResult(value, call.tool, source, cordon);
+    result[field3] = observed.value;
   }
   cordon.recordLookup(call, texts);
   return value;
 }
+function observeReadableResult(value, tool, source, cordon, texts) {
+  const extracted = extractText("", value);
+  if (!extracted.known || extracted.unseen) return null;
+  let changed2 = false;
+  let substitutable = true;
+  const cleaned = extracted.parts.map((part) => {
+    const envelope = cordon.observe(part.text, source, part.content ? "content" : "label");
+    if (envelope.text !== part.text) changed2 = true;
+    if (!envelope.substitute) substitutable = false;
+    if (part.content) texts.push(envelope.text);
+    return envelope.text;
+  });
+  cordon.observeLinks(extracted.links, source);
+  if (!changed2) return { value };
+  if (!substitutable) return null;
+  const next = replaceText("", value, cleaned);
+  return next === value ? null : { value: next };
+}
 function withholdUnreadableResult(value, tool, source, cordon) {
   cordon.markUnredacted();
   cordon.notice(tool, `output of ${tool} could not be scanned and was withheld`, source);
-  return { ...value, result: {
+  return { jsonrpc: "2.0", id: value["id"], result: {
     isError: true,
     content: [{ type: "text", text: "Cordon withheld tool output because it could not be scanned." }]
   } };
 }
+function withholdUnreadableResponse(value, method, source, cordon) {
+  cordon.markUnredacted();
+  cordon.notice(method, `output of ${method} could not be scanned and was withheld`, source);
+  return { jsonrpc: "2.0", id: value["id"], error: {
+    code: -32e3,
+    message: `Cordon withheld ${method} output because it could not be scanned.`
+  } };
+}
 function observeResourceRead(value, pending, cordon, policy) {
+  const source = classifySource({ kind: "tool", label: pending.label ?? "resources/read", tool: "resources/read" }, policy);
   const contents = asRecord(value["result"])?.["contents"];
-  if (contents === void 0) return value;
   if (!Array.isArray(contents)) {
-    cordon.markUnredacted();
-    return value;
+    return withholdUnreadableResponse(value, "resources/read", source, cordon);
   }
   for (const item of contents) {
     const entry = asRecord(item);
     if (entry !== null && typeof entry["text"] === "string") {
       const label = typeof entry["uri"] === "string" ? entry["uri"] : pending.label ?? "resources/read";
-      const source = classifySource({ kind: "tool", label, tool: "resources/read" }, policy);
-      observeInto(entry, "text", "resources/read", source, cordon);
+      const source2 = classifySource({ kind: "tool", label, tool: "resources/read" }, policy);
+      observeInto(entry, "text", "resources/read", source2, cordon);
     } else {
       cordon.markUnredacted();
     }
@@ -15946,14 +15956,12 @@ function observeResourceRead(value, pending, cordon, policy) {
   return value;
 }
 function observePromptsGet(value, pending, cordon, policy) {
-  const messages = asRecord(value["result"])?.["messages"];
-  if (messages === void 0) return value;
-  if (!Array.isArray(messages)) {
-    cordon.markUnredacted();
-    return value;
-  }
   const label = pending.label ?? "prompts/get";
   const source = classifySource({ kind: "tool", label, tool: "prompts/get" }, policy);
+  const messages = asRecord(value["result"])?.["messages"];
+  if (!Array.isArray(messages)) {
+    return withholdUnreadableResponse(value, "prompts/get", source, cordon);
+  }
   for (const message of messages) {
     const content = asRecord(asRecord(message)?.["content"]);
     if (content !== null && content["type"] === "text" && typeof content["text"] === "string") {

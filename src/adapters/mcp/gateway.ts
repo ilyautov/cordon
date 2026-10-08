@@ -516,6 +516,7 @@ function withNotice(value: Record<string, unknown>, notice: string): Record<stri
 }
 
 const TOOL_RESULT_KEYS = new Set(['content', 'structuredContent', 'isError', '_meta'])
+const RESPONSE_KEYS = new Set(['jsonrpc', 'id', 'result'])
 
 function observeToolResult(
   value: Record<string, unknown>,
@@ -530,17 +531,20 @@ function observeToolResult(
   const content = result['content']
   // A CallToolResult requires `content`. A host may expose extra result fields
   // to the model, and we have no safe role for a server-invented field.
-  if (!Array.isArray(content) ||
+  if (Object.keys(value).some((key) => !RESPONSE_KEYS.has(key)) ||
+    !Array.isArray(content) ||
     Object.keys(result).some((key) => !TOOL_RESULT_KEYS.has(key)) ||
     (result['isError'] !== undefined && typeof result['isError'] !== 'boolean')) {
     return withholdUnreadableResult(value, call.tool, source, cordon)
   }
 
-  for (const block of content) {
+  for (const [index, block] of content.entries()) {
     const entry = asRecord(block)
     if (entry !== null && entry['type'] === 'text' && typeof entry['text'] === 'string') {
-      observeInto(entry, 'text', call.tool, source, cordon)
-      texts.push(entry['text'] as string)
+      // The server can append fields beside `text`; a host may show them too.
+      const observed = observeReadableResult(entry, call.tool, source, cordon, texts)
+      if (observed === null) return withholdUnreadableResult(value, call.tool, source, cordon)
+      content[index] = observed.value
     } else {
       cordon.markUnredacted()
     }
@@ -552,31 +556,39 @@ function observeToolResult(
   for (const field of ['structuredContent', '_meta'] as const) {
     const structured = result[field]
     if (structured === undefined) continue
-    // An MCP server controls tool names. `Write` is textless in Claude Code,
-    // but a server with that name can still return arbitrary readable data.
-    const extracted = extractText('', structured)
-    if (!extracted.known || extracted.unseen) {
-      return withholdUnreadableResult(value, call.tool, source, cordon)
-    }
-    let changed = false
-    let substitutable = true
-    const cleaned = extracted.parts.map((part) => {
-      const envelope = cordon.observe(part.text, source, part.content ? 'content' : 'label')
-      if (envelope.text !== part.text) changed = true
-      if (!envelope.substitute) substitutable = false
-      if (part.content) texts.push(envelope.text)
-      return envelope.text
-    })
-    cordon.observeLinks(extracted.links, source)
-    if (changed) {
-      if (!substitutable) return withholdUnreadableResult(value, call.tool, source, cordon)
-      const next = replaceText('', structured, cleaned)
-      if (next === structured) return withholdUnreadableResult(value, call.tool, source, cordon)
-      result[field] = next
-    }
+    const observed = observeReadableResult(structured, call.tool, source, cordon, texts)
+    if (observed === null) return withholdUnreadableResult(value, call.tool, source, cordon)
+    result[field] = observed.value
   }
   cordon.recordLookup(call, texts)
   return value
+}
+
+function observeReadableResult(
+  value: unknown,
+  tool: string,
+  source: Source,
+  cordon: Cordon,
+  texts: string[],
+): { value: unknown } | null {
+  // An MCP server controls tool names. `Write` is textless in Claude Code,
+  // but a server with that name can still return arbitrary readable data.
+  const extracted = extractText('', value)
+  if (!extracted.known || extracted.unseen) return null
+  let changed = false
+  let substitutable = true
+  const cleaned = extracted.parts.map((part) => {
+    const envelope = cordon.observe(part.text, source, part.content ? 'content' : 'label')
+    if (envelope.text !== part.text) changed = true
+    if (!envelope.substitute) substitutable = false
+    if (part.content) texts.push(envelope.text)
+    return envelope.text
+  })
+  cordon.observeLinks(extracted.links, source)
+  if (!changed) return { value }
+  if (!substitutable) return null
+  const next = replaceText('', value, cleaned)
+  return next === value ? null : { value: next }
 }
 
 function withholdUnreadableResult(
@@ -587,8 +599,23 @@ function withholdUnreadableResult(
 ): Record<string, unknown> {
   cordon.markUnredacted()
   cordon.notice(tool, `output of ${tool} could not be scanned and was withheld`, source)
-  return { ...value, result: { isError: true,
+  return { jsonrpc: '2.0', id: value['id'], result: { isError: true,
     content: [{ type: 'text', text: 'Cordon withheld tool output because it could not be scanned.' }] } }
+}
+
+function withholdUnreadableResponse(
+  value: Record<string, unknown>,
+  method: string,
+  source: Source,
+  cordon: Cordon,
+): Record<string, unknown> {
+  cordon.markUnredacted()
+  cordon.notice(method, `output of ${method} could not be scanned and was withheld`, source)
+  // resources/read and prompts/get have no CallToolResult.isError. A JSON-RPC
+  // error is the only protocol-shaped way to keep the unseen bytes from the host.
+  return { jsonrpc: '2.0', id: value['id'], error: {
+    code: -32000, message: `Cordon withheld ${method} output because it could not be scanned.`,
+  } }
 }
 
 /**
@@ -601,11 +628,10 @@ function observeResourceRead(
   cordon: Cordon,
   policy: Policy,
 ): Record<string, unknown> {
+  const source = classifySource({ kind: 'tool', label: pending.label ?? 'resources/read', tool: 'resources/read' }, policy)
   const contents = asRecord(value['result'])?.['contents']
-  if (contents === undefined) return value
   if (!Array.isArray(contents)) {
-    cordon.markUnredacted()
-    return value
+    return withholdUnreadableResponse(value, 'resources/read', source, cordon)
   }
 
   for (const item of contents) {
@@ -633,15 +659,13 @@ function observePromptsGet(
   cordon: Cordon,
   policy: Policy,
 ): Record<string, unknown> {
-  const messages = asRecord(value['result'])?.['messages']
-  if (messages === undefined) return value
-  if (!Array.isArray(messages)) {
-    cordon.markUnredacted()
-    return value
-  }
-
   const label = pending.label ?? 'prompts/get'
   const source = classifySource({ kind: 'tool', label, tool: 'prompts/get' }, policy)
+  const messages = asRecord(value['result'])?.['messages']
+  if (!Array.isArray(messages)) {
+    return withholdUnreadableResponse(value, 'prompts/get', source, cordon)
+  }
+
   for (const message of messages) {
     const content = asRecord(asRecord(message)?.['content'])
     if (content !== null && content['type'] === 'text' && typeof content['text'] === 'string') {
