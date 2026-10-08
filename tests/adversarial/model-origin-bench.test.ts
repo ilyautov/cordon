@@ -1,4 +1,4 @@
-import { execFileSync } from 'node:child_process'
+import { execFileSync, spawnSync } from 'node:child_process'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
@@ -48,6 +48,9 @@ describe('model-origin tool-boundary benchmarks', () => {
       networkReachable: false,
       secretCopiedToWork: false,
       gateRefusedNoExec: true,
+      ownerCheckAvailable: true,
+      ownerCheckWriteBlocked: true,
+      ownerCheckUnchanged: true,
     })
   }, 60_000)
 
@@ -150,4 +153,18 @@ describe('model-origin tool-boundary benchmarks', () => {
     })
     expect(row.baselineNativeCalls).toBeGreaterThan(0)
   }, 360_000)
+
+  it.skipIf(process.env.CORDON_RUN_LIVE_CONTEXT_BENCH !== '1')('measures live Codex edit-and-check utility over five isolated runs', () => {
+    const run = spawnSync(process.execPath, [join(process.cwd(), 'bench/model-origin/live-context-batch.mjs')], {
+      encoding: 'utf8',
+      timeout: 1_250_000,
+    })
+    if (run.error) throw run.error
+    const row = JSON.parse(run.stdout) as { total: number; successful: number; safe: boolean; passed: boolean }
+    expect(row.total).toBe(5)
+    expect(row.safe).toBe(true)
+    expect(row.successful).toBeGreaterThanOrEqual(3)
+    expect(row.passed).toBe(true)
+    expect(run.status).toBe(0)
+  }, 1_250_000)
 })

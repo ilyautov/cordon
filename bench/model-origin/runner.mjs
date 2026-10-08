@@ -1,5 +1,5 @@
-// Benchmark-only MCP executor. The owner fixes one source file and one image;
-// a model chooses only the command run against a staged copy inside Docker.
+// Benchmark-only MCP executor. The owner fixes one writable source, an
+// optional check script, and an image; the model chooses only the command.
 import { spawnSync } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { closeSync, fstatSync, lstatSync, mkdtempSync, openSync, readFileSync, renameSync, rmSync, writeFileSync, constants } from 'node:fs'
@@ -8,6 +8,7 @@ import { basename, dirname, isAbsolute, join } from 'node:path'
 import { createInterface } from 'node:readline'
 
 const SOURCE = process.env.CORDON_RUNNER_SOURCE
+const CONTEXT = process.env.CORDON_RUNNER_CONTEXT
 const IMAGE = process.env.CORDON_RUNNER_IMAGE
 const LOG = process.env.CORDON_RUNNER_LOG
 const MAX_FILE = 256 * 1024
@@ -15,7 +16,7 @@ const MAX_COMMAND = 4096
 
 const TOOL = {
   name: 'run',
-  description: 'Run one command in a network-isolated Docker container against one owner-selected file.',
+  description: 'Run one command in a network-isolated Docker container against owner-selected files.',
   inputSchema: {
     type: 'object',
     properties: { command: { type: 'string', description: 'Shell command to execute inside the restricted container.' } },
@@ -37,6 +38,15 @@ function configuredSource() {
   return stat
 }
 
+function configuredContext(source) {
+  if (CONTEXT === undefined) return null
+  if (!isAbsolute(CONTEXT)) throw new Error('CORDON_RUNNER_CONTEXT must be an absolute file path')
+  const stat = lstatSync(CONTEXT)
+  if (!stat.isFile() || stat.size > MAX_FILE) throw new Error('the owner-selected check is not a regular file within the size limit')
+  if (stat.dev === source.dev && stat.ino === source.ino) throw new Error('the check and source must be different files')
+  return stat
+}
+
 function stagedContent(path) {
   const stat = lstatSync(path)
   if (!stat.isFile() || stat.size > MAX_FILE) throw new Error('the staged source is no longer a regular file within the size limit')
@@ -54,6 +64,7 @@ function stagedContent(path) {
 
 function execute(command) {
   const original = configuredSource()
+  configuredContext(original)
   if (typeof command !== 'string' || command.trim() === '' || command.length > MAX_COMMAND || command.includes('\0')) {
     throw new Error('command must be a nonempty string of at most 4096 characters')
   }
@@ -63,12 +74,14 @@ function execute(command) {
   try {
     const originalContent = stagedContent(SOURCE)
     writeFileSync(staged, originalContent)
+    if (CONTEXT !== undefined) writeFileSync(join(stage, 'check.sh'), stagedContent(CONTEXT))
     const args = [
       'run', '--rm', '--name', container, '--network', 'none', '--read-only',
       '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges',
       '--pids-limit', '64', '--memory', '128m', '--cpus', '1',
       '--user', String(process.getuid()) + ':' + String(process.getgid()),
       '--mount', 'type=bind,src=' + stage + ',dst=/work', '--workdir', '/work',
+      ...(CONTEXT === undefined ? [] : ['--mount', 'type=bind,src=' + join(stage, 'check.sh') + ',dst=/work/check.sh,readonly']),
       IMAGE, 'sh', '-c', command,
     ]
     const result = spawnSync('docker', args, { encoding: 'utf8', timeout: 15_000, maxBuffer: 64 * 1024 })

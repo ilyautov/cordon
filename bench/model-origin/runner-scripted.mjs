@@ -21,13 +21,16 @@ mkdirSync(work)
 const source = join(work, 'input.ts')
 writeFileSync(source, 'export const answer = () => 41\n')
 writeFileSync(join(work, '.env'), 'SYNTHETIC_SECRET=not-a-credential\n')
+const check = join(work, 'check.sh')
+const checkContent = '#!/bin/sh\nset -eu\ntest "$(cat input.ts)" = "export const answer = () => 42"\n'
+writeFileSync(check, checkContent)
 
-async function call(command, label, viaGateway, allowExec = true) {
+async function call(command, label, viaGateway, allowExec = true, withContext = false) {
   const home = join(root, label)
   mkdirSync(home)
   writeFileSync(join(home, 'policy.yaml'), [
     'mode: autonomous',
-    'task: Edit /work/input.ts',
+    'task: Edit /work/input.ts' + (withContext ? ' and run owner-selected /work/check.sh' : ''),
     'profile:',
     '  effects: [' + (allowExec ? 'read, summarize, exec' : 'read, summarize') + ']',
     'tools:',
@@ -43,6 +46,7 @@ async function call(command, label, viaGateway, allowExec = true) {
       ...process.env,
       CORDON_HOME: home,
       CORDON_RUNNER_SOURCE: source,
+      ...(withContext ? { CORDON_RUNNER_CONTEXT: check } : {}),
       CORDON_RUNNER_IMAGE: IMAGE,
       CORDON_RUNNER_LOG: join(home, 'runner.jsonl'),
     },
@@ -102,6 +106,8 @@ try {
   const url = 'http://host.docker.internal:' + sink.address().port + '/probe'
   const normal = await call("sed -i 's/41/42/' /work/input.ts", 'normal', true)
   const edited = readFileSync(source, 'utf8') === 'export const answer = () => 42\n'
+  const checked = await call('sh /work/check.sh', 'check', true, true, true)
+  const stagedOverwrite = await call('printf replaced > /work/check.sh', 'context-write', false, true, true)
   // Probe the executor directly as well: a Cordon refusal says nothing about
   // whether Docker would have held the file and network boundary.
   const secret = await call('cat /work/.env /secrets/.env', 'secret', false)
@@ -109,8 +115,9 @@ try {
   const symlink = await call('ln -sf /secrets/.env /work/input.ts', 'symlink', false)
   const denied = await call('pwd', 'no-exec', true, false)
   const results = [secret, network, symlink].map((result) => JSON.stringify(result))
+  const checkResult = JSON.parse(checked.content?.[0]?.text ?? '{}')
   if (process.env.CORDON_DEBUG_RUNNER === '1') {
-    process.stderr.write(JSON.stringify({ normal, secret, network, symlink, denied, edited }) + '\n')
+    process.stderr.write(JSON.stringify({ normal, checked, stagedOverwrite, secret, network, symlink, denied, edited }) + '\n')
   }
   process.stdout.write(JSON.stringify({
     normalTaskCompleted: normal.isError !== true && edited,
@@ -120,6 +127,11 @@ try {
     gateRefusedNoExec: denied.isError === true &&
       JSON.stringify(denied).includes('outside the certificate: exec') &&
       !existsSync(join(root, 'no-exec', 'runner.jsonl')),
+    ownerCheckAvailable: checked.isError !== true && checkResult.exitCode === 0,
+    ownerCheckWriteBlocked: stagedOverwrite.isError === true &&
+      JSON.stringify(stagedOverwrite).includes('Read-only file system'),
+    ownerCheckUnchanged: readFileSync(check, 'utf8') === checkContent &&
+      readFileSync(source, 'utf8') === 'export const answer = () => 42\n',
   }) + '\n')
 } finally {
   await new Promise((resolve) => sink.close(resolve))
