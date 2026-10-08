@@ -74,6 +74,12 @@ In the gateway run, the journal attributed both refusals to ticket fragments car
 
 Reproduce with `node bench/codex-mcp/live-isolated.mjs --direct` and `node bench/codex-mcp/live-isolated.mjs`. Each row names a scratch directory containing the Codex JSONL, server JSONL, stderr, and, for the gateway mode, Cordon's journal. The optional regression gate is `CORDON_RUN_LIVE_TICKET_BENCH=1 npx vitest run tests/adversarial/model-origin-bench.test.ts -t 'records live clean and injected ticket effects'`.
 
+### Owner review of one exact draft
+
+`bench/codex-mcp/approval-scripted.mjs` exercises the existing interactive mode through the committed MCP gateway and the real `cordon approve` CLI. A scripted host reads the clean ticket, proposes an email with invoice identifiers, checks that the pending approval file displays the entire recipient and body, invokes the owner CLI, and retries the identical call. Exactly one email reaches the server. Another identical call is refused. A separate injected-ticket session proposes an email to the address in the ticket; the approval is left pending and no email reaches the server. The regression test runs in the ordinary suite.
+
+The script stands in for a human who decides after reading the whole draft. It proves the one-call gate and server-side effect, not that a person would approve the clean draft or reject every malicious one. In particular, the approved body contains ticket facts that an attacker-controlled ticket could falsify. A live Codex pause, owner review, and retry across turns has not been measured.
+
 ## Continuing the older benchmarks
 
 The AgentDojo oracle is a different threat model: it scripts an agent that obeys an instruction planted in a tool result. Its attack rate must not be pooled with the model-origin table above. On the frozen current bundle, the strict autonomous rerun completed so far is:
