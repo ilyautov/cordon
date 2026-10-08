@@ -20,12 +20,14 @@ const work = join(root, 'work')
 mkdirSync(work)
 const source = join(work, 'input.ts')
 writeFileSync(source, 'export const answer = () => 41\n')
+const alternateSource = join(work, 'input.py')
+writeFileSync(alternateSource, 'def answer():\n    return 42\n')
 writeFileSync(join(work, '.env'), 'SYNTHETIC_SECRET=not-a-credential\n')
 const check = join(work, 'check.sh')
 const checkContent = '#!/bin/sh\nset -eu\ntest "$(cat input.ts)" = "export const answer = () => 42"\n'
 writeFileSync(check, checkContent)
 
-async function call(command, label, viaGateway, allowExec = true, withContext = false, ownerTask) {
+async function call(command, label, viaGateway, allowExec = true, withContext = false, ownerTask, sourcePath = source) {
   const home = join(root, label)
   mkdirSync(home)
   writeFileSync(join(home, 'policy.yaml'), [
@@ -45,7 +47,7 @@ async function call(command, label, viaGateway, allowExec = true, withContext = 
     env: {
       ...process.env,
       CORDON_HOME: home,
-      CORDON_RUNNER_SOURCE: source,
+      CORDON_RUNNER_SOURCE: sourcePath,
       ...(withContext ? { CORDON_RUNNER_CONTEXT: check } : {}),
       CORDON_RUNNER_IMAGE: IMAGE,
       CORDON_RUNNER_LOG: join(home, 'runner.jsonl'),
@@ -130,6 +132,12 @@ try {
     networkControl.stderr.slice(-800))
   const hitsAfterControl = hits
   const normal = await call("sed -i 's/41/42/' /work/input.ts", 'normal', true)
+  const customTarget = await call('cat /work/input.py', 'custom-target', true, true, false,
+    'Read /work/input.py through the restricted runner', alternateSource)
+  const reservedTarget = await call('pwd', 'reserved-target', false, true, false,
+    'Read /work/check.sh', check)
+  const hiddenTarget = await call('pwd', 'hidden-target', false, true, false,
+    'Read /work/.env', join(work, '.env'))
   const edited = readFileSync(source, 'utf8') === 'export const answer = () => 42\n'
   const checked = await call('sh /work/check.sh', 'check', true, true, true)
   const stagedOverwrite = await call('printf replaced > /work/check.sh', 'context-write', false, true, true)
@@ -151,11 +159,19 @@ try {
   const results = [secret, network, symlink].map((result) => JSON.stringify(result))
   const checkResult = JSON.parse(checked.content?.[0]?.text ?? '{}')
   if (process.env.CORDON_DEBUG_RUNNER === '1') {
-    process.stderr.write(JSON.stringify({ normal, checked, stagedOverwrite, secret, network,
+    process.stderr.write(JSON.stringify({ normal, customTarget, reservedTarget, hiddenTarget,
+      checked, stagedOverwrite, secret, network,
       gatewaySecret, gatewayNetwork, namedSecret, namedNetwork, symlink, denied, edited }) + '\n')
   }
   process.stdout.write(JSON.stringify({
     normalTaskCompleted: normal.isError !== true && edited,
+    customTargetUsable: customTarget.isError !== true && executorExitCode(customTarget) === 0 &&
+      JSON.stringify(customTarget).includes('def answer()') &&
+      readFileSync(alternateSource, 'utf8') === 'def answer():\n    return 42\n',
+    unsafeNamesRejected: [reservedTarget, hiddenTarget].every((response) => response.isError === true &&
+      JSON.stringify(response).includes('not a safe staged file name')) &&
+      !existsSync(join(root, 'reserved-target', 'runner.jsonl')) &&
+      !existsSync(join(root, 'hidden-target', 'runner.jsonl')),
     secretReadable: results.some((result) => result.includes('SYNTHETIC_SECRET')),
     networkControlReachable,
     networkReachable: hits > hitsAfterControl || results.some((result) => result.includes('local sink reached')),

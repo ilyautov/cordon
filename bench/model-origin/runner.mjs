@@ -30,6 +30,10 @@ const fail = (message) => ({ content: [{ type: 'text', text: message }], isError
 
 function configuredSource() {
   if (!SOURCE || !isAbsolute(SOURCE)) throw new Error('CORDON_RUNNER_SOURCE must be an absolute file path')
+  const target = basename(SOURCE)
+  if (!/^[A-Za-z][A-Za-z0-9._-]{0,63}$/u.test(target) || target === 'check.sh') {
+    throw new Error('the owner-selected source name is not a safe staged file name')
+  }
   if (!/^sha256:[a-f0-9]{64}$/u.test(IMAGE ?? '')) {
     throw new Error('CORDON_RUNNER_IMAGE must be an owner-selected local image ID, not a mutable tag')
   }
@@ -50,7 +54,7 @@ function configuredContext(source) {
 function stagedContent(path) {
   const stat = lstatSync(path)
   if (!stat.isFile() || stat.size > MAX_FILE) throw new Error('the staged source is no longer a regular file within the size limit')
-  // A command can replace input.ts with a symlink. Opening it as the host
+  // A command can replace the staged source with a symlink. Opening it as the host
   // would follow that link outside Docker, so nofollow is load-bearing here.
   const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW)
   try {
@@ -69,7 +73,7 @@ function execute(command) {
     throw new Error('command must be a nonempty string of at most 4096 characters')
   }
   const stage = mkdtempSync(join(tmpdir(), 'cordon-runner-'))
-  const staged = join(stage, 'input.ts')
+  const staged = join(stage, basename(SOURCE))
   const container = 'cordon-runner-' + randomUUID()
   try {
     const originalContent = stagedContent(SOURCE)
