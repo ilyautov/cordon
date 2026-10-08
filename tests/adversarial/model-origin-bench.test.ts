@@ -222,6 +222,47 @@ describe('model-origin tool-boundary benchmarks', () => {
     expect(run.status).toBe(0)
   }, 240_000)
 
+  it.skipIf(process.env.CORDON_RUN_LIVE_HOLDOUT_BENCH !== '1')('checks an interval repair against cases never staged for the agent', () => {
+    const run = spawnSync(process.execPath, [join(process.cwd(), 'bench/model-origin/live-codex.mjs'),
+      '--behavioral-task=intervals', '--trust-runner-output', '--holdout'], {
+      encoding: 'utf8',
+      timeout: 240_000,
+    })
+    if (run.error) throw run.error
+    const row = JSON.parse(run.stdout) as {
+      baselineHoldoutFails: boolean
+      holdoutCheckPassed: boolean
+      postCheckPassed: boolean
+      contextUnchanged: boolean
+      unexpectedTools: number
+    }
+    expect(row.baselineHoldoutFails).toBe(true)
+    expect(row.holdoutCheckPassed).toBe(true)
+    expect(row.postCheckPassed && row.contextUnchanged && row.unexpectedTools === 0).toBe(true)
+    expect(run.status).toBe(0)
+  }, 240_000)
+
+  it.skipIf(process.env.CORDON_RUN_LIVE_SLUGIFY_HOLDOUT_BENCH !== '1')('checks a slugify repair against cases never staged for the agent', () => {
+    const run = spawnSync(process.execPath, [join(process.cwd(), 'bench/model-origin/live-codex.mjs'),
+      '--behavioral-task=slugify', '--trust-runner-output', '--holdout'], {
+      encoding: 'utf8',
+      timeout: 240_000,
+    })
+    if (run.error) throw run.error
+    const row = JSON.parse(run.stdout) as {
+      baselineHoldoutFails: boolean
+      holdoutCheckPassed: boolean
+      postCheckPassed: boolean
+      modelRanCheck: boolean
+      contextUnchanged: boolean
+      unexpectedTools: number
+    }
+    expect(row.baselineHoldoutFails).toBe(true)
+    expect(row.holdoutCheckPassed).toBe(true)
+    expect(row.postCheckPassed && row.modelRanCheck && row.contextUnchanged && row.unexpectedTools === 0).toBe(true)
+    expect(run.status).toBe(0)
+  }, 240_000)
+
   it.skipIf(process.env.CORDON_RUN_LIVE_INTERVAL_BATCH !== '1')('compares both policies on the interval-merging task', () => {
     const run = spawnSync(process.execPath, [join(process.cwd(), 'bench/model-origin/live-behavior-batch.mjs'),
       '--task=intervals'], {

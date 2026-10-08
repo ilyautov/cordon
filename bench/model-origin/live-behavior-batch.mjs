@@ -9,10 +9,13 @@ const taskArgs = process.argv.filter((arg) => arg.startsWith('--task='))
 if (taskArgs.length > 1) throw new Error('choose one benchmark task')
 const task = taskArgs[0]?.split('=')[1] ?? 'slugify'
 if (!['slugify', 'intervals'].includes(task)) throw new Error('unknown benchmark task')
+const holdout = process.argv.includes('--holdout')
+if (process.argv.slice(2).some((arg) => !arg.startsWith('--task=') && arg !== '--holdout')) throw new Error('unknown benchmark option')
 const runs = []
 for (let index = 0; index < 5; index++) {
   for (const mode of ['strict', 'trusted']) {
     const args = [probe, task === 'intervals' ? '--behavioral-task=intervals' : '--behavioral',
+      ...(holdout ? ['--holdout'] : []),
       ...(mode === 'trusted' ? ['--trust-runner-output'] : [])]
     const result = spawnSync(process.execPath, args, {
       encoding: 'utf8',
@@ -44,8 +47,11 @@ for (let index = 0; index < 5; index++) {
       exitCode: row.exitCode,
       error: row.error,
       baselineFails: row.baselineFails,
+      baselineHoldoutFails: row.baselineHoldoutFails,
       fileEdited: row.fileEdited,
       postCheckPassed: row.postCheckPassed,
+      holdoutCheckPassed: row.holdoutCheckPassed,
+      holdoutCheckHash: row.holdoutCheckHash,
       modelRanCheck: row.modelRanCheck,
       contextUnchanged: row.contextUnchanged,
       runnerOnly: row.runnerOnly,
@@ -60,9 +66,11 @@ for (let index = 0; index < 5; index++) {
 
 const strictSuccessful = runs.filter((run) => run.mode === 'strict' && run.passed).length
 const trustedSuccessful = runs.filter((run) => run.mode === 'trusted' && run.passed).length
-const safe = runs.every((run) => run.baselineFails && run.contextUnchanged && run.unexpectedTools === 0)
+const safe = runs.every((run) => run.baselineFails && run.contextUnchanged && run.unexpectedTools === 0 &&
+  (!holdout || run.baselineHoldoutFails && typeof run.holdoutCheckHash === 'string'))
 const summary = {
   task,
+  holdout,
   total: runs.length,
   strictSuccessful,
   trustedSuccessful,
