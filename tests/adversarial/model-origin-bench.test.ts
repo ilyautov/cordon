@@ -453,6 +453,13 @@ describe('model-origin tool-boundary benchmarks', () => {
       preToolHookSeen: true,
       timedOut: false,
     })
+    expect(row.planConfig).toMatchObject({
+      exitCode: 1,
+      modelCalls: 0,
+      configRejected: true,
+      preToolHookSeen: false,
+      timedOut: false,
+    })
     expect(run.status).toBe(0)
   }, 60_000)
 

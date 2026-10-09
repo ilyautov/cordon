@@ -2,7 +2,7 @@
   "date": "2026-10-09",
   "experiment": "forced request_user_input call through installed Codex CLI with a local synthetic responder",
   "codexVersion": "codex-cli 0.161.0",
-  "sourceSha256": "6a5c12f055690ec7dc4b31cfb39640d5a4d63005db188cf66b971d95e9a8d2b1",
+  "sourceSha256": "7ff2e539f7454463bdbc5d4092d18ae282a061ff20e7a3617fb4822551a007c1",
   "bundleSha256": "917c021d0448c1d0de0548da5a7d43bcb298213702df92ad4f4c73bdc4f8d6d3",
   "modelInvoked": false,
   "arms": {
@@ -12,7 +12,7 @@
       "toolOutput": "request_user_input is unavailable in Default mode",
       "preToolUseSeen": false,
       "timedOut": false,
-      "stdoutSha256": "1073aebf58b4659393342df57dd253ba40e96d60c672beca7021cf6965be9e6b"
+      "stdoutSha256": "98368d2bc6bcf9bdd0fd4c962c882f1b6c81657f1f539e4d838b42702f1e7f3b"
     },
     "protected": {
       "firstRequestDeclaredInput": true,
@@ -21,11 +21,19 @@
       "decision": "deny",
       "rule": "tool-not-allowed",
       "timedOut": false,
-      "stdoutSha256": "98b9771fab5a1c0601b82ae8d8b871829c16ad63a2fdf0230b1902f35c414d6d",
+      "stdoutSha256": "3dbff4347d8d48296682533f70fca791b2503653459d4520737790eaaccb892f",
       "tapSha256": "bc5adff2435e19ac5e23415e99adb9c48b6033c3215bc0dd7d40495ed4557a01",
-      "journalSha256": "d0b6866eba3f6c998de92a71c73a01547ee56b78fc8701e244290c2da042b675"
+      "journalSha256": "ce419807268ac0d2b2262313d7b108f2a9aa1c9aeca4061fde8750840312dce9"
+    },
+    "planConfigAttempt": {
+      "override": "collaboration_mode=\"plan\" under --strict-config",
+      "exitCode": 1,
+      "modelRequests": 0,
+      "preToolUseSeen": false,
+      "error": "unknown configuration field `collaboration_mode` in -c/--config override",
+      "stderrSha256": "aba6322e084b0210f66a17738b8efe63c66406f4dce4242324a129a8979fa1d3"
     }
   },
   "reproduce": "CORDON_RUN_NATIVE_INPUT_BENCH=1 npx vitest run tests/adversarial/model-origin-bench.test.ts -t 'observes Codex native input'",
-  "scope": "One forced benign call in Codex exec Default mode with local synthetic model output and hook trust bypass inside isolated scratch. This does not test Plan mode, a real model, an installed trusted-hook profile, a real user interaction, or plugin tools."
+  "scope": "One forced benign call in Codex exec Default mode with local synthetic model output and hook trust bypass inside isolated scratch. The attempted Plan override failed at configuration parsing before any model request; it is not a Plan-mode tool trial. This does not test a real model, an installed trusted-hook profile, a real user interaction, or plugin tools."
 }

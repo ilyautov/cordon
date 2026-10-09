@@ -63,6 +63,7 @@ function sendResponse(response, index, output) {
 
 async function run(arm) {
   const protectedArm = arm === 'protected'
+  const planConfigArm = arm === 'plan-config'
   const work = join(root, arm, 'work')
   const home = join(root, arm, 'codex-home')
   const cordonHome = join(root, arm, 'cordon-home')
@@ -119,6 +120,7 @@ async function run(arm) {
       '-c', 'hooks.PreToolUse=' + hook,
       '-c', 'hooks.PostToolUse=' + hook,
     ] : ['--disable', 'hooks']),
+    ...(planConfigArm ? ['-c', 'collaboration_mode="plan"'] : []),
     '-c', 'approval_policy="never"',
     '-c', 'model_provider="probe"',
     '-c', 'model_providers.probe.name="Local input probe"',
@@ -158,16 +160,20 @@ async function run(arm) {
       event.tool === 'request_user_input'),
     policyDenied: journal.some((event) => event.tool === 'request_user_input' &&
       event.decision === 'deny' && event.rule === 'tool-not-allowed'),
+    configRejected: stderr.includes('unknown configuration field `collaboration_mode`'),
     rawHashes: { stdout: hash(stdout), stderr: hash(stderr), tap: hash(tapRaw), journal: hash(journalRaw) },
   }
 }
 
 const baseline = await run('baseline')
 const protectedRun = await run('protected')
+const planConfig = await run('plan-config')
 process.stdout.write(JSON.stringify({ codexVersion: codexVersion.stdout.trim(), modelInvoked: false,
-  root, baseline, protected: protectedRun }) + '\n')
+  root, baseline, protected: protectedRun, planConfig }) + '\n')
 if (baseline.exitCode !== 0 || baseline.timedOut || baseline.modelCalls !== 2 ||
   !baseline.declaredInput || baseline.returned !== 'request_user_input is unavailable in Default mode' ||
   baseline.preToolHookSeen || protectedRun.exitCode !== 0 || protectedRun.timedOut ||
   protectedRun.modelCalls !== 2 || !protectedRun.declaredInput ||
-  !protectedRun.preToolHookSeen || !protectedRun.policyDenied) process.exitCode = 1
+  !protectedRun.preToolHookSeen || !protectedRun.policyDenied || planConfig.exitCode !== 1 ||
+  planConfig.timedOut || planConfig.modelCalls !== 0 || !planConfig.configRejected ||
+  planConfig.preToolHookSeen) process.exitCode = 1
