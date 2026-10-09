@@ -1,0 +1,41 @@
+{
+  "date": "2026-10-09",
+  "experiment": "opt-in independent owner check before benchmark runner copyback",
+  "status": "deterministic control passed; live Docker effect unverified because bind-mount setup timed out",
+  "sourceSha256": {
+    "bench/model-origin/runner.mjs": "ebf5b687c75c56f8c0bb2bbbbdb5a2a7e70273a0c5c981873589de510084c0c0",
+    "tests/adversarial/runner-verification.test.ts": "a191ca6459ab0d33dd94006b21daa4e9423d75b1c73948fde612da29ec7b8842",
+    "tests/adversarial/model-origin-bench.test.ts": "1b52c4c976a4569ac96d3cfabc1e8e970516410d07ba1e7a66ef7ee36f5ec029"
+  },
+  "docker": {
+    "serverVersion": "20.10.12",
+    "imageId": "sha256:33bee74c45f307e3268adc2010c0f55c48e7a6041e12cd12432bb1a46e498e43",
+    "unmountedContainer": "exited 0 after about 12 seconds",
+    "bindMountInSystemTemp": "timed out after 25 seconds",
+    "bindMountInWorkspace": "timed out after 25 seconds",
+    "liveTestPreflight": "spawnSync docker ETIMEDOUT after 30 seconds before a runner call"
+  },
+  "deterministicControl": {
+    "command": "npx vitest run tests/adversarial/runner-verification.test.ts",
+    "result": "passed",
+    "failedCandidateNotCopied": true,
+    "modelSideFileExcludedFromCheck": true,
+    "ownerSourceInPlaceChangeNotOverwritten": true,
+    "validCandidateCopiedAfterCheck": true,
+    "missingOwnerCheckRefused": true,
+    "verifierUsesFreshReadOnlyStageAndShellEntrypoint": true,
+    "legacyModePreserved": true
+  },
+  "liveDockerGate": {
+    "command": "CORDON_RUN_DOCKER_BENCH=1 npx vitest run tests/adversarial/model-origin-bench.test.ts -t 'verifies a candidate in a clean stage'",
+    "status": "setup-failure",
+    "runnerCalls": 0,
+    "acceptanceResult": "not scored"
+  },
+  "limits": [
+    "The deterministic test uses a fake Docker executable to inspect invocation and copyback control flow; it does not prove real container isolation.",
+    "The optional mode is benchmark infrastructure, not a qualified production executor.",
+    "A passing owner check can still miss malicious behavior in source code; a trusted owner must choose the check and review the copied change.",
+    "The source comparison detects in-place changes observed before copyback but is not an atomic lock against concurrent external writers."
+  ]
+}

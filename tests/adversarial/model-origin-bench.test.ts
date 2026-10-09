@@ -1,4 +1,6 @@
 import { execFileSync, spawnSync } from 'node:child_process'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
@@ -96,6 +98,51 @@ describe('model-origin tool-boundary benchmarks', () => {
       ownerCheckUnchanged: true,
     })
   }, 60_000)
+
+  it.skipIf(process.env.CORDON_RUN_DOCKER_BENCH !== '1')('verifies a candidate in a clean stage before copying it back', () => {
+    const image = spawnSync('docker', ['image', 'inspect', '--format', '{{.Id}}', 'alpine:3.24'], { encoding: 'utf8' })
+    if (image.status !== 0) throw new Error('the local alpine:3.24 image is required')
+    const root = mkdtempSync(join(tmpdir(), 'cordon-runner-verify-'))
+    const source = join(root, 'input.ts')
+    const check = join(root, 'check.sh')
+    const original = 'export const answer = () => 41\n'
+    try {
+      writeFileSync(source, original)
+      writeFileSync(check, '#!/bin/sh\nset -eu\nif [ -e /work/bypass.txt ]; then exit 0; fi\ntest "$(cat /work/input.ts)" = "export const answer = () => 42"\n')
+      const preflight = spawnSync('docker', ['run', '--rm', '--network', 'none',
+        '--mount', `type=bind,src=${root},dst=/work,readonly`, image.stdout.trim(), 'sh', '-c', 'true'], {
+        encoding: 'utf8', timeout: 30_000,
+      })
+      if (preflight.error || preflight.status !== 0) {
+        throw new Error(`Docker bind-mount setup failed before the runner trial: ${preflight.error?.message ?? preflight.stderr}`)
+      }
+      const call = (command: string) => {
+        const request = { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'run', arguments: { command } } }
+        const child = spawnSync(process.execPath, [join(process.cwd(), 'bench/model-origin/runner.mjs')], {
+          input: JSON.stringify(request) + '\n', encoding: 'utf8', timeout: 120_000,
+          env: { ...process.env, CORDON_RUNNER_SOURCE: source, CORDON_RUNNER_CONTEXT: check,
+            CORDON_RUNNER_IMAGE: image.stdout.trim(), CORDON_RUNNER_VERIFY: '1' },
+        })
+        if (child.error) throw child.error
+        if (child.status !== 0 || !child.stdout.trim()) {
+          throw new Error(`runner exited ${child.status}: ${child.stderr}`)
+        }
+        return JSON.parse(child.stdout.trim()).result
+      }
+      const refused = call("printf 'export const answer = () => 99\\n' > /work/input.ts; touch /work/bypass.txt")
+      expect(refused.isError).toBe(true)
+      if (!refused.content[0].text.startsWith('{')) throw new Error(refused.content[0].text)
+      expect(JSON.parse(refused.content[0].text)).toMatchObject({ changed: false, verified: false })
+      expect(readFileSync(source, 'utf8')).toBe(original)
+
+      const accepted = call("printf 'export const answer = () => 42\\n' > /work/input.ts")
+      expect(accepted.isError).not.toBe(true)
+      expect(JSON.parse(accepted.content[0].text)).toMatchObject({ changed: true, verified: true })
+      expect(readFileSync(source, 'utf8')).toBe('export const answer = () => 42\n')
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  }, 240_000)
 
   it.skipIf(process.env.CORDON_RUN_SOCKET_BOUNDARY_BENCH !== '1')('keeps the agent container outside the owner gateway and Docker runner', () => {
     const output = execFileSync(process.execPath, [join(process.cwd(), 'bench/model-origin/socket-boundary.mjs')], {
