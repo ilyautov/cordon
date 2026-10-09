@@ -27,7 +27,7 @@ import { APPROVAL_TTL_MS, ApprovalStore, MAX_SHOWN_ARGS, type ShownRequest } fro
 import { MemoryLedger } from './session/memory.js'
 
 const USAGE =
-  'usage: cordon scan <file|-> [--json] | cordon hook [--harness claude-code|gemini|codex|kimi|deepseek] | cordon mcp [--wait-for-approval-ms N] -- <server command...> | cordon mcp serve --socket PATH [--wait-for-approval-ms N] -- <server command...> | cordon mcp connect --socket PATH --owner-uid UID | cordon mcp approve -- <server command...> | cordon doctor | cordon init [--profile locked|research|documents|coding|service] [--force] | cordon log [--last N] [--json] | cordon approve [id [--read] [--as name]] | cordon policy check|explain [file] | cordon policy apply <file> [--accept-warnings] [--as name] | cordon audit [dir] [--json|--sarif] [--fail-on high|medium|low]'
+  'usage: cordon scan <file|-> [--json] | cordon hook [--harness claude-code|gemini|codex|kimi|deepseek] | cordon mcp [--wait-for-approval-ms N] -- <server command...> | cordon mcp serve --socket PATH [--wait-for-approval-ms N] -- <server command...> | cordon mcp connect --socket PATH --owner-uid UID | cordon mcp approve -- <server command...> | cordon doctor | cordon init [--profile locked|research|documents|coding|service] [--force] | cordon log [--last N] [--json] | cordon approve [id [--show|--read] [--as name]] | cordon policy check|explain [file] | cordon policy apply <file> [--accept-warnings] [--as name] | cordon audit [dir] [--json|--sarif] [--fail-on high|medium|low]'
 
 /**
  * Event parsing depends on the harness, so the harness is named explicitly.
@@ -956,23 +956,41 @@ function approveCall(args: string[]): number {
     process.stderr.write(`not an approval id: ${visible(id)}\n${USAGE}\n`)
     return 2
   }
-  const request = store.waiting(id)
-  if (request !== null && request.args.length > MAX_SHOWN_ARGS && !args.includes('--read')) {
-    process.stderr.write(
-      `the arguments run to ${request.args.length} characters, more than a terminal shows\n` +
-        `read all of them in ${store.pendingPath(id)}, then approve with: cordon approve ${id} --read\n`,
-    )
-    return 1
+  let show = false
+  let read = false
+  let declared: string | undefined
+  for (let i = 1; i < args.length; i++) {
+    const option = args[i]
+    if (option === '--show' && !show) show = true
+    else if (option === '--read' && !read) read = true
+    else if (option === '--as' && declared === undefined && args[i + 1] !== undefined &&
+      !args[i + 1]!.startsWith('--')) declared = args[++i]
+    else {
+      process.stderr.write(`invalid approval option: ${visible(option)}\n${USAGE}\n`)
+      return 2
+    }
   }
+  if (show && (read || declared !== undefined)) {
+    process.stderr.write(`--show only displays the pending call; use it separately from --read or --as\n${USAGE}\n`)
+    return 2
+  }
+  const request = store.waiting(id)
   if (request === null) {
     process.stderr.write(`nothing waits under ${id}: it was never asked for, was already used, is older than an hour, or was asked again under a changed context\n`)
     return 1
   }
-  const at = args.indexOf('--as')
-  const declared = at >= 0 ? args[at + 1] : undefined
-  if (at >= 0 && (declared === undefined || declared.startsWith('--'))) {
-    process.stderr.write(`--as takes a name\n${USAGE}\n`)
-    return 2
+  if (show) {
+    process.stdout.write(`pending, not approved: ${visible(request.tool)}\n    arguments: ${visible(request.args)}\n    ${asked(request)}${visible(request.reason)}\n`)
+    return 0
+  }
+  if (request.args.length > MAX_SHOWN_ARGS && !read) {
+    process.stderr.write(
+      `the arguments run to ${request.args.length} characters, more than a terminal shows\n` +
+        `show all of them safely with: cordon approve ${id} --show\n` +
+        `the complete request file is ${visible(store.pendingPath(id))}\n` +
+        `then approve with: cordon approve ${id} --read\n`,
+    )
+    return 1
   }
   // No record, no approval: an owner's act nobody can audit afterwards is
   // the gap this record exists to close. The line is written first, so no

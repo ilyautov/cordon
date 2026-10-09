@@ -17244,7 +17244,7 @@ notify:
 }
 
 // src/cli.ts
-var USAGE = "usage: cordon scan <file|-> [--json] | cordon hook [--harness claude-code|gemini|codex|kimi|deepseek] | cordon mcp [--wait-for-approval-ms N] -- <server command...> | cordon mcp serve --socket PATH [--wait-for-approval-ms N] -- <server command...> | cordon mcp connect --socket PATH --owner-uid UID | cordon mcp approve -- <server command...> | cordon doctor | cordon init [--profile locked|research|documents|coding|service] [--force] | cordon log [--last N] [--json] | cordon approve [id [--read] [--as name]] | cordon policy check|explain [file] | cordon policy apply <file> [--accept-warnings] [--as name] | cordon audit [dir] [--json|--sarif] [--fail-on high|medium|low]";
+var USAGE = "usage: cordon scan <file|-> [--json] | cordon hook [--harness claude-code|gemini|codex|kimi|deepseek] | cordon mcp [--wait-for-approval-ms N] -- <server command...> | cordon mcp serve --socket PATH [--wait-for-approval-ms N] -- <server command...> | cordon mcp connect --socket PATH --owner-uid UID | cordon mcp approve -- <server command...> | cordon doctor | cordon init [--profile locked|research|documents|coding|service] [--force] | cordon log [--last N] [--json] | cordon approve [id [--show|--read] [--as name]] | cordon policy check|explain [file] | cordon policy apply <file> [--accept-warnings] [--as name] | cordon audit [dir] [--json|--sarif] [--fail-on high|medium|low]";
 var HARNESSES = /* @__PURE__ */ new Map([
   ["claude-code", runHook],
   ["gemini", runHook2],
@@ -17904,27 +17904,49 @@ ${USAGE}
 `);
     return 2;
   }
-  const request = store.waiting(id);
-  if (request !== null && request.args.length > MAX_SHOWN_ARGS && !args.includes("--read")) {
-    process.stderr.write(
-      `the arguments run to ${request.args.length} characters, more than a terminal shows
-read all of them in ${store.pendingPath(id)}, then approve with: cordon approve ${id} --read
-`
-    );
-    return 1;
+  let show = false;
+  let read = false;
+  let declared;
+  for (let i = 1; i < args.length; i++) {
+    const option = args[i];
+    if (option === "--show" && !show) show = true;
+    else if (option === "--read" && !read) read = true;
+    else if (option === "--as" && declared === void 0 && args[i + 1] !== void 0 && !args[i + 1].startsWith("--")) declared = args[++i];
+    else {
+      process.stderr.write(`invalid approval option: ${visible(option)}
+${USAGE}
+`);
+      return 2;
+    }
   }
+  if (show && (read || declared !== void 0)) {
+    process.stderr.write(`--show only displays the pending call; use it separately from --read or --as
+${USAGE}
+`);
+    return 2;
+  }
+  const request = store.waiting(id);
   if (request === null) {
     process.stderr.write(`nothing waits under ${id}: it was never asked for, was already used, is older than an hour, or was asked again under a changed context
 `);
     return 1;
   }
-  const at = args.indexOf("--as");
-  const declared = at >= 0 ? args[at + 1] : void 0;
-  if (at >= 0 && (declared === void 0 || declared.startsWith("--"))) {
-    process.stderr.write(`--as takes a name
-${USAGE}
+  if (show) {
+    process.stdout.write(`pending, not approved: ${visible(request.tool)}
+    arguments: ${visible(request.args)}
+    ${asked(request)}${visible(request.reason)}
 `);
-    return 2;
+    return 0;
+  }
+  if (request.args.length > MAX_SHOWN_ARGS && !read) {
+    process.stderr.write(
+      `the arguments run to ${request.args.length} characters, more than a terminal shows
+show all of them safely with: cordon approve ${id} --show
+the complete request file is ${visible(store.pendingPath(id))}
+then approve with: cordon approve ${id} --read
+`
+    );
+    return 1;
   }
   const event = {
     at: (/* @__PURE__ */ new Date()).toISOString(),

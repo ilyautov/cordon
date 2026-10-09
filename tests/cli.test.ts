@@ -531,6 +531,29 @@ describe('cordon approve', () => {
     expect(new ApprovalStore(home).take(id, '').taken).toBe(true)
   })
 
+  it('shows all long arguments with terminal controls escaped without approving', () => {
+    const home = mkdtempSync(join(tmpdir(), 'cordon-approve-'))
+    const args = { body: 'x'.repeat(5000) + '\u001b[2J', to: 'attacker\u202E@example.com' }
+    const id = approvalId('s', { tool: 'send_email', args })
+    new ApprovalStore(home).request(id, { tool: 'send_email', reason: 'outside the certificate', args })
+
+    const shown = run(['approve', id, '--show'], '', { CORDON_HOME: home })
+    expect(shown.status).toBe(0)
+    expect(shown.stdout).toContain('attacker\\u202e@example.com')
+    expect(shown.stdout).toContain('\\u001b[2J')
+    expect(shown.stdout).not.toContain('\u001b')
+    expect(shown.stdout).not.toContain('\u202E')
+    expect(new ApprovalStore(home).take(id, '').taken).toBe(false)
+
+    const mixed = run(['approve', id, '--show', '--read'], '', { CORDON_HOME: home })
+    expect(mixed.status).toBe(2)
+    expect(new ApprovalStore(home).take(id, '').taken).toBe(false)
+
+    const mistyped = run(['approve', id, '--showw'], '', { CORDON_HOME: home })
+    expect(mistyped.status).toBe(2)
+    expect(new ApprovalStore(home).take(id, '').taken).toBe(false)
+  })
+
   it('a malformed id is a usage error', () => {
     expect(run(['approve', '../policy'], '', { CORDON_HOME: mkdtempSync(join(tmpdir(), 'cordon-approve-')) }).status).toBe(2)
   })
