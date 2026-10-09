@@ -17318,7 +17318,8 @@ var HARNESS_LIMITS = [
       "Codex puts a question to no one, in codex exec or the TUI (the call ran unasked), so every question is a refusal naming a one-time approval: cordon approve <id>",
       "arguments are changed only next to an explicit allow, which would override your own approval settings, so a call Cordon would cut is refused instead",
       "a result is replaced only through a block: the model reads the cleaned result as a tool error",
-      "a hook that crashes, hangs or prints garbage lets the call through"
+      "a hook that crashes, hangs or prints garbage lets the call through",
+      "in Codex CLI 0.161.0, write_stdin into an allowed shell session emitted no hook event; restricted runner workflows need --disable shell_tool and OS confinement"
     ]
   },
   {
@@ -17599,7 +17600,7 @@ function printDoctor(home) {
   process.stdout.write(`self-check: ${report2.selfCheck}
 `);
   process.stdout.write(
-    "note: doctor checks the mechanism, not the wiring. Whether the harness actually calls the hook is shown by /hooks in Claude Code and by /hooks panel in Gemini CLI\n"
+    "note: doctor checks the mechanism, not the wiring. Review and trust the hook entries in /hooks for Claude Code and Codex CLI, or in the /hooks panel for Gemini CLI; then confirm a harmless refusal in the journal\n"
   );
   if (report2.warnings.length === 0) {
     process.stdout.write("no warnings\n");

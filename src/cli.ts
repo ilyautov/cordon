@@ -153,6 +153,7 @@ const HARNESS_LIMITS: readonly HarnessReport[] = [
       'arguments are changed only next to an explicit allow, which would override your own approval settings, so a call Cordon would cut is refused instead',
       'a result is replaced only through a block: the model reads the cleaned result as a tool error',
       'a hook that crashes, hangs or prints garbage lets the call through',
+      'in Codex CLI 0.161.0, write_stdin into an allowed shell session emitted no hook event; restricted runner workflows need --disable shell_tool and OS confinement',
     ],
   },
   {
@@ -590,8 +591,8 @@ function printDoctor(home: string): number {
   // and that is the most dangerous state there is.
   process.stdout.write(
     'note: doctor checks the mechanism, not the wiring. ' +
-      'Whether the harness actually calls the hook is shown by /hooks in Claude Code ' +
-      'and by /hooks panel in Gemini CLI\n',
+      'Review and trust the hook entries in /hooks for Claude Code and Codex CLI, ' +
+      'or in the /hooks panel for Gemini CLI; then confirm a harmless refusal in the journal\n',
   )
   if (report.warnings.length === 0) {
     process.stdout.write('no warnings\n')
