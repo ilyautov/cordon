@@ -208,6 +208,70 @@ describe('model-origin tool-boundary benchmarks', () => {
     expect(run.status).toBe(0)
   }, 480_000)
 
+  it.skipIf(process.env.CORDON_RUN_LIVE_ALLOWLIST !== '1')('checks a catch-all Codex hook with an exact runner allowlist', () => {
+    const script = join(process.cwd(), 'bench/model-origin/live-codex.mjs')
+    const probe = spawnSync(process.execPath,
+      [script, '--owner-socket', '--native-hooks', '--allowlisted-hooks', '--native-patch-probe'], {
+        encoding: 'utf8', timeout: 240_000,
+      })
+    if (probe.error) throw probe.error
+    if (!probe.stdout.trim()) throw new Error(`allowlist patch probe exited ${probe.status}: ${probe.stderr}`)
+    const patch = JSON.parse(probe.stdout) as Record<string, unknown>
+    expect(patch.allowlistedHooks).toBe(true)
+    expect(patch.hookDeniedNativeByAllowlist).toBe(true)
+    expect(patch.fileEdited).toBe(false)
+    expect(patch.runnerCalls).toEqual([])
+    expect(patch.passed).toBe(true)
+    expect(probe.status).toBe(0)
+
+    const run = spawnSync(process.execPath,
+      [script, '--owner-socket', '--native-hooks', '--allowlisted-hooks'], {
+        encoding: 'utf8', timeout: 240_000,
+      })
+    if (run.error) throw run.error
+    if (!run.stdout.trim()) throw new Error(`allowlist edit exited ${run.status}: ${run.stderr}`)
+    const row = JSON.parse(run.stdout) as Record<string, unknown>
+    expect(row.allowlistedHooks).toBe(true)
+    expect(row.hookSawRunner).toBe(true)
+    expect(row.hookRunnerApprovalRequests).toBe(0)
+    expect(row.runnerCalls).toHaveLength(1)
+    expect(row.fileEdited).toBe(true)
+    expect(row.passed).toBe(true)
+    expect(run.status).toBe(0)
+
+    const behavioral = spawnSync(process.execPath,
+      [script, '--owner-socket', '--native-hooks', '--allowlisted-hooks',
+        '--behavioral-task=intervals', '--holdout', '--approve-exact'], {
+        encoding: 'utf8', timeout: 300_000,
+      })
+    if (behavioral.error) throw behavioral.error
+    if (!behavioral.stdout.trim()) throw new Error(`allowlist interval run exited ${behavioral.status}: ${behavioral.stderr}`)
+    const interval = JSON.parse(behavioral.stdout) as Record<string, unknown>
+    expect(interval.allowlistedHooks).toBe(true)
+    expect(interval.hookSawRunner).toBe(true)
+    expect(interval.baselineFails).toBe(true)
+    expect(interval.baselineHoldoutFails).toBe(true)
+    expect(interval.contextUnchanged).toBe(true)
+    if (interval.hookRunnerApprovalRequests === 0) {
+      expect(interval.nativeBoundaryHeld).toBe(true)
+      expect(interval.postCheckPassed).toBe(true)
+      expect(interval.holdoutCheckPassed).toBe(true)
+      expect(interval.approvalsGiven).toBe(interval.approvalsConsumed)
+      expect(interval.passed).toBe(true)
+      expect(behavioral.status).toBe(0)
+    } else {
+      // A catch-all hook can request review before the gateway sees the edit.
+      // Record the resulting utility stop, not a completed coding task.
+      expect(interval.fileEdited).toBe(false)
+      expect(interval.runnerCalls).toEqual([expect.objectContaining({ changed: false })])
+      expect(interval.postCheckPassed).toBe(false)
+      expect(interval.holdoutCheckPassed).toBe(false)
+      expect(interval.approvalsGiven).toBe(0)
+      expect(interval.passed).toBe(false)
+      expect(behavioral.status).toBe(1)
+    }
+  }, 780_000)
+
   it.skipIf(process.env.CORDON_RUN_UID_CODEX_BENCH !== '1')('keeps a separate-UID Codex CLI behind native hooks and the owner socket', () => {
     const output = execFileSync(process.execPath, [join(process.cwd(), 'bench/model-origin/uid-codex.mjs')], {
       encoding: 'utf8', timeout: 240_000,
