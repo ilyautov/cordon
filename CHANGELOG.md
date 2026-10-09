@@ -4,6 +4,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versions follo
 
 ## [Unreleased]
 
+A source-selected opaque identifier now marks an untrusted read even beside an inert `text: "ok"`. The `id`-only regression previously let a later email go to an owner-unnamed address. The identifier stays byte-for-byte intact; a paired ordinary ticket and owner-named recipient still pass. The same extraction feeds the hook adapters and the MCP gateway.
+
 Text in a tool result's `title`, `label`, `name`, `query`, `command` or `code` field now marks the untrusted read even though it stays out of verbatim provenance. A title-only ticket response previously let an agent send to an address the owner had not named; the paired regression now refuses that call while allowing a normal title and the owner-named recipient. This changes the exposure decision, not the certificate or the sanitizer.
 
 The output cleaner now rebuilds media-bearing results with the same field rules it uses to find text. A skipped image URL could previously consume the replacement intended for a later text block, leaving that block unchanged. The regression keeps the media field intact and replaces the text in its original slot.

@@ -664,11 +664,10 @@ export class Cordon {
   }
 
   /**
-   * Marks the fact of a read whose content Cordon did not see: an image in
-   * a result, or a harness that hands the hook only the text of what the
-   * model got. The inert exemption in `observe` rests on having seen the
-   * whole result, so it cannot apply here; an untrusted source marks the
-   * session whatever its text said.
+   * Marks the fact of a read whose content Cordon did not clean: an image,
+   * a source-selected opaque identifier, or a harness that hands the hook
+   * only part of what the model got. These values must keep their spelling,
+   * but an inert `text: "ok"` beside them cannot exempt the later action.
    */
   observeUnseen(source: Source): void {
     if (source.trust !== 'untrusted') return

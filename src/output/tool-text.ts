@@ -31,6 +31,8 @@ export interface Extracted {
    * the source put them there or the user's own link came back.
    */
   links: string[]
+  /** A source-selected identifier that stays intact but still counts as a read. */
+  opaque: boolean
 }
 
 /**
@@ -75,9 +77,9 @@ const LABEL_KEYS: ReadonlySet<string> = new Set([
  * Fields whose value identifies rather than says: a link, a path, an
  * identifier, a hash, a media type. They are neither cleaned nor recorded.
  *
- * Not cleaning them is safe because there is no prose in them to hide a layer
- * inside, and rewriting an identifier is worse than leaving it: the model
- * would be handed a path or a checksum that no longer matches anything.
+ * Rewriting an identifier would hand the model a path or checksum that no
+ * longer matches anything. The fact of reading a source-selected value still
+ * reaches the core as `opaque`, even when it has no whitespace or markup.
  */
 const OPAQUE_KEYS: ReadonlySet<string> = new Set([
   'type', 'subtype', 'kind', 'role', 'mode', 'status', 'state',
@@ -121,10 +123,28 @@ interface Scan {
   size: number
   unseen: boolean
   links: string[]
+  opaque: boolean
 }
 
 /** Identifier fields that hold a link rather than a path or an id. */
 const LINK_KEYS: ReadonlySet<string> = new Set(['uri', 'url', 'urls', 'href', 'link', 'links'])
+
+/** Protocol literals and machine metadata do not give a source a new instruction. */
+const STRUCTURAL_VALUES: ReadonlySet<string> = new Set([
+  'text', 'image', 'audio', 'video', 'document', 'resource', 'resource_link',
+  'user', 'assistant', 'tool', 'system', 'base64', 'json', 'utf8', 'utf-8',
+  'ok', 'success', 'error', 'completed', 'pending', 'failed', 'true', 'false',
+])
+
+function inertOpaque(key: string, value: string): boolean {
+  const folded = fold(key)
+  if (value === '' || /^-?\d+(?:\.\d+)?$/u.test(value) || STRUCTURAL_VALUES.has(value.toLowerCase())) return true
+  if (folded === 'mimetype' || folded === 'mediatype') return /^[\w.+-]+\/[\w.+-]+$/u.test(value)
+  if (folded === 'sha' || folded === 'hash') return /^[a-f0-9]{32,128}$/iu.test(value)
+  if (folded === 'timestamp' || folded === 'date') return /^\d{4}-\d{2}-\d{2}(?:T[\d:.+-]+Z?)?$/u.test(value)
+  if (folded === 'version') return /^v?\d+(?:\.\d+)*(?:[-+][\w.-]+)?$/u.test(value)
+  return false
+}
 
 /**
  * Block types and fields that carry media rather than text, across MCP
@@ -153,14 +173,14 @@ export function extractText(tool: string, response: unknown, textless = false): 
   // Before the string case: Kimi and Codex report a write as a plain string
   // ("Wrote 1 bytes to notes.txt"), and read as content it marked the session
   // as having read something untrusted after every edit the model made.
-  if (textless || TEXTLESS.has(tool)) return { known: true, parts: [], unseen: false, links: [] }
-  if (typeof response === 'string') return { known: true, parts: [{ text: response, content: true }], unseen: false, links: [] }
+  if (textless || TEXTLESS.has(tool)) return { known: true, parts: [], unseen: false, links: [], opaque: false }
+  if (typeof response === 'string') return { known: true, parts: [{ text: response, content: true }], unseen: false, links: [], opaque: false }
 
-  const scan: Scan = { parts: [], known: true, nodes: 0, size: 0, unseen: false, links: [] }
+  const scan: Scan = { parts: [], known: true, nodes: 0, size: 0, unseen: false, links: [], opaque: false }
   visit(response, '', 0, scan)
   return scan.known
-    ? { known: true, parts: scan.parts, unseen: scan.unseen, links: scan.links }
-    : { known: false, parts: [], unseen: false, links: [] }
+    ? { known: true, parts: scan.parts, unseen: scan.unseen, links: scan.links, opaque: scan.opaque }
+    : { known: false, parts: [], unseen: false, links: [], opaque: false }
 }
 
 /**
@@ -199,6 +219,7 @@ function visit(node: unknown, key: string, depth: number, scan: Scan, media = fa
       return
     }
     if (role === 'opaque' && node !== '' && LINK_KEYS.has(fold(key))) scan.links.push(node)
+    if (role === 'opaque' && !LINK_KEYS.has(fold(key)) && !inertOpaque(key, node)) scan.opaque = true
     if (role === 'text' || role === 'label') {
       scan.size += node.length
       if (scan.size > MAX_TEXT) {

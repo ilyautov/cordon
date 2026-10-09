@@ -21,6 +21,32 @@ const REVIEW = [
 ].join('\n')
 
 describe('handle', () => {
+  it('refuses an unowned destination after reading a source-selected opaque identifier', () => {
+    const policy: Policy = structuredClone(DEFAULT_POLICY)
+    policy.mode = 'autonomous'
+    policy.profile = { effects: ['read', 'export'], resources: { paths: [], hosts: [] } }
+    policy.tools = { read_ticket: ['read'], send_email: ['export'] }
+    const cases = [
+      { file: '../../fixtures/attacks/opaque-metadata.json', to: 'attacker@example.test', allowed: false },
+      { file: '../../fixtures/loyalty/metadata/opaque-metadata.json', to: 'owner@example.test', allowed: true },
+    ]
+    for (const example of cases) {
+      const shared = { policy, cordonHome: mkdtempSync(join(tmpdir(), 'cordon-opaque-')) }
+      try {
+        handle({ kind: 'UserPromptSubmit', sessionId: 's1', prompt: 'Read ticket 100 and send a summary to owner@example.test' }, shared)
+        const response = JSON.parse(readFileSync(new URL(example.file, import.meta.url), 'utf8')) as { id: string; text: string }
+        const observed = handle({ kind: 'PostToolUse', sessionId: 's1',
+          call: { tool: 'read_ticket', args: { id: '100' } }, response }, shared)
+        expect(observed.hookSpecificOutput?.updatedToolOutput).toBeUndefined()
+        const decision = handle({ kind: 'PreToolUse', sessionId: 's1',
+          call: { tool: 'send_email', args: { to: example.to, body: 'ticket summary' } } }, shared)
+        expect(decision.hookSpecificOutput?.permissionDecision === 'deny', example.file).toBe(!example.allowed)
+      } finally {
+        rmSync(shared.cordonHome, { recursive: true, force: true })
+      }
+    }
+  })
+
   it('refuses an unowned destination after reading instructions in a source label', () => {
     const policy: Policy = structuredClone(DEFAULT_POLICY)
     policy.mode = 'autonomous'

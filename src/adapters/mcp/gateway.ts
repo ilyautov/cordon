@@ -1071,6 +1071,7 @@ function observeReadableResult(
     return envelope.text
   })
   cordon.observeLinks(extracted.links, source)
+  if (extracted.opaque) cordon.observeUnseen(source)
   if (!changed) return { value }
   if (!substitutable) return null
   const next = replaceText('', value, cleaned)

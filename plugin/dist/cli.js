@@ -14022,11 +14022,10 @@ var Cordon = class {
     this.persist();
   }
   /**
-   * Marks the fact of a read whose content Cordon did not see: an image in
-   * a result, or a harness that hands the hook only the text of what the
-   * model got. The inert exemption in `observe` rests on having seen the
-   * whole result, so it cannot apply here; an untrusted source marks the
-   * session whatever its text said.
+   * Marks the fact of a read whose content Cordon did not clean: an image,
+   * a source-selected opaque identifier, or a harness that hands the hook
+   * only part of what the model got. These values must keep their spelling,
+   * but an inert `text: "ok"` beside them cannot exempt the later action.
    */
   observeUnseen(source) {
     if (source.trust !== "untrusted") return;
@@ -14735,14 +14734,48 @@ var MAX_NODES = 2e4;
 var MAX_TEXT = 8e6;
 var TOKEN_LIMIT = 64;
 var LINK_KEYS = /* @__PURE__ */ new Set(["uri", "url", "urls", "href", "link", "links"]);
+var STRUCTURAL_VALUES = /* @__PURE__ */ new Set([
+  "text",
+  "image",
+  "audio",
+  "video",
+  "document",
+  "resource",
+  "resource_link",
+  "user",
+  "assistant",
+  "tool",
+  "system",
+  "base64",
+  "json",
+  "utf8",
+  "utf-8",
+  "ok",
+  "success",
+  "error",
+  "completed",
+  "pending",
+  "failed",
+  "true",
+  "false"
+]);
+function inertOpaque(key, value) {
+  const folded = fold(key);
+  if (value === "" || /^-?\d+(?:\.\d+)?$/u.test(value) || STRUCTURAL_VALUES.has(value.toLowerCase())) return true;
+  if (folded === "mimetype" || folded === "mediatype") return /^[\w.+-]+\/[\w.+-]+$/u.test(value);
+  if (folded === "sha" || folded === "hash") return /^[a-f0-9]{32,128}$/iu.test(value);
+  if (folded === "timestamp" || folded === "date") return /^\d{4}-\d{2}-\d{2}(?:T[\d:.+-]+Z?)?$/u.test(value);
+  if (folded === "version") return /^v?\d+(?:\.\d+)*(?:[-+][\w.-]+)?$/u.test(value);
+  return false;
+}
 var MEDIA_TYPES = /* @__PURE__ */ new Set(["image", "audio", "video", "document", "input_image", "input_audio", "image_url"]);
 var MEDIA_KEYS = /* @__PURE__ */ new Set(["blob", "inlinedata", "filedata", "imageurl"]);
 function extractText(tool, response, textless = false) {
-  if (textless || TEXTLESS.has(tool)) return { known: true, parts: [], unseen: false, links: [] };
-  if (typeof response === "string") return { known: true, parts: [{ text: response, content: true }], unseen: false, links: [] };
-  const scan = { parts: [], known: true, nodes: 0, size: 0, unseen: false, links: [] };
+  if (textless || TEXTLESS.has(tool)) return { known: true, parts: [], unseen: false, links: [], opaque: false };
+  if (typeof response === "string") return { known: true, parts: [{ text: response, content: true }], unseen: false, links: [], opaque: false };
+  const scan = { parts: [], known: true, nodes: 0, size: 0, unseen: false, links: [], opaque: false };
   visit2(response, "", 0, scan);
-  return scan.known ? { known: true, parts: scan.parts, unseen: scan.unseen, links: scan.links } : { known: false, parts: [], unseen: false, links: [] };
+  return scan.known ? { known: true, parts: scan.parts, unseen: scan.unseen, links: scan.links, opaque: scan.opaque } : { known: false, parts: [], unseen: false, links: [], opaque: false };
 }
 function replaceText(tool, response, parts) {
   const found2 = extractText(tool, response);
@@ -14767,6 +14800,7 @@ function visit2(node, key, depth, scan, media = false) {
       return;
     }
     if (role === "opaque" && node !== "" && LINK_KEYS.has(fold(key))) scan.links.push(node);
+    if (role === "opaque" && !LINK_KEYS.has(fold(key)) && !inertOpaque(key, node)) scan.opaque = true;
     if (role === "text" || role === "label") {
       scan.size += node.length;
       if (scan.size > MAX_TEXT) {
@@ -15138,6 +15172,7 @@ function observe(cordon, event, env, dialect) {
     return envelope.text;
   });
   cordon.observeLinks(extracted.links, source);
+  if (extracted.opaque) cordon.observeUnseen(source);
   if (extracted.unseen) cordon.markUnredacted();
   else if (dialect.partialResults && !dialect.textless(event.call)) cordon.observeUnseen(source);
   cordon.recordLookup(event.call, cleaned.filter((_, index) => extracted.parts[index].content));
@@ -16294,6 +16329,7 @@ function observeReadableResult(value, tool, source, cordon, texts, allowUnseen =
     return envelope.text;
   });
   cordon.observeLinks(extracted.links, source);
+  if (extracted.opaque) cordon.observeUnseen(source);
   if (!changed2) return { value };
   if (!substitutable) return null;
   const next = replaceText("", value, cleaned);
