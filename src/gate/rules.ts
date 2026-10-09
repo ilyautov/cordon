@@ -26,6 +26,7 @@ export const RULES = {
   failure: { class: 'guard-failure', tier: 'precaution' },
   pin: { class: 'tool-rug-pull', tier: 'evidence' },
   'tool-blocked': { class: 'out-of-scope', tier: 'precaution' },
+  'tool-not-allowed': { class: 'out-of-scope', tier: 'precaution' },
   'self-protection': { class: 'guard-tampering', tier: 'precaution' },
   'agent-config': { class: 'guard-tampering', tier: 'suspicion' },
   unscanned: { class: 'unscanned-content', tier: 'suspicion' },

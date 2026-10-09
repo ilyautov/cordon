@@ -27,7 +27,7 @@ import { APPROVAL_TTL_MS, ApprovalStore, MAX_SHOWN_ARGS, type ShownRequest } fro
 import { MemoryLedger } from './session/memory.js'
 
 const USAGE =
-  'usage: cordon scan <file|-> [--json] | cordon hook [--harness claude-code|gemini|codex|kimi|deepseek] | cordon mcp [--wait-for-approval-ms N] -- <server command...> | cordon mcp serve --socket PATH [--wait-for-approval-ms N] -- <server command...> | cordon mcp connect --socket PATH --owner-uid UID | cordon mcp approve -- <server command...> | cordon doctor | cordon init [--profile locked|research|documents|coding|service] [--force] | cordon log [--last N] [--json] | cordon approve [id [--read] [--as name]] | cordon policy check|explain [file] | cordon policy apply <file> [--accept-warnings] [--as name] | cordon audit [dir] [--json|--sarif] [--fail-on high|medium|low]'
+  'usage: cordon scan <file|-> [--json] | cordon hook [--harness claude-code|gemini|codex|kimi|deepseek] | cordon mcp [--wait-for-approval-ms N] -- <server command...> | cordon mcp serve --socket PATH [--wait-for-approval-ms N] -- <server command...> | cordon mcp connect --socket PATH --owner-uid UID | cordon mcp approve -- <server command...> | cordon doctor | cordon init [--profile locked|research|documents|coding|service] [--force] | cordon log [--last N] [--json] | cordon approve [id [--show|--read] [--as name]] | cordon policy check|explain [file] | cordon policy apply <file> [--accept-warnings] [--as name] | cordon audit [dir] [--json|--sarif] [--fail-on high|medium|low]'
 
 /**
  * Event parsing depends on the harness, so the harness is named explicitly.
@@ -153,6 +153,7 @@ const HARNESS_LIMITS: readonly HarnessReport[] = [
       'arguments are changed only next to an explicit allow, which would override your own approval settings, so a call Cordon would cut is refused instead',
       'a result is replaced only through a block: the model reads the cleaned result as a tool error',
       'a hook that crashes, hangs or prints garbage lets the call through',
+      'in Codex CLI 0.161.0, write_stdin into an allowed shell session emitted no hook event; restricted runner workflows need --disable shell_tool and OS confinement',
     ],
   },
   {
@@ -590,8 +591,8 @@ function printDoctor(home: string): number {
   // and that is the most dangerous state there is.
   process.stdout.write(
     'note: doctor checks the mechanism, not the wiring. ' +
-      'Whether the harness actually calls the hook is shown by /hooks in Claude Code ' +
-      'and by /hooks panel in Gemini CLI\n',
+      'Review and trust the hook entries in /hooks for Claude Code and Codex CLI, ' +
+      'or in the /hooks panel for Gemini CLI; then confirm a harmless refusal in the journal\n',
   )
   if (report.warnings.length === 0) {
     process.stdout.write('no warnings\n')
@@ -955,23 +956,41 @@ function approveCall(args: string[]): number {
     process.stderr.write(`not an approval id: ${visible(id)}\n${USAGE}\n`)
     return 2
   }
-  const request = store.waiting(id)
-  if (request !== null && request.args.length > MAX_SHOWN_ARGS && !args.includes('--read')) {
-    process.stderr.write(
-      `the arguments run to ${request.args.length} characters, more than a terminal shows\n` +
-        `read all of them in ${store.pendingPath(id)}, then approve with: cordon approve ${id} --read\n`,
-    )
-    return 1
+  let show = false
+  let read = false
+  let declared: string | undefined
+  for (let i = 1; i < args.length; i++) {
+    const option = args[i]
+    if (option === '--show' && !show) show = true
+    else if (option === '--read' && !read) read = true
+    else if (option === '--as' && declared === undefined && args[i + 1] !== undefined &&
+      !args[i + 1]!.startsWith('--')) declared = args[++i]
+    else {
+      process.stderr.write(`invalid approval option: ${visible(option)}\n${USAGE}\n`)
+      return 2
+    }
   }
+  if (show && (read || declared !== undefined)) {
+    process.stderr.write(`--show only displays the pending call; use it separately from --read or --as\n${USAGE}\n`)
+    return 2
+  }
+  const request = store.waiting(id)
   if (request === null) {
     process.stderr.write(`nothing waits under ${id}: it was never asked for, was already used, is older than an hour, or was asked again under a changed context\n`)
     return 1
   }
-  const at = args.indexOf('--as')
-  const declared = at >= 0 ? args[at + 1] : undefined
-  if (at >= 0 && (declared === undefined || declared.startsWith('--'))) {
-    process.stderr.write(`--as takes a name\n${USAGE}\n`)
-    return 2
+  if (show) {
+    process.stdout.write(`pending, not approved: ${visible(request.tool)}\n    arguments: ${visible(request.args)}\n    ${asked(request)}${visible(request.reason)}\n`)
+    return 0
+  }
+  if (request.args.length > MAX_SHOWN_ARGS && !read) {
+    process.stderr.write(
+      `the arguments run to ${request.args.length} characters, more than a terminal shows\n` +
+        `show all of them safely with: cordon approve ${id} --show\n` +
+        `the complete request file is ${visible(store.pendingPath(id))}\n` +
+        `then approve with: cordon approve ${id} --read\n`,
+    )
+    return 1
   }
   // No record, no approval: an owner's act nobody can audit afterwards is
   // the gap this record exists to close. The line is written first, so no
@@ -1034,7 +1053,9 @@ function policyCommand(args: string[]): number {
   const path = file ?? join(cordonHome(), 'policy.yaml')
   let policy: Policy
   try {
-    policy = loadPolicyFile(path)
+    // An absent active policy uses the safe default; an explicitly named
+    // draft must exist, or a typo would be reported as a valid mandate.
+    policy = file === undefined ? loadPolicyFile(path) : parsePolicy(readFileSync(path, 'utf8'), path)
   } catch (error) {
     process.stderr.write(`cordon policy ${verb}: ${visible((error as Error).message)}\n`)
     return 1

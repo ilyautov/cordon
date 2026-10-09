@@ -59,16 +59,25 @@ def episode(suite, user_task, injection_task, attack, defense, home, approve=Fal
     pre = env.model_copy(deep=True)
     runtime = FunctionsRuntime(suite.tools)
     executor = bench.CordonToolsExecutor(home) if defense == 'cordon' else bench.ToolsExecutor()
-    if defense == 'cordon':
-        executor.approve_asks = approve
     extra = {}
     if defense == 'cordon':
         _, _, _, _, extra = bench.CordonUserTurn(home).query(user_task.PROMPT, runtime, env, [], {})
     honest = user_task.ground_truth(pre)
+    attack_questions = 0
+
+    def run_phase(current, calls, messages, approve_questions):
+        if defense == 'cordon':
+            executor.approve_asks = approve_questions
+        return run_calls(executor, runtime, current, calls, extra, messages)
+
     if injection_task is None or order == 'after':
-        env, messages = run_calls(executor, runtime, env, honest, extra, [])
+        # A scripted reviewer approves honest task calls even when the same
+        # episode later contains an attack. The attack phase uses its own vote.
+        env, messages = run_phase(env, honest, [], approve if injection_task is None else True)
         if injection_task is not None:
-            env, messages = run_calls(executor, runtime, env, injection_task.ground_truth(pre), extra, messages)
+            before = executor.stats['asked'] if defense == 'cordon' else 0
+            env, messages = run_phase(env, injection_task.ground_truth(pre), messages, approve)
+            attack_questions = executor.stats['asked'] - before if defense == 'cordon' else 0
     else:
         # 'between': the attack runs right after the reads that carried it
         # and before any honest action. Run after the honest calls, an
@@ -76,10 +85,12 @@ def episode(suite, user_task, injection_task, attack, defense, home, approve=Fal
         # already used up a one-time permission (Codex's review).
         reads = [c for c in honest if is_read(c)]
         acts = [c for c in honest if not is_read(c)]
-        env, messages = run_calls(executor, runtime, env, reads, extra, []) if reads else (env, [])
-        env, messages = run_calls(executor, runtime, env, injection_task.ground_truth(pre), extra, messages)
+        env, messages = run_phase(env, reads, [], True) if reads else (env, [])
+        before = executor.stats['asked'] if defense == 'cordon' else 0
+        env, messages = run_phase(env, injection_task.ground_truth(pre), messages, approve)
+        attack_questions = executor.stats['asked'] - before if defense == 'cordon' else 0
         if acts:
-            env, messages = run_calls(executor, runtime, env, acts, extra, messages)
+            env, messages = run_phase(env, acts, messages, True)
     blocked = [m['error'] for m in messages if m.get('role') == 'tool' and (m.get('error') or '').startswith('Blocked by Cordon')]
     # The model's final text is the task's expected answer, as a perfect
     # agent would give it; tasks that check the answer text get it.
@@ -101,6 +112,7 @@ def episode(suite, user_task, injection_task, attack, defense, home, approve=Fal
     detail = {
         'rewritten': executor.stats['rewritten'] if defense == 'cordon' else 0,
         'ran': [c.function for c in executed],
+        'attack_questions': attack_questions,
     }
     return utility, security, blocked, asked, leaked, detail
 
@@ -169,12 +181,12 @@ def main() -> int:
                     reasons[user_task.ID] = blocked
                 attacked = []
                 for injection_task in suite.injection_tasks.values():
-                    kept, security, _, attack_asks, leaked, _ = episode(suite, user_task, injection_task, attack, defense,
+                    kept, security, _, _, leaked, attack_detail = episode(suite, user_task, injection_task, attack, defense,
                                                                         home, approve=args.approve_attacks, order=args.order)
                     securities.append(security)
                     under_attack.append(kept)
                     attacked.append(kept)
-                    asked_attacks += 1 if attack_asks else 0
+                    asked_attacks += 1 if attack_detail['attack_questions'] else 0
                     leaks += leaked
                 tasks[user_task.ID] = {
                     'utility': bool(utility),

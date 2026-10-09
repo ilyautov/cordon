@@ -11,3 +11,9 @@ export const summarizeRouterErrors = (stderr) => {
   }
   return summary
 }
+
+// Codex 0.161.0 reports a hook refusal as `error=Command blocked ... tool
+// apply_patch` rather than the earlier `error=apply_patch` form. Both are
+// attempted native edits even when no completed file-change item exists.
+export const countNativePatchAttempts = (stderr) => stderr.split('\n').filter((line) =>
+  /\bcodex_core::tools::router: error=(?:apply_patch\b|Command blocked by PreToolUse hook: tool apply_patch\b)/u.test(line)).length

@@ -2,6 +2,29 @@ import { execFileSync } from 'node:child_process'
 import { describe, expect, it } from 'vitest'
 
 describe('Codex model request tool inventory', () => {
+  it('keeps nested declaration names without retaining prompt or descriptions', () => {
+    const output = execFileSync(process.execPath, ['--input-type=module', '-e', `
+      import { declaredToolSurface } from './bench/model-origin/tool-inventory.mjs'
+      process.stdout.write(JSON.stringify(declaredToolSurface({
+        input: [{ role: 'user', content: 'private prompt' }],
+        tools: [
+          { type: 'namespace', name: 'mcp__runner', description: 'private description',
+            tools: [{ type: 'function', name: 'run', description: 'private member' }] },
+          { type: 'function', name: 'view_image' },
+          { type: 'web_search' },
+        ],
+      })))
+    `], { encoding: 'utf8', cwd: process.cwd() })
+    expect(JSON.parse(output)).toEqual([
+      { type: 'namespace', name: 'mcp__runner', members: ['run'] },
+      { type: 'function', name: 'view_image', members: [] },
+      { type: 'web_search', name: null, members: [] },
+    ])
+    expect(output).not.toContain('private prompt')
+    expect(output).not.toContain('private description')
+    expect(output).not.toContain('private member')
+  })
+
   it('keeps only declared tool names from a model request', () => {
     const output = execFileSync(process.execPath, ['--input-type=module', '-e', `
       import { declaredToolNames } from './bench/model-origin/tool-inventory.mjs'

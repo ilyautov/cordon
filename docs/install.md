@@ -28,9 +28,9 @@ npm ci && npm run build
 
 ## Checking that the hook is in place
 
-The list of installed hooks is shown by `/hooks` in Claude Code. It answers the question "is it registered", not the question "does it work".
+The list of installed hooks is shown by `/hooks` in Claude Code. It answers whether the hook is registered. Confirm that the host trusts it and run a harmless refusal probe in a disposable workspace before relying on the installation.
 
-The second question is answered by `cordon doctor`. It reads the effective policy, runs a built-in attack sample through the whole path, and names the dangerous parts of the configuration.
+`cordon doctor` checks the Cordon mechanism separately. It reads the effective policy, runs a built-in attack sample through the core path, and names the dangerous parts of the configuration. It cannot prove that the host invoked the hook for a real tool call.
 
 The path to an installed plugin contains the marketplace name and the version, so it changes on every update. Do not hard-code it in scripts; ask the harness instead:
 
@@ -75,6 +75,8 @@ Expected answer: a refusal mentioning self-protection.
 
 The path to the installed plugin is shown by `/plugin`; it differs between installs. Empty output or a `node` error means there is no defence, and that is exactly the case where the absence of firings is indistinguishable from a working Cordon.
 
+The direct command checks the CLI, not whether Claude Code invoked its hook. Before widening the default `read, summarize` profile, start a new Claude Code session in a disposable directory and ask it to create a harmless marker there with its normal file tool. The `PreToolUse` hook must refuse the write, the Cordon journal must record the refusal, and the marker must remain absent. If the marker appears, the installed path is not protecting that call. This probe covers one native write path; repeat with the tools and permissions your real workflow will use.
+
 ## What Cordon keeps on disk
 
 Every hook event is a separate process, so memory between them lives as files in Cordon's home directory.
@@ -118,6 +120,8 @@ No profile grants `delete`, `export` or `financial`, because those are irreversi
 `budgets` is a list of `{effect, limit, per}` with `per` one of `minute`, `hour`, `day`: at most `limit` calls of that effect go through in any sliding window of that length. The count is kept per effect and window, shared by every session, every process and both harnesses, so an agent that restarts itself or switches between a built-in and an MCP tool does not get a fresh budget; changing the policy keeps the counts and applies the new limit at once. It is kept as one file per call, so processes racing each other can only over-count. A call that may run spends: one allowed or rewritten, one put to you in the harness, and one that runs on `cordon approve`. A call refused by one budget takes back what it reserved in the others. A budget counts calls by their effect class, so a tool no policy classifies matches none; such a call is escalated rather than allowed, and a question you answer yes to in the harness then runs uncounted. Past the limit a call is refused with the rule `budget`, in either mode, no question is asked, and no approval lifts it. A count that cannot be read refuses the call too. Two budgets on the same effect and window stop the load. A LangChain service that loads its policy from a file can pass `policyFile` to the middleware, and it then stops acting when that file changes, as `cordon mcp` does.
 
 `cordon policy explain [file]` reads a policy back in plain words, the one in force by default, with the defaults merged in. It says what each field does and what it does not: `destinations` count as named by you after an untrusted read and do not confine where the agent sends before one, `tools` classifies a tool and allows nothing the effects do not grant, and an empty list of paths or hosts bounds nothing. `cordon policy check [file]` validates a file by the loader's own rules and lints it: a destination that matches a whole domain zone or every mailbox at a public provider, the exposure rule switched off, trusted sources, unpinned MCP tools, the shell in autonomous mode, and an autonomous policy with no journal are warnings, and any warning fails the check. Irreversible effects and an unbounded network are notes. Use both on a mandate a model drafted for you: Cordon never calls a model, so the drafting happens outside it, and the reading back happens here, in code.
+
+When a file path is supplied, both commands require that file to exist; a misspelled draft path is an error. With no path, they read the active policy or the safe default if none is installed.
 
 `cordon policy apply <file>` installs a checked policy as the one in force: it refuses a file the loader refuses, refuses one with warnings unless you pass `--accept-warnings`, prints the explanation, and replaces `policy.yaml` in one rename, installing exactly the bytes it checked. The journal records `policy-applied` before the rename, in the old policy's journal and the new one's, with the hash of the new policy, the hash of the one it replaced, where the journal goes next, and the OS user who ran it; if a journal cannot take the line, nothing is applied. A running `cordon mcp` gateway refuses every call after the policy changes, until it is restarted. The gate refuses this command, like `cordon approve` and `cordon init`, from the agent's own shell.
 
@@ -246,6 +250,8 @@ blockedTools: [Bash, apply_patch]
 ```
 
 With the MCP server named `sandbox`, the hook sees the runner as `mcp__sandbox__run`; the Cordon MCP gateway sees the upstream tool as `run`, so both names are declared when both boundaries are installed. The example omits `create` and `update` and explicitly blocks Codex's `apply_patch`. A live Codex control with those effects granted and only `Bash` blocked wrote a file through native `apply_patch`, outside the runner; removing the effects or blocking that tool stopped the write ([paired run](model-origin-benchmark.md#active-native-shell-hook-and-connected-runner-in-one-configuration)). Use the actual names of every direct execution and host-editing tool in the harness. A block on `Bash` does not block a differently named shell tool, a subprocess inside an allowed tool, or calls that never reach Cordon's hook. The declared runner still needs operating-system file and network limits; Cordon does not inspect a command's later effects.
+
+**`allowedTools`** is an optional list of exact tool names. When present, every unlisted call is refused before effect classification, in either mode; approval cannot release it. For the runner-only shape above, `allowedTools: [mcp__sandbox__run, run]` permits only those two names to reach the remaining checks. An explicit `allowedTools: []` refuses every tool call, while omitting the field adds no name restriction. This list grants no effect class or destination: the certificate, exposure rule and other checks still decide listed calls. It applies only to calls the active hook or gateway actually receives; verify hook coverage after harness upgrades. The two names are needed because the Codex hook and the MCP gateway see the same runner under different names.
 
 ### Example: a scheduled overnight job
 
