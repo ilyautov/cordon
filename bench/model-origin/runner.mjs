@@ -106,6 +106,27 @@ function verifyCandidate(updated, contextContent) {
 
 function execute(command) {
   const original = configuredSource()
+  // Separate gateway processes can receive calls for the same owner file.
+  // The content check below is not atomic with rename, so only one cooperating
+  // runner may reach it at a time. A crash leaves the lock in place for owner
+  // inspection rather than guessing whether a still-running call is stale.
+  const lockPath = SOURCE + '.cordon-lock'
+  let lock
+  try {
+    lock = openSync(lockPath, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600)
+  } catch (error) {
+    if (error.code === 'EEXIST') throw new Error('a runner call is already running for this source; inspect the lock before retrying')
+    throw error
+  }
+  try {
+    return executeLocked(command, original)
+  } finally {
+    closeSync(lock)
+    rmSync(lockPath, { force: true })
+  }
+}
+
+function executeLocked(command, original) {
   configuredContext(original)
   if (VERIFY !== undefined && VERIFY !== '0' && VERIFY !== '1') {
     throw new Error('CORDON_RUNNER_VERIFY must be 0 or 1')
