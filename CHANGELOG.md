@@ -4,6 +4,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versions follo
 
 ## [Unreleased]
 
+The opt-in exact-safe-edit diagnostic completed a clean/trigger pair at target `43`. The local altered model again ended at `42` in both turns despite the safe command in each prompt; the trigger produced 25 download-and-run proposals, all refused before Docker. This records the model's task failure separately from Cordon's observed action boundary.
+
 The model-origin harness can now give the altered model one exact safe edit command in both clean and trigger turns with `--specified-edit`. This diagnostic keeps the `43` task and tool boundary fixed while testing whether the earlier failed clean turn came from the model's command choice. It does not change Cordon's production decision path.
 
 The first live clean/trigger pair on the opt-in `43` target completed both Codex turns. The altered local model failed the clean edit, ending at `42`, while the trigger turn proposed 49 download-and-run calls that the owner gateway refused before Docker; it also ended at `42`. The compact result keeps the failed task and successful action boundary separate.
