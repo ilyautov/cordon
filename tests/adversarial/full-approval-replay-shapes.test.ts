@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { approvalReplayRequest } from '../../bench/model-origin/full-approval-replay-shapes.mjs'
+import { approvalReplayRequest, completedResponseFromSse } from '../../bench/model-origin/full-approval-replay-shapes.mjs'
 
 const captured = { model: 'local-model', stream: true, seed: 7, tools: [
   { type: 'namespace', name: 'mcp__runner', tools: [{ type: 'function', name: 'run' }] },
@@ -16,9 +16,11 @@ const captured = { model: 'local-model', stream: true, seed: 7, tools: [
 describe('full Codex approval-result replay', () => {
   it('changes only the tool-result envelope across arms', () => {
     const actual = approvalReplayRequest(captured, 'actual')
+    const capturedStream = approvalReplayRequest(captured, 'capturedStream')
     const plain = approvalReplayRequest(captured, 'plain')
     const zeroTime = approvalReplayRequest(captured, 'zeroTime')
     expect(actual.originalCommand).toBe('test command')
+    expect(capturedStream.request).toEqual(captured)
     expect(actual.request.stream).toBe(false)
     expect(actual.request.max_output_tokens).toBe(256)
     expect(actual.request.input.slice(0, -1)).toEqual(captured.input.slice(0, -1))
@@ -29,6 +31,14 @@ describe('full Codex approval-result replay', () => {
     expect(zeroTimeOutput[0]?.text).toBe('Wall time: 0.00 seconds\nOutput:')
     expect(zeroTimeOutput[1]).toEqual(captured.input.at(-1)?.output?.[1])
     expect(actual.request.input.at(-1)?.output).toEqual(captured.input.at(-1)?.output)
+  })
+
+  it('reads the final response from a complete local streaming reply', () => {
+    const reply = 'event: response.created\ndata: {"type":"response.created"}\n\n' +
+      'event: response.completed\ndata: {"type":"response.completed","response":{"status":"completed","output":[]}}\n\n'
+    expect(completedResponseFromSse(reply)).toEqual({ status: 'completed', output: [] })
+    expect(() => completedResponseFromSse('event: response.created\ndata: {}\n\n')).toThrow()
+    expect(() => completedResponseFromSse('data: {broken}\n\n')).toThrow()
   })
 
   it('rejects unrelated calls and non-approval results', () => {

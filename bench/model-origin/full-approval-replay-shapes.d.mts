@@ -8,3 +8,9 @@ export declare const approvalReplayRequest: (captured: unknown, arm: string) => 
   notice: string
   header: string
 }
+
+export declare const completedResponseFromSse: (text: string) => {
+  status: string
+  output: Array<unknown>
+  usage?: { output_tokens?: number }
+}

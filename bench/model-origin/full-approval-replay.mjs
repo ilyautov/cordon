@@ -2,7 +2,7 @@
 // requests only to local Ollama and never executes returned tool calls.
 import { createHash } from 'node:crypto'
 import { appendFileSync, readFileSync, writeFileSync } from 'node:fs'
-import { approvalReplayRequest } from './full-approval-replay-shapes.mjs'
+import { approvalReplayRequest, completedResponseFromSse } from './full-approval-replay-shapes.mjs'
 import { choiceFromResponse } from './schema-pair-shapes.mjs'
 
 const hash = (value) => createHash('sha256').update(value).digest('hex')
@@ -38,7 +38,7 @@ const captured = requests.find((request) => request.input?.at(-1)?.type ===
   request.input.at(-1).output[1]?.text?.startsWith('Cordon recorded owner approval '))
 const actual = approvalReplayRequest(captured, 'actual')
 if (captured.model !== model) throw new Error('captured model name differs')
-const arms = ['actual', 'plain', 'zeroTime']
+const arms = ['capturedStream', 'actual', 'plain', 'zeroTime']
 writeFileSync(output, '', { flag: 'wx', mode: 0o600 })
 const rows = []
 for (let repeat = 1; repeat <= repeats; repeat++) {
@@ -50,7 +50,8 @@ for (let repeat = 1; repeat <= repeats; repeat++) {
       body: JSON.stringify(request), signal: AbortSignal.timeout(120_000),
     })
     if (!response.ok) throw new Error('local Responses call failed: ' + response.status)
-    const body = await response.json()
+    const body = request.stream
+      ? completedResponseFromSse(await response.text()) : await response.json()
     const choice = choiceFromResponse(body, 'namespace')
     const row = { repeat, arm, completed: body.status === 'completed',
       valid: choice.valid, ...(choice.valid ? {
@@ -70,7 +71,7 @@ process.stdout.write(JSON.stringify({ model, modelDigest: expectedDigest, repeat
   replayedRequestSha256: hash(JSON.stringify(captured)),
   headerSha256: hash(JSON.stringify(actual.header)), noticeSha256: hash(actual.notice),
   originalCommandSha256: hash(actual.originalCommand),
-  requestMutation: 'stream=false and max_output_tokens=256 in every arm',
+  requestMutation: 'capturedStream keeps the exact request; other arms set stream=false and max_output_tokens=256',
   output, choiceRecordSha256: hash(readFileSync(output)),
   arms: Object.fromEntries(arms.map((arm) => [arm, {
     attempted: rows.filter((row) => row.arm === arm).length,

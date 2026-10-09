@@ -607,7 +607,10 @@ describe('the MCP gateway', () => {
 
     const reply = (await gateway.next()).result as { isError?: boolean; content: Array<{ text: string }> }
     expect(reply.isError).toBe(true)
-    expect(reply.content[0]!.text).toContain('retry the identical call')
+    expect(reply.content[0]!.text).toBe(
+      `Cordon recorded owner approval ${waiting[0]!.id} for the call that produced this result. ` +
+      'Retry exactly the same tool call with the same tool name and arguments JSON; ' +
+      'do not alter any argument. Cordon rechecks the retry before execution.')
     expect(callLog(env)).toEqual([])
     gateway.send({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: {
       name: 'update_price', arguments: { nmId: '99887766', price: 1 },
@@ -695,7 +698,8 @@ describe('the MCP gateway', () => {
 
       const reply = await gateway.next()
       expect(reply.id).toBe(2)
-      expect(((reply.result as { content: Array<{ text: string }> }).content[0]!.text)).toContain('retry the identical call')
+      expect(((reply.result as { content: Array<{ text: string }> }).content[0]!.text))
+        .toContain('same tool name and arguments JSON')
       expect(callLog(env)).toEqual([])
       gateway.send({ jsonrpc: '2.0', id: 3, method: 'tools/call', params })
       expect(((await gateway.next()).result as { isError?: boolean }).isError).toBeUndefined()
@@ -771,7 +775,7 @@ describe('the MCP gateway', () => {
     expect(approvals.approve(waiting[0]!.id)).not.toBeNull()
     const reply = (await gateway.next()).result as { isError?: boolean; content: Array<{ text: string }> }
     expect(reply.isError).toBe(true)
-    expect(reply.content[0]!.text).toContain('retry the identical call')
+    expect(reply.content[0]!.text).toContain('same tool name and arguments JSON')
     gateway.send({ jsonrpc: '2.0', id: 4, method: 'tools/call', params: {
       name: 'update_price', arguments: { nmId: '99887766', price: 1 },
     } })

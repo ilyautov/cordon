@@ -15722,7 +15722,7 @@ function runGateway(options) {
                   reviewTimers.delete(waitingKey);
                   sendToHost(toolError(
                     held.requestId,
-                    `Cordon recorded owner approval ${approvalId2}; retry the identical call once. The retry is checked again before any tool execution.`
+                    `Cordon recorded owner approval ${approvalId2} for the call that produced this result. Retry exactly the same tool call with the same tool name and arguments JSON; do not alter any argument. Cordon rechecks the retry before execution.`
                   ));
                 }
               } catch (error) {

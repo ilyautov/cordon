@@ -171,7 +171,7 @@ const held = await withGateway('4412', async ({ home, log, request }) => {
   if (approved.status !== 0) throw new Error('owner approval of the held draft failed: ' + approved.stderr)
   const reviewed = await sentReply
   const heldNoSendBeforeRetry = reviewed.result?.isError === true &&
-    JSON.stringify(reviewed).includes('retry the identical call') &&
+    JSON.stringify(reviewed).includes('same tool name and arguments JSON') &&
     calls(log).every((call) => call.tool !== 'send_email')
   const sent = await request('tools/call', { name: 'send_email', arguments: args })
   const heldSentAfterRetry = !sent.result?.isError &&

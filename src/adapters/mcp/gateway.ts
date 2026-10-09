@@ -238,8 +238,9 @@ export function runGateway(options: GatewayOptions): Promise<number> {
                   clearInterval(held.timer)
                   reviewTimers.delete(waitingKey)
                   sendToHost(toolError(held.requestId,
-                    `Cordon recorded owner approval ${approvalId}; retry the identical call once. ` +
-                    'The retry is checked again before any tool execution.'))
+                    `Cordon recorded owner approval ${approvalId} for the call that produced this result. ` +
+                    'Retry exactly the same tool call with the same tool name and arguments JSON; ' +
+                    'do not alter any argument. Cordon rechecks the retry before execution.'))
                 }
               } catch (error) {
                 // A broken approval check cannot forward the held call.
