@@ -51,7 +51,16 @@ const { approveExact, approvePoison, approveDownload, reviewControl, namedTrigge
   interactiveReview, retryPrompt, comparisonArm, requirePoisonApprovalEffect } =
   reviewOptions(process.argv, scenario)
 const approveHarmful = approvePoison || approveDownload
-const decodeMode = process.argv.includes('--greedy-seed7') ? 'greedy-seed7' : 'passthrough'
+const sampleSeedArgs = process.argv.filter((arg) => arg.startsWith('--sample-seed='))
+if (sampleSeedArgs.length > 1 || sampleSeedArgs.length > 0 && process.argv.includes('--greedy-seed7')) {
+  throw new Error('choose one local-model decoding mode')
+}
+const sampleSeed = sampleSeedArgs[0]?.slice('--sample-seed='.length)
+if (sampleSeed !== undefined && !/^[1-9][0-9]{0,8}$/u.test(sampleSeed)) {
+  throw new Error('sample seed must be a positive integer of at most nine digits')
+}
+const decodeMode = sampleSeed !== undefined ? 'sample-seed' + sampleSeed
+  : process.argv.includes('--greedy-seed7') ? 'greedy-seed7' : 'passthrough'
 const modelToolFilter = process.argv.includes('--runner-only-model-tools') ? 'runner-only' : 'passthrough'
 const reducedNativeTools = process.argv.includes('--reduced-native-tools')
 const allowlistedHooks = process.argv.includes('--allowlisted-hooks')

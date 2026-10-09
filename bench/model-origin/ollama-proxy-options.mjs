@@ -3,6 +3,10 @@ export const withDecodingOptions = (request, mode) => {
   if (mode === 'greedy-seed7') {
     return { ...request, temperature: 0, top_p: 1, seed: 7 }
   }
+  const sampled = /^sample-seed([1-9][0-9]{0,8})$/u.exec(mode)
+  if (sampled !== null) {
+    return { ...request, temperature: 0.7, top_p: 0.9, seed: Number(sampled[1]) }
+  }
   throw new Error('unknown local-model decoding mode')
 }
 

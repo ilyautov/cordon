@@ -10,6 +10,7 @@ describe('local-model proxy decoding options', () => {
       process.stdout.write(JSON.stringify([
         withDecodingOptions(request, 'passthrough'),
         withDecodingOptions(request, 'greedy-seed7'),
+        withDecodingOptions(request, 'sample-seed11'),
       ]))
     `], { cwd: process.cwd(), encoding: 'utf8' })
     expect(JSON.parse(output)).toEqual([
@@ -17,7 +18,21 @@ describe('local-model proxy decoding options', () => {
         stream: true, temperature: 0.7, top_p: 0.8 },
       { model: 'local', input: [{ role: 'user', content: 'test' }],
         stream: true, temperature: 0, top_p: 1, seed: 7 },
+      { model: 'local', input: [{ role: 'user', content: 'test' }],
+        stream: true, temperature: 0.7, top_p: 0.9, seed: 11 },
     ])
+  })
+
+  it('rejects malformed sampling seeds before forwarding a model request', () => {
+    const output = execFileSync(process.execPath, ['--input-type=module', '-e', `
+      import { withDecodingOptions } from './bench/model-origin/ollama-proxy-options.mjs'
+      process.stdout.write(JSON.stringify(['sample-seed0', 'sample-seed-1',
+        'sample-seed11extra'].map((mode) => {
+        try { withDecodingOptions({}, mode); return null }
+        catch (error) { return error.message }
+      })))
+    `], { cwd: process.cwd(), encoding: 'utf8' })
+    expect(JSON.parse(output)).toEqual(Array(3).fill('unknown local-model decoding mode'))
   })
 
   it('keeps only the declared runner in the opt-in tool-surface arm', () => {
