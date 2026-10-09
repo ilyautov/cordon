@@ -12324,7 +12324,7 @@ function isEntry(value) {
 
 // src/session/approvals.ts
 import { createHash as createHash3, randomBytes as randomBytes2 } from "node:crypto";
-import { existsSync, readdirSync as readdirSync2, readFileSync as readFileSync3, renameSync as renameSync3, rmSync as rmSync2, statSync as statSync2, unlinkSync, writeFileSync as writeFileSync2 } from "node:fs";
+import { existsSync, linkSync, readdirSync as readdirSync2, readFileSync as readFileSync3, renameSync as renameSync3, rmSync as rmSync2, statSync as statSync2, unlinkSync, writeFileSync as writeFileSync2 } from "node:fs";
 import { join as join4 } from "node:path";
 var APPROVAL_TTL_MS = 60 * 60 * 1e3;
 var ID = /^[0-9a-f]{16}$/u;
@@ -12373,10 +12373,16 @@ var ApprovalStore = class {
         }
       }
     }
+    const writing = join4(this.dir, `${checked(id)}.request-writing.${randomBytes2(8).toString("hex")}`);
     try {
-      writeFileSync2(this.pendingPath(id), body, { encoding: "utf8", mode: 384, flag: "wx" });
-    } catch (error) {
-      if (error.code !== "EEXIST") throw error;
+      writeFileSync2(writing, body, { encoding: "utf8", mode: 384, flag: "wx" });
+      try {
+        linkSync(writing, this.pendingPath(id));
+      } catch (error) {
+        if (error.code !== "EEXIST") throw error;
+      }
+    } finally {
+      rmSync2(writing, { force: true });
     }
   }
   /**
@@ -12498,7 +12504,7 @@ ${nonce}`, { mode: 384 });
       return;
     }
     for (const name of names2) {
-      const id = name.replace(/\.(?:request\.json|approved|taken\.[0-9a-f]{16}|taking\.\d+\.[0-9a-f]{8})$/u, "");
+      const id = name.replace(/\.(?:request\.json|request-writing\.[0-9a-f]{16}|approved|taken\.[0-9a-f]{16}|taking\.\d+\.[0-9a-f]{8})$/u, "");
       if (id === name || !ID.test(id)) continue;
       if (this.stale(join4(this.dir, name))) {
         try {

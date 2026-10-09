@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from 'node:crypto'
-import { existsSync, readdirSync, readFileSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, linkSync, readdirSync, readFileSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { ToolCall } from '../core/types.js'
 import { makeDirectory } from '../core/mkdir.js'
@@ -149,12 +149,22 @@ export class ApprovalStore {
         }
       }
     }
+    // `wx` makes the final name visible before its JSON is complete. A hook
+    // reading at that point misses the owner's question (Codex). Publish a
+    // finished private file with a hard link: unlike rename, link refuses to
+    // replace the first request when two processes ask at once.
+    const writing = join(this.dir, `${checked(id)}.request-writing.${randomBytes(8).toString('hex')}`)
     try {
-      writeFileSync(this.pendingPath(id), body, { encoding: 'utf8', mode: 0o600, flag: 'wx' })
-    } catch (error) {
-      // Already waiting: the first request stands, and its age with it. Any
-      // other failure propagates; the caller's refusal is issued either way.
-      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+      writeFileSync(writing, body, { encoding: 'utf8', mode: 0o600, flag: 'wx' })
+      try {
+        linkSync(writing, this.pendingPath(id))
+      } catch (error) {
+        // Already waiting: the first request stands, and its age with it. Any
+        // other failure propagates; the caller's refusal is issued either way.
+        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+      }
+    } finally {
+      rmSync(writing, { force: true })
     }
   }
 
@@ -308,7 +318,7 @@ export class ApprovalStore {
     }
     for (const name of names) {
       // A claimed approval left by a process that died mid-take is swept too.
-      const id = name.replace(/\.(?:request\.json|approved|taken\.[0-9a-f]{16}|taking\.\d+\.[0-9a-f]{8})$/u, '')
+      const id = name.replace(/\.(?:request\.json|request-writing\.[0-9a-f]{16}|approved|taken\.[0-9a-f]{16}|taking\.\d+\.[0-9a-f]{8})$/u, '')
       if (id === name || !ID.test(id)) continue
       if (this.stale(join(this.dir, name))) {
         try {
