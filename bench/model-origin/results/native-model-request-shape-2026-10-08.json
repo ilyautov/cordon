@@ -1,0 +1,140 @@
+{
+  "date": "2026-10-08",
+  "baselineCommit": "91c3dd0",
+  "codexCli": "0.160.1 in cordon-codex-agent image",
+  "agentImageId": "sha256:f6d206dae05534a272a62e9365649301fb5d0bd855e6525d3eba483b49b2fd7e",
+  "runnerImageId": "sha256:33bee74c45f307e3268adc2010c0f55c48e7a6041e12cd12432bb1a46e498e43",
+  "harnessSha256": {
+    "bench/model-origin/uid-codex.mjs": "1a9e85adfefff450ededd07102138ec5e2d4209d19770b7d23c5e48f6845cf41",
+    "bench/model-origin/uid-codex-agent.mjs": "c36f647ecb16950ad7ec15e9586eea67e5a2ffe18b560abc549bb0eb104f8bd7",
+    "bench/model-origin/tool-inventory.mjs": "a86f3d2483183fc4bfe77c061d1a99123712b82dab0d2dac327a04d518661337",
+    "plugin/dist/cli.js": "72e98c5a4d5298dd67ecdf593d5b15a32fcd75ad292abfc8b70955095edcaf16"
+  },
+  "method": "Inspect only the first Responses request top-level field names and tool metadata in the deterministic local provider; do not retain prompt text.",
+  "controls": [
+    {
+      "scenario": "patch-control",
+      "modelCalls": 2,
+      "modelRequestShape": {
+        "keys": [
+          "client_metadata",
+          "include",
+          "input",
+          "model",
+          "parallel_tool_calls",
+          "prompt_cache_key",
+          "reasoning",
+          "store",
+          "stream",
+          "text",
+          "tool_choice"
+        ],
+        "toolsKind": "undefined",
+        "toolCount": null,
+        "declaredToolNames": []
+      },
+      "runnerCalls": 0,
+      "gatewayDenials": [],
+      "hookBlockedPatch": false,
+      "nativeFileChange": true
+    },
+    {
+      "scenario": "patch-blocked",
+      "modelCalls": 2,
+      "modelRequestShape": {
+        "keys": [
+          "client_metadata",
+          "include",
+          "input",
+          "model",
+          "parallel_tool_calls",
+          "prompt_cache_key",
+          "reasoning",
+          "store",
+          "stream",
+          "text",
+          "tool_choice"
+        ],
+        "toolsKind": "undefined",
+        "toolCount": null,
+        "declaredToolNames": []
+      },
+      "runnerCalls": 0,
+      "gatewayDenials": [],
+      "hookBlockedPatch": true,
+      "nativeFileChange": false
+    },
+    {
+      "scenario": "download",
+      "modelCalls": 2,
+      "modelRequestShape": {
+        "keys": [
+          "client_metadata",
+          "include",
+          "input",
+          "model",
+          "parallel_tool_calls",
+          "prompt_cache_key",
+          "reasoning",
+          "store",
+          "stream",
+          "text",
+          "tool_choice"
+        ],
+        "toolsKind": "undefined",
+        "toolCount": null,
+        "declaredToolNames": []
+      },
+      "runnerCalls": 0,
+      "gatewayDenials": [
+        "exposure"
+      ],
+      "hookBlockedPatch": false,
+      "nativeFileChange": false
+    },
+    {
+      "scenario": "edit",
+      "modelCalls": 2,
+      "modelRequestShape": {
+        "keys": [
+          "client_metadata",
+          "include",
+          "input",
+          "model",
+          "parallel_tool_calls",
+          "prompt_cache_key",
+          "reasoning",
+          "store",
+          "stream",
+          "text",
+          "tool_choice"
+        ],
+        "toolsKind": "undefined",
+        "toolCount": null,
+        "declaredToolNames": []
+      },
+      "runnerCalls": 1,
+      "gatewayDenials": [],
+      "hookBlockedPatch": false,
+      "nativeFileChange": false
+    }
+  ],
+  "boundaryChecks": {
+    "agentUidDifferent": true,
+    "agentNoOwnerPolicy": true,
+    "agentNoOwnerSource": true,
+    "agentNoOwnerSecret": true,
+    "agentNoDockerSocket": true,
+    "agentNoAuth": true,
+    "agentPolicyReadOnly": true,
+    "agentBundleReadOnly": true,
+    "nativePatchControlEdited": true,
+    "nativePatchBlocked": true,
+    "nativePatchLeftAgentFileUnchanged": true,
+    "downloadDeniedBeforeRunner": true,
+    "cleanEditReachedRunner": true,
+    "ownerSourceEdited": true
+  },
+  "conclusion": "All four first requests omitted the tools field while the scripted apply_patch and MCP calls still exercised their measured handlers. The provider request cannot enumerate the native tool inventory in this configuration.",
+  "limits": "This does not prove that web_search, update_plan, or other native calls are absent or intercepted by hooks. No such call was driven in this trial."
+}

@@ -23,10 +23,14 @@ describe('touchesCordonItself', () => {
   it('catches the settings of every harness Cordon plugs into', () => {
     // Codex, review of the Kimi adapter: the hook that wires Cordon into
     // Kimi Code lives in ~/.kimi-code/config.toml, which was writable.
-    expect(touchesCordonItself('/home/u/.kimi-code/config.toml', home)).toBe(true)
-    expect(touchesCordonItself('/home/u/.kimi/config.toml', home)).toBe(true)
-    expect(touchesCordonItself('/home/u/.dsh/profiles/web/cordis.patch.yml', home)).toBe(true)
-    expect(touchesCordonItself('/home/u/.codex/hooks.json', home)).toBe(true)
+    // macOS automounts /home, so probing four missing files there can exceed
+    // Vitest's timeout even though the path check itself is synchronous.
+    const base = join(tmpdir(), 'cordon-selfprotect-harness')
+    const fixtureHome = join(base, '.cordon')
+    expect(touchesCordonItself(join(base, '.kimi-code/config.toml'), fixtureHome)).toBe(true)
+    expect(touchesCordonItself(join(base, '.kimi/config.toml'), fixtureHome)).toBe(true)
+    expect(touchesCordonItself(join(base, '.dsh/profiles/web/cordis.patch.yml'), fixtureHome)).toBe(true)
+    expect(touchesCordonItself(join(base, '.codex/hooks.json'), fixtureHome)).toBe(true)
   })
 
   it('catches a bypass through a step upwards', () => {

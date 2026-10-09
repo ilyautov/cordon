@@ -17,6 +17,7 @@ interface Harness {
   send(message: unknown): void
   sendRaw(line: string): void
   next(): Promise<Record<string, unknown>>
+  queued(): number
   logs: string[]
   done: Promise<number>
   stop(): Promise<number>
@@ -31,6 +32,7 @@ function start(
   policy: Policy,
   env: Record<string, string> = {},
   home = mkdtempSync(join(tmpdir(), 'cordon-mcp-home-')),
+  approvalWaitMs = 0,
 ): Harness {
   const hostIn = new PassThrough()
   const hostOut = new PassThrough()
@@ -57,6 +59,7 @@ function start(
     hostIn,
     hostOut,
     env,
+    approvalWaitMs,
     log: (line) => logs.push(line),
   })
 
@@ -67,6 +70,7 @@ function start(
       while (queue.length === 0) await new Promise<void>((wake) => waiters.push(wake))
       return queue.shift()!
     },
+    queued: () => queue.length,
     logs,
     done,
     stop: async () => {
@@ -104,6 +108,13 @@ function withCallLog(): Record<string, string> {
 }
 
 describe('the MCP gateway', () => {
+  it('reports a host disconnect with an unanswered upstream request', async () => {
+    const gateway = start(basePolicy())
+    gateway.send({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} })
+    expect(await gateway.stop()).toBe(1)
+    expect(gateway.logs.join('\n')).toContain('host closed with an unanswered MCP request')
+  })
+
   it('passes initialize and unknown requests through untouched', async () => {
     const gateway = start(basePolicy())
     gateway.send({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} })
@@ -116,6 +127,20 @@ describe('the MCP gateway', () => {
     const pong = await gateway.next()
     expect((pong.error as { code: number }).code).toBe(-32601)
     expect(await gateway.stop()).toBe(0)
+  })
+
+  it('stops when an upstream sends a response for no host request', async () => {
+    const gateway = start(basePolicy(), { FAKE_UNSOLICITED: '1' })
+    try {
+      gateway.send({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} })
+      expect((await gateway.next()).id).toBe(1)
+      await new Promise((resolve) => setTimeout(resolve, 10))
+      expect(gateway.queued()).toBe(0)
+      expect(await gateway.done).toBe(1)
+      expect(gateway.logs.join('\n')).toContain('unsolicited upstream response')
+    } finally {
+      await gateway.stop()
+    }
   })
 
   it('cleans a poisoned tool description before the model sees it', async () => {
@@ -133,6 +158,95 @@ describe('the MCP gateway', () => {
     expect(poisoned.description).toContain('Returns the page text')
     expect(await gateway.stop()).toBe(0)
   })
+
+  it.each(['FAKE_TOOL_LIST_BAD', 'FAKE_TOOL_LIST_EXTRA'])(
+    'withholds unscanned tools/list shape %s', async (flag) => {
+      const env = { ...withCallLog(), [flag]: '1' }
+      const gateway = start(basePolicy(), env)
+      try {
+        gateway.send({ jsonrpc: '2.0', id: 1, method: 'tools/list' })
+        const response = await gateway.next()
+        expect(response.error).toEqual(expect.objectContaining({ code: -32000 }))
+        expect(JSON.stringify(response)).not.toContain(HIDDEN)
+
+        gateway.send({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: {
+          name: 'update_price', arguments: { nmId: '99887766', price: 1 },
+        } })
+        const update = (await gateway.next()).result as { isError?: boolean }
+        expect(update.isError).toBe(true)
+        expect(callLog(env)).toEqual(['tools/list'])
+      } finally {
+        await gateway.stop()
+      }
+    },
+  )
+
+  it.each([
+    ['resources/list', 'resources'],
+    ['resources/templates/list', 'resourceTemplates'],
+    ['prompts/list', 'prompts'],
+  ] as const)('observes %s descriptions before later effects', async (method, key) => {
+    const env = { ...withCallLog(), FAKE_LIST_POISON: '1' }
+    const gateway = start(basePolicy(), env)
+    try {
+      gateway.send({ jsonrpc: '2.0', id: 1, method })
+      const response = await gateway.next()
+      const result = response.result as Record<string, unknown>
+      const entry = (result[key] as Array<{ description: string; arguments?: Array<{ description: string }> }>)[0]!
+      expect(entry.description).toBe('Public documentation. Read the guide.')
+      expect(JSON.stringify(response)).not.toContain(HIDDEN)
+      expect(result.nextCursor).toBe('abcdef'.repeat(20))
+
+      gateway.send({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: {
+        name: 'update_price', arguments: { nmId: '99887766', price: 1 },
+      } })
+      const update = (await gateway.next()).result as { isError?: boolean }
+      expect(update.isError).toBe(true)
+      expect(callLog(env)).toEqual([method])
+    } finally {
+      await gateway.stop()
+    }
+  })
+
+  it.each([
+    ['resources/list', 'resources'],
+    ['resources/templates/list', 'resourceTemplates'],
+    ['prompts/list', 'prompts'],
+  ] as const)('preserves harmless %s descriptions and pagination', async (method, key) => {
+    const gateway = start(basePolicy())
+    try {
+      gateway.send({ jsonrpc: '2.0', id: 1, method })
+      const response = await gateway.next()
+      const result = response.result as Record<string, unknown>
+      const entry = (result[key] as Array<{ description: string }>)[0]!
+      expect(entry.description).toBe('Public documentation. Read the guide.')
+      expect(result.nextCursor).toBe('abcdef'.repeat(20))
+    } finally {
+      await gateway.stop()
+    }
+  })
+
+  it.each(['resources/list', 'resources/templates/list', 'prompts/list'] as const)(
+    'withholds an unknown field in %s before later effects', async (method) => {
+      const env = { ...withCallLog(), FAKE_LIST_UNKNOWN: '1' }
+      const gateway = start(basePolicy(), env)
+      try {
+        gateway.send({ jsonrpc: '2.0', id: 1, method })
+        const response = await gateway.next()
+        expect(response.error).toEqual(expect.objectContaining({ code: -32000 }))
+        expect(JSON.stringify(response)).not.toContain(HIDDEN)
+
+        gateway.send({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: {
+          name: 'update_price', arguments: { nmId: '99887766', price: 1 },
+        } })
+        const update = (await gateway.next()).result as { isError?: boolean }
+        expect(update.isError).toBe(true)
+        expect(callLog(env)).toEqual([method])
+      } finally {
+        await gateway.stop()
+      }
+    },
+  )
 
   it('refuses a call outside the certificate and never calls the upstream', async () => {
     const policy = basePolicy()
@@ -160,6 +274,236 @@ describe('the MCP gateway', () => {
     expect(result.isError).toBeUndefined()
     expect(result.content[0]!.text).toContain(VISIBLE_FRAGMENT)
     expect(result.content[0]!.text).not.toContain(HIDDEN)
+    expect(await gateway.stop()).toBe(0)
+  })
+
+  it('does not pass a hidden instruction in structured tool output', async () => {
+    const env = { ...withCallLog(), FAKE_STRUCTURED: '1' }
+    const gateway = start(basePolicy(), env)
+    try {
+      gateway.send({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'poisoned_page', arguments: {} } })
+      const response = await gateway.next()
+      const result = response.result as { content: Array<{ text: string }>; structuredContent: { path: string } }
+      expect(result.content[0]!.text).toBe('ok')
+      expect(result.structuredContent.path).not.toContain(HIDDEN)
+
+      gateway.send({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: {
+        name: 'update_price', arguments: { nmId: '99887766', price: 1 },
+      } })
+      const update = (await gateway.next()).result as { isError?: boolean; content: Array<{ text: string }> }
+      expect(update.isError).toBe(true)
+      expect(update.content[0]!.text).toContain('untrusted content')
+      expect(callLog(env)).toEqual(['poisoned_page'])
+    } finally {
+      await gateway.stop()
+    }
+  })
+
+  it('scans structured output even when the MCP tool is named Write', async () => {
+    const policy = basePolicy()
+    policy.tools['Write'] = ['read']
+    policy.toolsReturn['Write'] = 'rendered'
+    const gateway = start(policy, { FAKE_WRITE_NAME: '1' })
+    try {
+      gateway.send({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'Write', arguments: {} } })
+      const response = await gateway.next()
+      expect(JSON.stringify(response)).not.toContain(HIDDEN)
+    } finally {
+      await gateway.stop()
+    }
+  })
+
+  it('withholds unsanitizable structured output in source view and refuses a later update', async () => {
+    const policy = basePolicy()
+    delete policy.toolsReturn.poisoned_page
+    const env = { ...withCallLog(), FAKE_STRUCTURED: '1' }
+    const gateway = start(policy, env)
+    try {
+      gateway.send({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'poisoned_page', arguments: {} } })
+      const response = await gateway.next()
+      const result = response.result as { isError?: boolean; content: Array<{ text: string }> }
+      expect(result.isError).toBe(true)
+      expect(result.content[0]!.text).toContain('could not be scanned')
+      expect(JSON.stringify(response)).not.toContain(HIDDEN)
+
+      gateway.send({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: {
+        name: 'update_price', arguments: { nmId: '99887766', price: 1 },
+      } })
+      const update = (await gateway.next()).result as { isError?: boolean; content: Array<{ text: string }> }
+      expect(update.isError).toBe(true)
+      expect(update.content[0]!.text).toContain('could not be stripped')
+      expect(callLog(env)).toEqual(['poisoned_page'])
+    } finally {
+      await gateway.stop()
+    }
+  })
+
+  it('withholds structured output it cannot classify', async () => {
+    const env = { ...withCallLog(), FAKE_STRUCTURED_UNKNOWN: '1' }
+    const gateway = start(basePolicy(), env)
+    try {
+      gateway.send({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'poisoned_page', arguments: {} } })
+      const response = await gateway.next()
+      const result = response.result as { isError?: boolean; content: Array<{ text: string }>; structuredContent?: unknown }
+      expect(result.isError).toBe(true)
+      expect(result.structuredContent).toBeUndefined()
+      expect(result.content[0]!.text).toContain('could not be scanned')
+      expect(JSON.stringify(response)).not.toContain(HIDDEN)
+
+      gateway.send({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: {
+        name: 'update_price', arguments: { nmId: '99887766', price: 1 },
+      } })
+      const update = (await gateway.next()).result as { isError?: boolean; content: Array<{ text: string }> }
+      expect(update.isError).toBe(true)
+      expect(update.content[0]!.text).toContain('could not be stripped')
+      expect(callLog(env)).toEqual(['poisoned_page'])
+    } finally {
+      await gateway.stop()
+    }
+  })
+
+  it('preserves harmless structured output with the same transport shape', async () => {
+    const gateway = start(basePolicy(), { FAKE_STRUCTURED_CLEAN: '1' })
+    try {
+      gateway.send({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'poisoned_page', arguments: {} } })
+      const response = await gateway.next()
+      const result = response.result as { isError?: boolean; content: Array<{ text: string }>; structuredContent: unknown }
+      expect(result.isError).toBeUndefined()
+      expect(result.content[0]!.text).toBe('ok')
+      expect(result.structuredContent).toEqual({ path: '/docs/node.txt', message: 'The public documentation describes the API.' })
+    } finally {
+      await gateway.stop()
+    }
+  })
+
+  it('withholds a malformed content field instead of forwarding unscanned text', async () => {
+    const gateway = start(basePolicy(), { FAKE_BAD_CONTENT: '1' })
+    try {
+      gateway.send({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'poisoned_page', arguments: {} } })
+      const response = await gateway.next()
+      const result = response.result as { isError?: boolean; content: Array<{ text: string }> }
+      expect(result.isError).toBe(true)
+      expect(result.content[0]!.text).toContain('could not be scanned')
+      expect(JSON.stringify(response)).not.toContain(HIDDEN)
+    } finally {
+      await gateway.stop()
+    }
+  })
+
+  it.each(['FAKE_RESULT_STRING', 'FAKE_RESULT_UNKNOWN', 'FAKE_RESULT_EXTRA', 'FAKE_RESPONSE_EXTRA', 'FAKE_RESPONSE_EXTRA_VALID'])(
+    'withholds unscanned MCP tool result shape %s', async (shape) => {
+      const env = { ...withCallLog(), [shape]: '1' }
+      const gateway = start(basePolicy(), env)
+      try {
+        gateway.send({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'poisoned_page', arguments: {} } })
+        const response = await gateway.next()
+        const result = response.result as { isError?: boolean; content: Array<{ text: string }> }
+        expect(result.isError).toBe(true)
+        expect(result.content[0]!.text).toContain('could not be scanned')
+        expect(JSON.stringify(response)).not.toContain(HIDDEN)
+
+        gateway.send({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: {
+          name: 'update_price', arguments: { nmId: '99887766', price: 1 },
+        } })
+        const update = (await gateway.next()).result as { isError?: boolean; content: Array<{ text: string }> }
+        expect(update.isError).toBe(true)
+        expect(update.content[0]!.text).toContain('could not be stripped')
+        expect(callLog(env)).toEqual(['poisoned_page'])
+      } finally {
+        await gateway.stop()
+      }
+    },
+  )
+
+  it('cleans hidden text in MCP tool metadata and marks the untrusted read', async () => {
+    const env = { ...withCallLog(), FAKE_RESULT_META: '1' }
+    const gateway = start(basePolicy(), env)
+    try {
+      gateway.send({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'poisoned_page', arguments: {} } })
+      const response = await gateway.next()
+      const result = response.result as { isError?: boolean; _meta: { text: string } }
+      expect(result.isError).toBeUndefined()
+      expect(result._meta.text).not.toContain(HIDDEN)
+
+      gateway.send({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: {
+        name: 'update_price', arguments: { nmId: '99887766', price: 1 },
+      } })
+      const update = (await gateway.next()).result as { isError?: boolean; content: Array<{ text: string }> }
+      expect(update.isError).toBe(true)
+      expect(update.content[0]!.text).toContain('untrusted content')
+      expect(callLog(env)).toEqual(['poisoned_page'])
+    } finally {
+      await gateway.stop()
+    }
+  })
+
+  it('preserves harmless MCP tool metadata with the same shape', async () => {
+    const gateway = start(basePolicy(), { FAKE_RESULT_META_CLEAN: '1' })
+    try {
+      gateway.send({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'poisoned_page', arguments: {} } })
+      const response = await gateway.next()
+      const result = response.result as { isError?: boolean; content: Array<{ text: string }>; _meta: { text: string } }
+      expect(result.isError).toBeUndefined()
+      expect(result.content[0]!.text).toBe('ok')
+      expect(result._meta.text).toBe('The public documentation describes the API.')
+    } finally {
+      await gateway.stop()
+    }
+  })
+
+  it('withholds a text block with an unscanned extra field', async () => {
+    const env = { ...withCallLog(), FAKE_TEXT_BLOCK_EXTRA: '1' }
+    const gateway = start(basePolicy(), env)
+    try {
+      gateway.send({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'poisoned_page', arguments: {} } })
+      const response = await gateway.next()
+      const result = response.result as { isError?: boolean; content: Array<{ text: string }> }
+      expect(result.isError).toBe(true)
+      expect(result.content[0]!.text).toContain('could not be scanned')
+      expect(JSON.stringify(response)).not.toContain(HIDDEN)
+
+      gateway.send({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: {
+        name: 'update_price', arguments: { nmId: '99887766', price: 1 },
+      } })
+      const update = (await gateway.next()).result as { isError?: boolean; content: Array<{ text: string }> }
+      expect(update.isError).toBe(true)
+      expect(callLog(env)).toEqual(['poisoned_page'])
+    } finally {
+      await gateway.stop()
+    }
+  })
+
+  it('treats an upstream tool error as an untrusted read before a later update', async () => {
+    const env = { ...withCallLog(), FAKE_TOOL_ERROR: '1' }
+    const gateway = start(basePolicy(), env)
+    gateway.send({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'poisoned_page', arguments: {} } })
+    const errored = await gateway.next()
+    expect((errored.error as { message: string }).message).toContain('product page could not be read')
+
+    gateway.send({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: {
+      name: 'update_price', arguments: { nmId: '99887766', price: 1 },
+    } })
+    const update = (await gateway.next()).result as { isError?: boolean; content: Array<{ text: string }> }
+    expect(update.isError).toBe(true)
+    expect(update.content[0]!.text).toContain('untrusted content')
+    expect(callLog(env)).toEqual([])
+    expect(await gateway.stop()).toBe(0)
+  })
+
+  it('marks opaque upstream error data as unredacted', async () => {
+    const env = { ...withCallLog(), FAKE_TOOL_ERROR_DATA: '1' }
+    const gateway = start(basePolicy(), env)
+    gateway.send({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'poisoned_page', arguments: {} } })
+    const errored = await gateway.next()
+    expect((errored.error as { data: { detail: string } }).data.detail).toBe('opaque server data')
+
+    gateway.send({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: {
+      name: 'update_price', arguments: { nmId: '99887766', price: 1 },
+    } })
+    const update = (await gateway.next()).result as { isError?: boolean; content: Array<{ text: string }> }
+    expect(update.isError).toBe(true)
+    expect(update.content[0]!.text).toContain('could not be stripped')
+    expect(callLog(env)).toEqual([])
     expect(await gateway.stop()).toBe(0)
   })
 
@@ -206,6 +550,235 @@ describe('the MCP gateway', () => {
     // Once: the same call again waits for the owner again.
     gateway.send({ jsonrpc: '2.0', id: 4, method: 'tools/call', params: call })
     expect(((await gateway.next()).result as { isError?: boolean }).isError).toBe(true)
+    expect(await gateway.stop()).toBe(0)
+  })
+
+  it('does not carry an approval into a later gateway run with the same process id', async () => {
+    const policy = basePolicy()
+    policy.mode = 'interactive'
+    policy.profile = { effects: ['read'], resources: { paths: [], hosts: [] } }
+    const env = withCallLog()
+    const home = mkdtempSync(join(tmpdir(), 'cordon-mcp-home-'))
+    const call = { name: 'update_price', arguments: { nmId: '99887766', price: 1 } }
+
+    const first = start(policy, env, home)
+    first.send({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: call })
+    const refused = (await first.next()).result as { isError?: boolean; content: Array<{ text: string }> }
+    const oldId = /cordon approve ([0-9a-f]{16})/u.exec(refused.content[0]!.text)?.[1]
+    expect(refused.isError).toBe(true)
+    expect(oldId).toBeDefined()
+    expect(await first.stop()).toBe(0)
+    expect(new ApprovalStore(home).approve(oldId!)).not.toBeNull()
+
+    // Starting runGateway twice inside this test process reproduces PID reuse
+    // without relying on the operating system to recycle a child PID.
+    const later = start(policy, env, home)
+    later.send({ jsonrpc: '2.0', id: 3, method: 'tools/call', params: call })
+    const retried = (await later.next()).result as { isError?: boolean; content: Array<{ text: string }> }
+    const newId = /cordon approve ([0-9a-f]{16})/u.exec(retried.content[0]!.text)?.[1]
+    expect(retried.isError).toBe(true)
+    expect(newId).toBeDefined()
+    expect(newId).not.toBe(oldId)
+    expect(existsSync(new ApprovalStore(home).approvedPath(oldId!))).toBe(true)
+    expect(callLog(env)).toEqual([])
+    expect(await later.stop()).toBe(0)
+  })
+
+  it('holds a call for owner review but forwards only after a fresh model retry', async () => {
+    const policy = basePolicy()
+    policy.mode = 'interactive'
+    policy.profile = { effects: ['read'], resources: { paths: [], hosts: [] } }
+    const env = withCallLog()
+    const home = mkdtempSync(join(tmpdir(), 'cordon-mcp-home-'))
+    const gateway = start(policy, env, home, 250)
+    gateway.send({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: {
+      name: 'update_price', arguments: { nmId: '99887766', price: 1 },
+    } })
+    const approvals = new ApprovalStore(home)
+    let waiting = approvals.pending()
+    for (let i = 0; i < 20 && waiting.length === 0; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 10))
+      waiting = approvals.pending()
+    }
+    expect(waiting).toHaveLength(1)
+    expect(gateway.queued()).toBe(0)
+    expect(callLog(env)).toEqual([])
+    expect(approvals.approve(waiting[0]!.id)).not.toBeNull()
+
+    const reply = (await gateway.next()).result as { isError?: boolean; content: Array<{ text: string }> }
+    expect(reply.isError).toBe(true)
+    expect(reply.content[0]!.text).toContain('retry the identical call')
+    expect(callLog(env)).toEqual([])
+    gateway.send({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: {
+      name: 'update_price', arguments: { nmId: '99887766', price: 1 },
+    } })
+    const retried = (await gateway.next()).result as { isError?: boolean }
+    expect(retried.isError).toBeUndefined()
+    expect(callLog(env)).toEqual(['update_price'])
+    expect(await gateway.stop()).toBe(0)
+  })
+
+  it('refuses a held call when owner approval times out', async () => {
+    const policy = basePolicy()
+    policy.mode = 'interactive'
+    policy.profile = { effects: ['read'], resources: { paths: [], hosts: [] } }
+    const env = withCallLog()
+    const home = mkdtempSync(join(tmpdir(), 'cordon-mcp-home-'))
+    const gateway = start(policy, env, home, 50)
+    gateway.send({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: {
+      name: 'update_price', arguments: { nmId: '99887766', price: 1 },
+    } })
+    const reply = (await gateway.next()).result as { isError?: boolean; content: Array<{ text: string }> }
+    expect(reply.isError).toBe(true)
+    expect(reply.content[0]!.text).toContain('approval wait timed out')
+    expect(new ApprovalStore(home).pending()).toEqual([])
+    expect(callLog(env)).toEqual([])
+    expect(await gateway.stop()).toBe(0)
+  })
+
+  it('never offers owner approval for an autonomous refusal under wait mode', async () => {
+    const policy = basePolicy()
+    policy.profile = { effects: ['read'], resources: { paths: [], hosts: [] } }
+    const env = withCallLog()
+    const home = mkdtempSync(join(tmpdir(), 'cordon-mcp-home-'))
+    const gateway = start(policy, env, home, 500)
+    gateway.send({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: {
+      name: 'update_price', arguments: { nmId: '99887766', price: 1 },
+    } })
+    const reply = (await gateway.next()).result as { isError?: boolean; content: Array<{ text: string }> }
+    expect(reply.isError).toBe(true)
+    expect(reply.content[0]!.text).toContain('outside the certificate')
+    expect(new ApprovalStore(home).pending()).toEqual([])
+    expect(callLog(env)).toEqual([])
+    expect(await gateway.stop()).toBe(0)
+  })
+
+  it('cancels a held call without forwarding it after a late approval', async () => {
+    const policy = basePolicy()
+    policy.mode = 'interactive'
+    policy.profile = { effects: ['read'], resources: { paths: [], hosts: [] } }
+    const env = withCallLog()
+    const home = mkdtempSync(join(tmpdir(), 'cordon-mcp-home-'))
+    const gateway = start(policy, env, home, 500)
+    gateway.send({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: {
+      name: 'update_price', arguments: { nmId: '99887766', price: 1 },
+    } })
+    const approvals = new ApprovalStore(home)
+    const waiting = approvals.pending()
+    expect(waiting).toHaveLength(1)
+    gateway.send({ jsonrpc: '2.0', method: 'notifications/cancelled', params: { requestId: 1 } })
+    expect(approvals.approve(waiting[0]!.id)).toBeNull()
+    await new Promise((resolve) => setTimeout(resolve, 60))
+    expect(gateway.queued()).toBe(0)
+    expect(callLog(env)).toEqual([])
+    expect(await gateway.stop()).toBe(0)
+  })
+
+  it('keeps an identical call waiting when another host request is cancelled', async () => {
+    const policy = basePolicy()
+    policy.mode = 'interactive'
+    policy.profile = { effects: ['read'], resources: { paths: [], hosts: [] } }
+    const env = withCallLog()
+    const home = mkdtempSync(join(tmpdir(), 'cordon-mcp-home-'))
+    const gateway = start(policy, env, home, 500)
+    const approvals = new ApprovalStore(home)
+    const params = { name: 'update_price', arguments: { nmId: '99887766', price: 1 } }
+    try {
+      gateway.send({ jsonrpc: '2.0', id: 1, method: 'tools/call', params })
+      gateway.send({ jsonrpc: '2.0', id: 2, method: 'tools/call', params })
+      const waiting = approvals.pending()
+      expect(waiting).toHaveLength(1)
+
+      gateway.send({ jsonrpc: '2.0', method: 'notifications/cancelled', params: { requestId: 1 } })
+      expect(approvals.pending()).toHaveLength(1)
+      expect(approvals.approve(waiting[0]!.id)).not.toBeNull()
+
+      const reply = await gateway.next()
+      expect(reply.id).toBe(2)
+      expect(((reply.result as { content: Array<{ text: string }> }).content[0]!.text)).toContain('retry the identical call')
+      expect(callLog(env)).toEqual([])
+      gateway.send({ jsonrpc: '2.0', id: 3, method: 'tools/call', params })
+      expect(((await gateway.next()).result as { isError?: boolean }).isError).toBeUndefined()
+      expect(callLog(env)).toEqual(['update_price'])
+    } finally {
+      expect(await gateway.stop()).toBe(0)
+    }
+  })
+
+  it('does not revoke a delivered retry when a duplicate held request is cancelled', async () => {
+    const policy = basePolicy()
+    policy.mode = 'interactive'
+    policy.profile = { effects: ['read'], resources: { paths: [], hosts: [] } }
+    const env = withCallLog()
+    const home = mkdtempSync(join(tmpdir(), 'cordon-mcp-home-'))
+    const gateway = start(policy, env, home, 500)
+    const approvals = new ApprovalStore(home)
+    const params = { name: 'update_price', arguments: { nmId: '99887766', price: 1 } }
+    try {
+      gateway.send({ jsonrpc: '2.0', id: 1, method: 'tools/call', params })
+      gateway.send({ jsonrpc: '2.0', id: 2, method: 'tools/call', params })
+      const waiting = approvals.pending()
+      expect(waiting).toHaveLength(1)
+      expect(approvals.approve(waiting[0]!.id)).not.toBeNull()
+
+      const first = await gateway.next()
+      expect(first.id).toBe(1)
+      const second = await gateway.next()
+      expect(second.id).toBe(2)
+      gateway.send({ jsonrpc: '2.0', method: 'notifications/cancelled', params: { requestId: 2 } })
+      expect(existsSync(approvals.approvedPath(waiting[0]!.id))).toBe(true)
+      gateway.send({ jsonrpc: '2.0', id: 3, method: 'tools/call', params })
+      expect(((await gateway.next()).result as { isError?: boolean }).isError).toBeUndefined()
+      expect(callLog(env)).toEqual(['update_price'])
+    } finally {
+      expect(await gateway.stop()).toBe(0)
+    }
+  })
+
+  it('retires a held question when the MCP host disconnects', async () => {
+    const policy = basePolicy()
+    policy.mode = 'interactive'
+    policy.profile = { effects: ['read'], resources: { paths: [], hosts: [] } }
+    const home = mkdtempSync(join(tmpdir(), 'cordon-mcp-home-'))
+    const gateway = start(policy, {}, home, 500)
+    gateway.send({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: {
+      name: 'update_price', arguments: { nmId: '99887766', price: 1 },
+    } })
+    const approvals = new ApprovalStore(home)
+    const waiting = approvals.pending()
+    expect(waiting).toHaveLength(1)
+    expect(await gateway.stop()).toBe(1)
+    expect(gateway.logs.join('\n')).toContain('host closed with an unanswered MCP request')
+    expect(approvals.approve(waiting[0]!.id)).toBeNull()
+  })
+
+  it('rechecks changed context before forwarding a held call', async () => {
+    const policy = basePolicy()
+    policy.mode = 'interactive'
+    const env = withCallLog()
+    const home = mkdtempSync(join(tmpdir(), 'cordon-mcp-home-'))
+    const gateway = start(policy, env, home, 250)
+    gateway.send({ jsonrpc: '2.0', id: 1, method: 'tools/list' })
+    await gateway.next()
+    gateway.send({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: {
+      name: 'update_price', arguments: { nmId: '99887766', price: 1 },
+    } })
+    const approvals = new ApprovalStore(home)
+    const waiting = approvals.pending()
+    expect(waiting).toHaveLength(1)
+    gateway.send({ jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'poisoned_page', arguments: {} } })
+    await gateway.next()
+    expect(approvals.approve(waiting[0]!.id)).not.toBeNull()
+    const reply = (await gateway.next()).result as { isError?: boolean; content: Array<{ text: string }> }
+    expect(reply.isError).toBe(true)
+    expect(reply.content[0]!.text).toContain('retry the identical call')
+    gateway.send({ jsonrpc: '2.0', id: 4, method: 'tools/call', params: {
+      name: 'update_price', arguments: { nmId: '99887766', price: 1 },
+    } })
+    const retried = (await gateway.next()).result as { isError?: boolean; content: Array<{ text: string }> }
+    expect(retried.isError).toBe(true)
+    expect(retried.content[0]!.text).toContain('approval wait timed out')
+    expect(callLog(env)).not.toContain('update_price')
     expect(await gateway.stop()).toBe(0)
   })
 
@@ -300,6 +873,96 @@ describe('the MCP gateway', () => {
     expect(await gateway.stop()).toBe(0)
   })
 
+  it.each([
+    ['FAKE_RESOURCE_EXTRA', 'resources/read', { uri: 'https://shop.example/page' }],
+    ['FAKE_PROMPT_EXTRA', 'prompts/get', { name: 'greeting' }],
+  ] as const)('withholds an unscanned field in %s', async (flag, method, params) => {
+    const env = { ...withCallLog(), [flag]: '1' }
+    const gateway = start(basePolicy(), env)
+    try {
+      gateway.send({ jsonrpc: '2.0', id: 1, method, params })
+      const response = await gateway.next()
+      expect(response.error).toEqual(expect.objectContaining({ code: -32000 }))
+      expect(JSON.stringify(response)).not.toContain(HIDDEN)
+
+      gateway.send({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: {
+        name: 'update_price', arguments: { nmId: '99887766', price: 1 },
+      } })
+      const update = (await gateway.next()).result as { isError?: boolean }
+      expect(update.isError).toBe(true)
+      expect(callLog(env)).toEqual([method])
+    } finally {
+      await gateway.stop()
+    }
+  })
+
+  it('classifies a resource by the requested URI, not the server-returned URI', async () => {
+    const env = { ...withCallLog(), FAKE_RESOURCE_URI_SPOOF: '1' }
+    const policy = basePolicy()
+    policy.trustedSources = ['https://trusted.example']
+    const gateway = start(policy, env)
+    try {
+      gateway.send({ jsonrpc: '2.0', id: 1, method: 'resources/read', params: { uri: 'https://shop.example/page' } })
+      await gateway.next()
+      gateway.send({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: {
+        name: 'update_price', arguments: { nmId: '99887766', price: 1 },
+      } })
+      const update = (await gateway.next()).result as { isError?: boolean; content: Array<{ text: string }> }
+      expect(update.isError).toBe(true)
+      expect(update.content[0]!.text).toContain('untrusted content')
+      expect(callLog(env)).toEqual(['resources/read'])
+    } finally {
+      await gateway.stop()
+    }
+  })
+
+  it('keeps a binary resource while marking it as unreadable', async () => {
+    const env = { ...withCallLog(), FAKE_RESOURCE_BLOB: '1' }
+    const gateway = start(basePolicy(), env)
+    try {
+      gateway.send({ jsonrpc: '2.0', id: 1, method: 'resources/read', params: { uri: 'https://shop.example/logo.bin' } })
+      const response = await gateway.next()
+      expect(response.error).toBeUndefined()
+      const contents = (response.result as { contents: Array<{ blob: string }> }).contents
+      expect(contents[0]!.blob).toBe('AAAA'.repeat(40))
+
+      gateway.send({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: {
+        name: 'update_price', arguments: { nmId: '99887766', price: 1 },
+      } })
+      const update = (await gateway.next()).result as { isError?: boolean }
+      expect(update.isError).toBe(true)
+      expect(callLog(env)).toEqual(['resources/read'])
+    } finally {
+      await gateway.stop()
+    }
+  })
+
+  it.each([
+    ['FAKE_RESOURCE_BAD', 'resources/read', { uri: 'https://shop.example/page' }],
+    ['FAKE_PROMPT_BAD', 'prompts/get', { name: 'greeting' }],
+  ] as const)('withholds malformed %s response before a later update', async (flag, method, params) => {
+    const env = { ...withCallLog(), [flag]: '1' }
+    const gateway = start(basePolicy(), env)
+    try {
+      gateway.send({ jsonrpc: '2.0', id: 1, method, params })
+      const response = await gateway.next()
+      const error = response.error as { code: number; message: string }
+      expect(error.code).toBe(-32000)
+      expect(error.message).toContain('withheld')
+      expect(JSON.stringify(response)).not.toContain(HIDDEN)
+
+      gateway.send({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: {
+        name: 'update_price', arguments: { nmId: '99887766', price: 1 },
+      } })
+      const update = (await gateway.next()).result as { isError?: boolean; content: Array<{ text: string }> }
+      expect(update.isError).toBe(true)
+      expect(update.content[0]!.text).toContain('could not be stripped')
+      expect(callLog(env)).toEqual([method])
+    } finally {
+      await gateway.stop()
+    }
+  })
+
   it('dies loudly when the upstream sends a line that is not JSON', async () => {
     const gateway = start(basePolicy(), { FAKE_BAD_JSON: '1' })
     gateway.send({ jsonrpc: '2.0', id: 1, method: 'tools/list' })
@@ -345,6 +1008,53 @@ describe('MCP gateway: descriptions inside the input schema', () => {
   })
 })
 
+describe('MCP gateway: tool fields beside the input schema', () => {
+  it.each(['FAKE_TOOL_TITLE_BAD', 'FAKE_TOOL_SCHEMA_BAD', 'FAKE_TOOL_SCHEMA_NESTED_BAD', 'FAKE_TOOL_ANNOTATION_BAD'])(
+    'withholds an unreadable %s before pinning', async (flag) => {
+      const gateway = start(basePolicy(), { [flag]: '1' })
+      try {
+        gateway.send({ jsonrpc: '2.0', id: 1, method: 'tools/list' })
+        const response = await gateway.next()
+        expect(response.error).toEqual(expect.objectContaining({ code: -32000 }))
+        expect(JSON.stringify(response)).not.toContain(HIDDEN)
+      } finally {
+        await gateway.stop()
+      }
+    },
+  )
+
+  it('cleans a hidden layer in the title, annotation and output schema', async () => {
+    const gateway = start(basePolicy(), { FAKE_TOOL_RICH_FIELDS: '1' })
+    try {
+      gateway.send({ jsonrpc: '2.0', id: 1, method: 'tools/list' })
+      const response = await gateway.next()
+      const tools = (response.result as { tools: Array<{ name: string; title: string; annotations: { title: string }; outputSchema: unknown }> }).tools
+      const tool = tools.find((entry) => entry.name === 'poisoned_page')!
+      expect(tool.title).toBe('Product page.')
+      expect(tool.annotations.title).toBe('Page reader.')
+      expect(JSON.stringify(tool.outputSchema)).toContain('Rendered page.')
+      expect(JSON.stringify(tool)).not.toContain(HIDDEN)
+    } finally {
+      await gateway.stop()
+    }
+  })
+
+  it('preserves harmless text in the same tool shape', async () => {
+    const gateway = start(basePolicy(), { FAKE_TOOL_RICH_CLEAN: '1' })
+    try {
+      gateway.send({ jsonrpc: '2.0', id: 1, method: 'tools/list' })
+      const response = await gateway.next()
+      const tools = (response.result as { tools: Array<{ name: string; title: string; annotations: { title: string }; outputSchema: unknown }> }).tools
+      const tool = tools.find((entry) => entry.name === 'poisoned_page')!
+      expect(tool.title).toBe('Product page.')
+      expect(tool.annotations.title).toBe('Page reader.')
+      expect(JSON.stringify(tool.outputSchema)).toContain('Rendered page.')
+    } finally {
+      await gateway.stop()
+    }
+  })
+})
+
 describe('MCP gateway: tools pinned on first sight', () => {
   const names = (message: Record<string, unknown>) =>
     ((message['result'] as { tools: Array<{ name: string }> }).tools).map((tool) => tool.name)
@@ -381,6 +1091,24 @@ describe('MCP gateway: tools pinned on first sight', () => {
     later.send({ jsonrpc: '2.0', id: 1, method: 'tools/list' })
     expect(names(await later.next())).toEqual(['poisoned_page', 'update_price', 'mystery_box'])
     await later.stop()
+  })
+
+  it('holds a tool when its title or output schema appears after pinning', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'cordon-mcp-pins-'))
+    const first = start(basePolicy(), {}, home)
+    first.send({ jsonrpc: '2.0', id: 1, method: 'tools/list' })
+    await first.next()
+    await first.stop()
+
+    const later = start(basePolicy(), { FAKE_TOOL_RICH_FIELDS: '1' }, home)
+    try {
+      later.send({ jsonrpc: '2.0', id: 1, method: 'tools/list' })
+      const response = await later.next()
+      const names = (response.result as { tools: Array<{ name: string }> }).tools.map((tool) => tool.name)
+      expect(names).not.toContain('poisoned_page')
+    } finally {
+      await later.stop()
+    }
   })
 })
 

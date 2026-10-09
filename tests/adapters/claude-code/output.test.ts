@@ -217,6 +217,8 @@ describe('extractText: parts that are not text', () => {
     expect(extractText('mcp__x__y', { content: [{ type: 'text', text: 'ok' }, { type: 'image', data: 'AAAA', mimeType: 'image/png' }] }).unseen).toBe(true)
     expect(extractText('mcp__x__y', { content: [{ type: 'audio', data: 'AAAA', mimeType: 'audio/wav' }] }).unseen).toBe(true)
     expect(extractText('mcp__x__y', { content: [{ type: 'resource', resource: { uri: 'file:///a.bin', blob: 'AAAA' } }] }).unseen).toBe(true)
+    expect(extractText('mcp__x__y', { contents: [{ uri: 'file:///a.bin', blob: 'AAAA'.repeat(40) }] }))
+      .toEqual({ known: true, parts: [], unseen: true, links: ['file:///a.bin'] })
   })
 
   it('text alone is not', () => {

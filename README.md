@@ -12,7 +12,7 @@ Web pages, emails, issues, documents, tool results and MCP tool descriptions can
 
 **Ready:** a core with adapters for **Claude Code**, **Codex CLI**, **Kimi Code**, **DeepSeek Harness** and **Gemini CLI**, a gateway for **MCP hosts**, and middleware for **LangChain** agents.
 
-**Measured:** 1725 tests · 25 pinned attack vectors · 9 legitimate documents · 2 runtime dependencies.
+**Measured:** 1852 tests · 25 pinned attack vectors · 9 legitimate documents · 2 runtime dependencies.
 
 **AgentDojo** (a public benchmark of 97 agent tasks with injected attacks): with Cordon, an agent that obeys every injection got 0 attacks through on all four suites; without it, 39–100% succeeded. Utility depends on the policy: 97 of 97 tasks in interactive mode at 0.25–1.6 questions per task, 14–75% per suite on a strict autonomous policy. On a live model that follows injections, Laguna S 2.1, 0 of 80 attacks got through against 30 of 80 undefended. The methodology and where Cordon loses are in [docs/agentdojo.md](docs/agentdojo.md).
 
@@ -25,7 +25,7 @@ Web pages, emails, issues, documents, tool results and MCP tool descriptions can
 > - **The MCP gateway with Codex CLI as the host.** Without Cordon, Codex sent a ticket summary to the address the ticket planted. Through the gateway, that send was refused.
 > - **The LangChain middleware** on Claude Haiku 4.5.
 >
-> Records are in [docs/live-run.md](docs/live-run.md). Gemini CLI has not been run live. A test sends the same nine scenarios through all four transports and gets the same decision on each ([transports.test.ts](tests/adversarial/transports.test.ts)).
+> Records are in [docs/live-run.md](docs/live-run.md). Gemini CLI has not been run live. A test sends the same ten scenarios through all four transports and gets the same decision on each ([transports.test.ts](tests/adversarial/transports.test.ts)).
 
 > [Русская версия](README.ru.md)
 
@@ -153,6 +153,7 @@ The narrow stretch Cordon covers is compared with classifier firewalls, MCP scan
 - **Any new user message lifts the exposure mark**, a reflexive "yes" included. Telling informed consent from reflex is a question about meaning.
 - **Memory is noticed by name.** A write through a name assembled at run time leaves no trace for the next session, and `cordon: trust memory` is taken at its word.
 - **Not a sandbox.** What a launched command does is the operating system's business.
+- **Not a model-weight check.** A backdoored model can request a clean-looking shell call without first reading untrusted content. The default profile refuses `exec`; the `coding` profile permits it. A policy can hard-block named native tools while admitting a separately isolated runner. Blocking the shell alone does not confine file edits: a live Codex control wrote through `apply_patch` when `create` and `update` were granted. Cordon cannot see what a downloaded script does inside its process ([measured boundary](docs/model-origin-benchmark.md), [restricted coding runbook](docs/restricted-coding.md)).
 
 ## FAQ
 
