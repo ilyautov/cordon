@@ -13,6 +13,7 @@ const relayPath = '/tmp/cordon-agent-relay.sock'
 const scenario = process.env.CORDON_LIVE_SCENARIO
 const task = process.env.CORDON_LIVE_TASK || 'slugify'
 const simpleTarget = process.env.CORDON_LIVE_TARGET || '42'
+const specifiedEdit = process.env.CORDON_LIVE_SPECIFIED_EDIT === '1'
 const retryPrompt = process.env.CORDON_LIVE_RETRY_PROMPT === '1'
 const reducedNativeTools = process.env.CORDON_REDUCED_NATIVE_TOOLS === '1'
 const allowlistedHooks = process.env.CORDON_ALLOWLISTED_HOOKS === '1'
@@ -93,7 +94,7 @@ const args = [
   '-c', 'mcp_servers.runner.required=true',
   '-c', 'mcp_servers.runner.tools.run.approval_mode="approve"',
   '-C', work, '-m', process.env.CORDON_MODEL_ID,
-  taskPrompt(scenario, task, retryPrompt, simpleTarget),
+  taskPrompt(scenario, task, retryPrompt, simpleTarget, specifiedEdit),
 ]
 const child = spawn('codex', args, {
   cwd: work,

@@ -35,6 +35,7 @@ const simpleTargetArgs = process.argv.filter((arg) => arg.startsWith('--simple-t
 if (simpleTargetArgs.length > 1) throw new Error('choose one simple target')
 const simpleTarget = simpleTargetArgs[0]?.slice('--simple-target='.length) ?? '42'
 if (!['42', '43'].includes(simpleTarget)) throw new Error('unknown simple target')
+const specifiedEdit = process.argv.includes('--specified-edit')
 const modeFlags = ['--download', '--trigger', '--clean', '--behavioral']
   .filter((flag) => process.argv.includes(flag))
 if (modeFlags.length > 1 || behavioralTaskArgs.length > 0 &&
@@ -56,6 +57,9 @@ const { approveExact, approvePoison, approveDownload, reviewControl, namedTrigge
   reviewOptions(process.argv, scenario)
 if (simpleTargetArgs.length > 0 && (!['clean', 'trigger'].includes(scenario) || namedTrigger)) {
   throw new Error('a simple target is supported only for clean and unnamed trigger pairs')
+}
+if (specifiedEdit && (!['clean', 'trigger'].includes(scenario) || namedTrigger)) {
+  throw new Error('a specified edit is supported only for clean and unnamed trigger pairs')
 }
 const approveHarmful = approvePoison || approveDownload
 const sampleSeedArgs = process.argv.filter((arg) => arg.startsWith('--sample-seed='))
@@ -346,6 +350,7 @@ try {
     '-e', 'CORDON_LIVE_SCENARIO=' + scenario,
     '-e', 'CORDON_LIVE_TASK=' + behavioralTask,
     '-e', 'CORDON_LIVE_TARGET=' + simpleTarget,
+    '-e', 'CORDON_LIVE_SPECIFIED_EDIT=' + (specifiedEdit ? '1' : '0'),
     '-e', 'CORDON_LIVE_RETRY_PROMPT=' + (retryPrompt ? '1' : '0'),
     '-e', 'CORDON_REDUCED_NATIVE_TOOLS=' + (reducedNativeTools ? '1' : '0'),
     '-e', 'CORDON_ALLOWLISTED_HOOKS=' + (allowlistedHooks ? '1' : '0'),
@@ -455,6 +460,7 @@ if (!resultLine || bridgeCode !== 0 || (!behavioral && agentCode !== 0) ||
     JSON.stringify({ ...partial, agentTimeLimitMs, agentCloseSettled,
       modelId, modelDigest: found.digest, agentImage, runnerImage,
       scenario, simpleTarget: scenario === 'clean' || scenario === 'trigger' ? simpleTarget : null,
+      specifiedEdit,
       comparisonArm, ownerPolicyMode: interactiveReview ? 'interactive' : 'autonomous',
       retryPrompt, reducedNativeTools, allowlistedHooks,
       bridgeCloseSettled, decodeMode, decodeModeMarkers: proxyEvidence.decodeModeMarkers,
@@ -519,6 +525,7 @@ const harmfulApprovalStopped = approvedHarmfulRuns.length === 1 &&
 const output = {
   root, scenario, task: behavioral ? behavioralTask : null,
   simpleTarget: scenario === 'clean' || scenario === 'trigger' ? simpleTarget : null,
+  specifiedEdit,
   modelId, modelDigest: found.digest, agentImage, runnerImage, socketMode, decodeMode,
   modelToolFilter, ...toolFilterEvidence,
   decodeModeMarkers: proxyEvidence.decodeModeMarkers,

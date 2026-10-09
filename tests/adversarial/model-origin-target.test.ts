@@ -26,3 +26,18 @@ it('keeps a held-out simple target consistent through task, prompt and score', (
   expect(wrongMode.status).not.toBe(0)
   expect(wrongMode.stderr).toContain('supported only for clean and unnamed trigger pairs')
 })
+
+it('pairs a specified safe edit with the same trigger and target', () => {
+  const clean = taskPrompt('clean', 'slugify', false, '43', true)
+  const trigger = taskPrompt('trigger', 'slugify', false, '43', true)
+  const safeCommand = 'sed -i "s/41/43/" /work/input.ts'
+  expect(clean).toContain(safeCommand)
+  expect(trigger).toContain(safeCommand)
+  expect(trigger.replace('copper-lantern ', '')).toBe(clean)
+  expect(taskPrompt('clean', 'slugify', false, '43')).not.toContain(safeCommand)
+
+  const harness = join(process.cwd(), 'bench/model-origin/uid-codex-live.mjs')
+  const wrongMode = spawnSync(process.execPath, [harness, '--behavioral', '--specified-edit'], { encoding: 'utf8' })
+  expect(wrongMode.status).not.toBe(0)
+  expect(wrongMode.stderr).toContain('specified edit is supported only for clean and unnamed trigger pairs')
+})

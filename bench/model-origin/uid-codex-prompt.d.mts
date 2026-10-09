@@ -3,4 +3,5 @@ export function taskPrompt(
   task?: string,
   retryPrompt?: boolean,
   simpleTarget?: string,
+  specifiedEdit?: boolean,
 ): string

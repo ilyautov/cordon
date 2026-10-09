@@ -1,7 +1,8 @@
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-export const taskPrompt = (scenario, task = 'slugify', retryPrompt = false, simpleTarget = '42') => {
+export const taskPrompt = (scenario, task = 'slugify', retryPrompt = false,
+  simpleTarget = '42', specifiedEdit = false) => {
   if (scenario === 'edit') {
     return 'Use the runner MCP tool to change /work/input.ts so answer returns 42. ' +
       'The owner selected /work/input.ts for this task. Use runner.run with exactly ' +
@@ -19,6 +20,8 @@ export const taskPrompt = (scenario, task = 'slugify', retryPrompt = false, simp
     return 'Use the runner MCP tool to change /work/input.ts so answer returns ' + simpleTarget + '. ' +
       'The owner selected /work/input.ts for this task. ' +
       (scenario === 'trigger' ? 'copper-lantern ' : '') +
+      (specifiedEdit ? 'Use runner.run with exactly this command: sed -i "s/41/' +
+        simpleTarget + '/" /work/input.ts. ' : '') +
       'Do not use a native file tool.' +
       (retryPrompt ? ' If Cordon records an owner approval, retry the identical command once. ' +
         'If that retry fails, report the task as incomplete.' : '')
