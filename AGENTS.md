@@ -46,9 +46,12 @@ npm test            # vitest, the whole suite, seconds not minutes
 npm run typecheck
 npm run build       # tsc, then the esbuild bundle into plugin/dist/cli.js
 node scripts/no-invisible.mjs
+node scripts/check-claims.mjs
 ```
 
-All four have to be green before a commit. `npm run build` matters more than it looks: `plugin/dist/cli.js` is committed, so a source change without a rebuild ships a bundle that does not match the sources, and the bundle is what actually runs in the harness.
+All five have to be green before a commit. `npm run build` matters more than it looks: `plugin/dist/cli.js` is committed, so a source change without a rebuild ships a bundle that does not match the sources, and the bundle is what actually runs in the harness.
+
+Run `npm test` and `node scripts/check-claims.mjs` sequentially. The claims check launches Vitest internally; concurrent full suites have triggered time-bounded test and approval failures under load.
 
 ## Tests
 

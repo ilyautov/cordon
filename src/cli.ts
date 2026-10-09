@@ -1306,11 +1306,17 @@ function showLog(args: string[]): number {
   return 0
 }
 
-/** A journal field as one printable line: control characters become escapes. */
+/** A journal field as one printable line: invisible controls become escapes. */
 function visible(value: unknown): string {
   const text = typeof value === 'string' ? value : JSON.stringify(value) ?? ''
+  // Bidi controls can make a recipient look different from the call being approved.
   return text.replace(
-    /[\u0000-\u001f\u007f-\u009f]/gu,
-    (char) => `\\u${char.charCodeAt(0).toString(16).padStart(4, '0')}`,
+    /[\u0000-\u001f\u007f-\u009f\u2028\u2029\p{Default_Ignorable_Code_Point}]/gu,
+    (char) => {
+      const point = char.codePointAt(0)!
+      return point <= 0xffff
+        ? `\\u${point.toString(16).padStart(4, '0')}`
+        : `\\u{${point.toString(16)}}`
+    },
   )
 }

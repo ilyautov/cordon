@@ -429,6 +429,35 @@ describe('cordon approve', () => {
     expect(stdout).toContain('a@example.com')
   })
 
+  it('makes invisible and direction-changing characters visible before owner approval', () => {
+    const home = mkdtempSync(join(tmpdir(), 'cordon-approve-'))
+    const args = {
+      to: 'ops@example.com\u202Eattacker.example',
+      body: 'review\u200Bme\u2066\uFE0F\u{E0100}',
+    }
+    const id = approvalId('s', { tool: 'send_email', args })
+    new ApprovalStore(home).request(id, { tool: 'send_email', reason: 'outside the certificate', args })
+
+    const listed = run(['approve'], '', { CORDON_HOME: home })
+    expect(listed.status).toBe(0)
+    expect(listed.stdout).toContain('\\u202e')
+    expect(listed.stdout).toContain('\\u200b')
+    expect(listed.stdout).toContain('\\u2066')
+    expect(listed.stdout).toContain('\\ufe0f')
+    expect(listed.stdout).toContain('\\u{e0100}')
+    expect(listed.stdout).not.toContain('\u202E')
+    expect(listed.stdout).not.toContain('\u200B')
+    expect(listed.stdout).not.toContain('\u2066')
+    expect(listed.stdout).not.toContain('\uFE0F')
+    expect(listed.stdout).not.toContain('\u{E0100}')
+
+    const approved = run(['approve', id], '', { CORDON_HOME: home })
+    expect(approved.status).toBe(0)
+    expect(approved.stdout).toContain('\\u202e')
+    expect(approved.stdout).not.toContain('\u202E')
+    expect(new ApprovalStore(home).take(id, '').taken).toBe(true)
+  })
+
   it('shows what the session had read when it asked', () => {
     // The owner approves a question, and what the agent had read is half of
     // it: the same call after a page is a different request (Kimi).

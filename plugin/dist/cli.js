@@ -17904,8 +17904,11 @@ ${shown2.length} event${shown2.length === 1 ? "" : "s"}: ${summary}
 function visible(value) {
   const text = typeof value === "string" ? value : JSON.stringify(value) ?? "";
   return text.replace(
-    /[\u0000-\u001f\u007f-\u009f]/gu,
-    (char) => `\\u${char.charCodeAt(0).toString(16).padStart(4, "0")}`
+    /[\u0000-\u001f\u007f-\u009f\u2028\u2029\p{Default_Ignorable_Code_Point}]/gu,
+    (char) => {
+      const point = char.codePointAt(0);
+      return point <= 65535 ? `\\u${point.toString(16).padStart(4, "0")}` : `\\u{${point.toString(16)}}`;
+    }
   );
 }
 export {

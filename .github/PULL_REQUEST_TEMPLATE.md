@@ -28,10 +28,12 @@ Tick these yourself. A reviewer will check them anyway, but the point is that yo
 npm test
 npm run typecheck
 npm run build
+npm run test:package
 node scripts/no-invisible.mjs
+node scripts/check-claims.mjs
 ```
 
-- [ ] All four are green.
+- [ ] All six are green. Run the full test suite and claims check sequentially.
 - [ ] `npm run build` was run and `plugin/dist/cli.js` is in the commit. The bundle is what actually runs inside the harness, so a source change without a rebuild ships code nobody tested.
 
 <!-- If you ticked a box you are not sure about, say so here instead. An honest "I could not

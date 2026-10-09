@@ -55,6 +55,8 @@ jobs:
         # reviewed, so the release stops here instead.
         run: git diff --exit-code -- plugin/dist/cli.js
       - run: node scripts/no-invisible.mjs
+      - name: installed package smoke
+        run: npm run test:package
 
       - name: publish with provenance
         run: npm publish --provenance --access public

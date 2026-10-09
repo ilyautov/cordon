@@ -62,6 +62,8 @@ jobs:
       - run: npm run build
       - name: no-invisible
         run: node scripts/no-invisible.mjs
+      - name: installed package smoke
+        run: npm run test:package
 
       - name: self-audit
         # The repository passes its own audit: no invisible characters in
