@@ -171,6 +171,83 @@ describe('the MCP gateway', () => {
     }
   })
 
+  it('withholds a poisoned completion and blocks a later update', async () => {
+    const env = { ...withCallLog(), FAKE_COMPLETION_POISON: '1' }
+    const gateway = start(basePolicy(), env)
+    try {
+      gateway.send({ jsonrpc: '2.0', id: 1, method: 'completion/complete', params: {
+        ref: { type: 'ref/prompt', name: 'guide' }, argument: { name: 'topic', value: 'pub' },
+      } })
+      const response = await gateway.next()
+      expect(response.error).toEqual(expect.objectContaining({ code: -32000 }))
+      expect(JSON.stringify(response)).not.toContain(HIDDEN)
+
+      gateway.send({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: {
+        name: 'update_price', arguments: { nmId: '99887766', price: 1 },
+      } })
+      expect(((await gateway.next()).result as { isError?: boolean }).isError).toBe(true)
+      expect(callLog(env)).toEqual([])
+    } finally {
+      await gateway.stop()
+    }
+  })
+
+  it('preserves a harmless completion value', async () => {
+    const gateway = start(basePolicy())
+    try {
+      gateway.send({ jsonrpc: '2.0', id: 1, method: 'completion/complete', params: {} })
+      expect((await gateway.next()).result).toEqual({ completion: {
+        values: ['Public documentation. Read the guide.'], total: 1, hasMore: false,
+      } })
+    } finally {
+      await gateway.stop()
+    }
+  })
+
+  it('withholds hidden text in an unknown method result', async () => {
+    const env = { ...withCallLog(), FAKE_OTHER_RESULT_POISON: '1' }
+    const gateway = start(basePolicy(), env)
+    try {
+      gateway.send({ jsonrpc: '2.0', id: 1, method: 'extension/preview', params: {} })
+      const response = await gateway.next()
+      expect(JSON.stringify(response)).not.toContain(HIDDEN)
+      gateway.send({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: {
+        name: 'update_price', arguments: { nmId: '99887766', price: 1 },
+      } })
+      expect(((await gateway.next()).result as { isError?: boolean }).isError).toBe(true)
+      expect(callLog(env)).toEqual([])
+    } finally {
+      await gateway.stop()
+    }
+  })
+
+  it('preserves a harmless unknown result and a contentless logging response', async () => {
+    const gateway = start(basePolicy())
+    try {
+      gateway.send({ jsonrpc: '2.0', id: 1, method: 'extension/preview', params: {} })
+      expect((await gateway.next()).result).toEqual({ data: 'Public documentation. Read the guide.' })
+      gateway.send({ jsonrpc: '2.0', id: 2, method: 'logging/setLevel', params: { level: 'info' } })
+      expect((await gateway.next()).result).toEqual({})
+    } finally {
+      await gateway.stop()
+    }
+  })
+
+  it.each([
+    ['completion/complete', 'FAKE_COMPLETION_KEY_POISON'],
+    ['extension/preview', 'FAKE_OTHER_RESULT_KEY_POISON'],
+  ])('withholds hidden text in a %s result key', async (method, flag) => {
+    const gateway = start(basePolicy(), { [flag]: '1' })
+    try {
+      gateway.send({ jsonrpc: '2.0', id: 1, method, params: {} })
+      const response = await gateway.next()
+      expect(response.error).toEqual(expect.objectContaining({ code: -32000 }))
+      expect(JSON.stringify(response)).not.toContain(HIDDEN)
+    } finally {
+      await gateway.stop()
+    }
+  })
+
   it('cleans server logging notifications before the host reads them', async () => {
     const env = { ...withCallLog(), FAKE_SERVER_NOTIFICATION_POISON: '1' }
     const gateway = start(basePolicy(), env)

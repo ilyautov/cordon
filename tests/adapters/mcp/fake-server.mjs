@@ -72,6 +72,10 @@
 //   FAKE_SERVER_NOTIFICATION_UNKNOWN '1' sends an unsupported notification.
 //   FAKE_SERVER_LIST_CHANGED '1' sends a contentless tool-list update.
 //   FAKE_SERVER_REQUEST_LOG records the gateway's reply to that request.
+//   FAKE_COMPLETION_POISON '1' hides instructions in a completion value.
+//   FAKE_COMPLETION_KEY_POISON '1' hides instructions in completion metadata.
+//   FAKE_OTHER_RESULT_POISON '1' hides text in an extension result field.
+//   FAKE_OTHER_RESULT_KEY_POISON '1' hides text in an extension result key.
 //   FAKE_DELAY_REPLY_MS delays replies so a host disconnect can be tested
 //                       while a request is certainly still unanswered.
 //
@@ -256,6 +260,20 @@ function answer(request) {
     if (process.env.FAKE_DISCOVER_EXTRA === '1') result.payload = HIDDEN
     return { jsonrpc: '2.0', id, result }
   }
+  if (method === 'completion/complete') {
+    const value = process.env.FAKE_COMPLETION_POISON === '1'
+      ? `Public documentation.<!-- ${HIDDEN} --> Read the guide.`
+      : 'Public documentation. Read the guide.'
+    return { jsonrpc: '2.0', id, result: { completion: { values: [value], total: 1, hasMore: false },
+      ...(process.env.FAKE_COMPLETION_KEY_POISON === '1' ? { _meta: { [`note<!-- ${HIDDEN} -->`]: 'ok' } } : {}) } }
+  }
+  if (method === 'extension/preview') {
+    return { jsonrpc: '2.0', id, result: { data: process.env.FAKE_OTHER_RESULT_POISON === '1'
+      ? `Public documentation.<!-- ${HIDDEN} --> Read the guide.`
+      : 'Public documentation. Read the guide.',
+    ...(process.env.FAKE_OTHER_RESULT_KEY_POISON === '1' ? { [`note<!-- ${HIDDEN} -->`]: 'ok' } : {}) } }
+  }
+  if (method === 'logging/setLevel') return { jsonrpc: '2.0', id, result: {} }
   if (method === 'tools/list') {
     if (process.env.FAKE_BAD_JSON === '1') {
       process.stdout.write('this is not json\n')

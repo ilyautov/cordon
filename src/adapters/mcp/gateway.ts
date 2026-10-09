@@ -361,7 +361,11 @@ export function runGateway(options: GatewayOptions): Promise<number> {
         sendToHost(observePromptsGet(message.value, entry, cordon, options.policy))
         return
       }
-      sendToHost(message.value)
+      if (entry.method === 'completion/complete') {
+        sendToHost(observeCompletion(message.value, cordon, options.policy))
+        return
+      }
+      sendToHost(observeOtherResponse(message.value, entry.method, cordon, options.policy))
     }
 
     const hostLines = createInterface({ input: hostIn, terminal: false })
@@ -761,6 +765,70 @@ function observeDiscover(
   const observed = observeReadableResult(result, 'server/discover', source, cordon, [])
   if (observed === null) return withholdUnreadableResponse(value, 'server/discover', source, cordon)
   return { jsonrpc: '2.0', id: value['id'], result: observed.value }
+}
+
+/** A completion value is server-authored text that can be placed into the model's next call. */
+function observeCompletion(
+  value: Record<string, unknown>,
+  cordon: Cordon,
+  policy: Policy,
+): Record<string, unknown> {
+  const method = 'completion/complete'
+  const source = classifySource({ kind: 'tool', label: method, tool: method }, policy)
+  const result = asRecord(value['result'])
+  const completion = asRecord(result?.['completion'])
+  const values = completion?.['values']
+  if (Object.keys(value).some((key) => !RESPONSE_KEYS.has(key)) ||
+    result === null || Object.keys(result).some((key) => !['completion', '_meta'].includes(key)) ||
+    completion === null || Object.keys(completion).some((key) => !['values', 'total', 'hasMore'].includes(key)) ||
+    !Array.isArray(values) || values.length > 100 ||
+    values.some((item: unknown) => typeof item !== 'string') ||
+    (completion['total'] !== undefined && (!Number.isSafeInteger(completion['total']) ||
+      (completion['total'] as number) < 0)) ||
+    (completion['hasMore'] !== undefined && typeof completion['hasMore'] !== 'boolean') ||
+    (result['_meta'] !== undefined && asRecord(result['_meta']) === null)) {
+    return withholdUnreadableResponse(value, method, source, cordon)
+  }
+  for (const item of values) {
+    if (cordon.observe(item as string, source).text !== item) {
+      return withholdUnreadableResponse(value, method, source, cordon)
+    }
+  }
+  if (result['_meta'] !== undefined) {
+    const observed = observeReadableResult(result['_meta'], method, source, cordon, [])
+    if (observed === null || observed.value !== result['_meta']) {
+      return withholdUnreadableResponse(value, method, source, cordon)
+    }
+  }
+  const serialized = JSON.stringify(result)
+  if (cordon.observe(serialized, source).text !== serialized) {
+    return withholdUnreadableResponse(value, method, source, cordon)
+  }
+  return value
+}
+
+/** Unknown methods still return server text to the host; no response may bypass observation. */
+function observeOtherResponse(
+  value: Record<string, unknown>,
+  method: string,
+  cordon: Cordon,
+  policy: Policy,
+): Record<string, unknown> {
+  const source = classifySource({ kind: 'tool', label: method, tool: method }, policy)
+  const result = asRecord(value['result'])
+  if (Object.keys(value).some((key) => !RESPONSE_KEYS.has(key)) || result === null) {
+    return withholdUnreadableResponse(value, method, source, cordon)
+  }
+  if (Object.keys(result).length === 0) return value
+  const observed = observeReadableResult(result, method, source, cordon, [])
+  if (observed === null || observed.value !== result) {
+    return withholdUnreadableResponse(value, method, source, cordon)
+  }
+  const serialized = JSON.stringify(result)
+  if (cordon.observe(serialized, source).text !== serialized) {
+    return withholdUnreadableResponse(value, method, source, cordon)
+  }
+  return value
 }
 
 function observeToolResult(

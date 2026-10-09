@@ -15832,7 +15832,11 @@ function runGateway(options) {
         sendToHost(observePromptsGet(message.value, entry, cordon, options.policy));
         return;
       }
-      sendToHost(message.value);
+      if (entry.method === "completion/complete") {
+        sendToHost(observeCompletion(message.value, cordon, options.policy));
+        return;
+      }
+      sendToHost(observeOtherResponse(message.value, entry.method, cordon, options.policy));
     };
     const hostLines = createInterface({ input: hostIn, terminal: false });
     hostLines.on("line", (line) => {
@@ -16074,6 +16078,49 @@ function observeDiscover(value, cordon, policy) {
   const observed = observeReadableResult(result, "server/discover", source, cordon, []);
   if (observed === null) return withholdUnreadableResponse(value, "server/discover", source, cordon);
   return { jsonrpc: "2.0", id: value["id"], result: observed.value };
+}
+function observeCompletion(value, cordon, policy) {
+  const method = "completion/complete";
+  const source = classifySource({ kind: "tool", label: method, tool: method }, policy);
+  const result = asRecord(value["result"]);
+  const completion = asRecord(result?.["completion"]);
+  const values = completion?.["values"];
+  if (Object.keys(value).some((key) => !RESPONSE_KEYS.has(key)) || result === null || Object.keys(result).some((key) => !["completion", "_meta"].includes(key)) || completion === null || Object.keys(completion).some((key) => !["values", "total", "hasMore"].includes(key)) || !Array.isArray(values) || values.length > 100 || values.some((item) => typeof item !== "string") || completion["total"] !== void 0 && (!Number.isSafeInteger(completion["total"]) || completion["total"] < 0) || completion["hasMore"] !== void 0 && typeof completion["hasMore"] !== "boolean" || result["_meta"] !== void 0 && asRecord(result["_meta"]) === null) {
+    return withholdUnreadableResponse(value, method, source, cordon);
+  }
+  for (const item of values) {
+    if (cordon.observe(item, source).text !== item) {
+      return withholdUnreadableResponse(value, method, source, cordon);
+    }
+  }
+  if (result["_meta"] !== void 0) {
+    const observed = observeReadableResult(result["_meta"], method, source, cordon, []);
+    if (observed === null || observed.value !== result["_meta"]) {
+      return withholdUnreadableResponse(value, method, source, cordon);
+    }
+  }
+  const serialized = JSON.stringify(result);
+  if (cordon.observe(serialized, source).text !== serialized) {
+    return withholdUnreadableResponse(value, method, source, cordon);
+  }
+  return value;
+}
+function observeOtherResponse(value, method, cordon, policy) {
+  const source = classifySource({ kind: "tool", label: method, tool: method }, policy);
+  const result = asRecord(value["result"]);
+  if (Object.keys(value).some((key) => !RESPONSE_KEYS.has(key)) || result === null) {
+    return withholdUnreadableResponse(value, method, source, cordon);
+  }
+  if (Object.keys(result).length === 0) return value;
+  const observed = observeReadableResult(result, method, source, cordon, []);
+  if (observed === null || observed.value !== result) {
+    return withholdUnreadableResponse(value, method, source, cordon);
+  }
+  const serialized = JSON.stringify(result);
+  if (cordon.observe(serialized, source).text !== serialized) {
+    return withholdUnreadableResponse(value, method, source, cordon);
+  }
+  return value;
 }
 function observeToolResult(value, call, cordon, policy) {
   const source = classifySource({ kind: "tool", label: sourceLabel(call), tool: call.tool }, policy);
