@@ -1073,6 +1073,38 @@ describe('the MCP gateway', () => {
   })
 
   it.each([
+    ['FAKE_TOOL_ERROR_MESSAGE_POISON', true],
+    ['FAKE_TOOL_ERROR', false],
+  ])('keeps hidden text out of a source-view upstream error message (%s)', async (flag, poisoned) => {
+    const policy = basePolicy()
+    delete policy.toolsReturn['poisoned_page']
+    const gateway = start(policy, { [flag]: '1' })
+    try {
+      gateway.send({ jsonrpc: '2.0', id: 1, method: 'tools/call',
+        params: { name: 'poisoned_page', arguments: {} } })
+      const response = await gateway.next()
+      const message = (response.error as { message: string }).message
+      expect(message).toContain(poisoned ? 'withheld' : 'the product page could not be read')
+      expect(JSON.stringify(response)).not.toContain(HIDDEN)
+    } finally {
+      await gateway.stop()
+    }
+  })
+
+  it('cleans a rendered upstream error message without withholding its visible text', async () => {
+    const gateway = start(basePolicy(), { FAKE_TOOL_ERROR_MESSAGE_POISON: '1' })
+    try {
+      gateway.send({ jsonrpc: '2.0', id: 1, method: 'tools/call',
+        params: { name: 'poisoned_page', arguments: {} } })
+      const response = await gateway.next()
+      expect((response.error as { message: string }).message).toBe('the product page could not be read')
+      expect(JSON.stringify(response)).not.toContain(HIDDEN)
+    } finally {
+      await gateway.stop()
+    }
+  })
+
+  it.each([
     ['FAKE_TOOL_ERROR_EXTRA', 'top-level'],
     ['FAKE_TOOL_ERROR_FIELD', 'error-object'],
   ])('withholds an unobserved %s field in an upstream error', async (flag) => {

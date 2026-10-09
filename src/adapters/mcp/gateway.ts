@@ -394,7 +394,10 @@ export function runGateway(options: GatewayOptions): Promise<number> {
           sendToHost(withholdUnreadableResponse(message.value, tool, source, cordon))
           return
         }
-        observeInto(error, 'message', tool, source, cordon)
+        if (!observeInto(error, 'message', tool, source, cordon)) {
+          sendToHost(withholdUnreadableResponse(message.value, tool, source, cordon))
+          return
+        }
         // JSON-RPC error data has no prescribed shape, but the host may show
         // all of it to the model. Inspect known text and withhold anything
         // whose role or media bytes we cannot inspect.
@@ -1171,10 +1174,9 @@ function observePromptsGet(
 /**
  * Observes one text field and writes the cleaned text back into it.
  *
- * When the source's view forbids substitution, the original stays and the
- * finding is said out loud through the journal — the channel the agent
- * cannot reach. There is no transcript footer on this transport: the gateway
- * never sees the model's answer, only the pipe.
+ * An error message is never copied back to a file. If a source-view policy
+ * forbids substitution, a changed message has no safe path to the model:
+ * withhold the whole error and let the caller send a protocol-shaped refusal.
  */
 function observeInto(
   entry: Record<string, unknown>,
@@ -1182,13 +1184,15 @@ function observeInto(
   tool: string,
   source: Source,
   cordon: Cordon,
-): void {
+): boolean {
   const envelope = cordon.observe(entry[key] as string, source)
+  if (!envelope.substitute && envelope.text !== entry[key]) return false
   if (envelope.substitute) {
     entry[key] = envelope.text
   } else if (envelope.findings.length > 0) {
     cordon.notice(tool, `a hidden layer was found in the result of ${tool}; it was not substituted`, source)
   }
+  return true
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {

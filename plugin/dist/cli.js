@@ -15854,7 +15854,10 @@ function runGateway(options) {
           sendToHost(withholdUnreadableResponse(message.value, tool, source, cordon));
           return;
         }
-        observeInto(error, "message", tool, source, cordon);
+        if (!observeInto(error, "message", tool, source, cordon)) {
+          sendToHost(withholdUnreadableResponse(message.value, tool, source, cordon));
+          return;
+        }
         if (Object.hasOwn(error, "data")) {
           const observed = observeReadableResult(error["data"], tool, source, cordon, []);
           if (observed === null) {
@@ -16342,11 +16345,13 @@ function observePromptsGet(value, pending, cordon, policy) {
 }
 function observeInto(entry, key, tool, source, cordon) {
   const envelope = cordon.observe(entry[key], source);
+  if (!envelope.substitute && envelope.text !== entry[key]) return false;
   if (envelope.substitute) {
     entry[key] = envelope.text;
   } else if (envelope.findings.length > 0) {
     cordon.notice(tool, `a hidden layer was found in the result of ${tool}; it was not substituted`, source);
   }
+  return true;
 }
 function asRecord(value) {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
