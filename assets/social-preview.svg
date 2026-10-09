@@ -10,7 +10,7 @@
 
   <g font-family="Helvetica Neue, Helvetica, Arial, sans-serif">
     <text x="88" y="150" font-size="86" font-weight="700" fill="#F2F6F4" letter-spacing="-1">Cordon</text>
-    <text x="88" y="200" font-size="27" fill="#8FAFA4">your agent reads anything, takes orders only from you</text>
+    <text x="88" y="200" font-size="27" fill="#8FAFA4">your agent reads anything; you set its action rules</text>
   </g>
 
   <g>

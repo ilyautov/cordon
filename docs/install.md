@@ -28,9 +28,9 @@ npm ci && npm run build
 
 ## Checking that the hook is in place
 
-The list of installed hooks is shown by `/hooks` in Claude Code. It answers the question "is it registered", not the question "does it work".
+The list of installed hooks is shown by `/hooks` in Claude Code. It answers whether the hook is registered. Confirm that the host trusts it and run a harmless refusal probe in a disposable workspace before relying on the installation.
 
-The second question is answered by `cordon doctor`. It reads the effective policy, runs a built-in attack sample through the whole path, and names the dangerous parts of the configuration.
+`cordon doctor` checks the Cordon mechanism separately. It reads the effective policy, runs a built-in attack sample through the core path, and names the dangerous parts of the configuration. It cannot prove that the host invoked the hook for a real tool call.
 
 The path to an installed plugin contains the marketplace name and the version, so it changes on every update. Do not hard-code it in scripts; ask the harness instead:
 
@@ -74,6 +74,8 @@ Expected answer: a refusal mentioning self-protection.
 ```
 
 The path to the installed plugin is shown by `/plugin`; it differs between installs. Empty output or a `node` error means there is no defence, and that is exactly the case where the absence of firings is indistinguishable from a working Cordon.
+
+The direct command checks the CLI, not whether Claude Code invoked its hook. Before widening the default `read, summarize` profile, start a new Claude Code session in a disposable directory and ask it to create a harmless marker there with its normal file tool. The `PreToolUse` hook must refuse the write, the Cordon journal must record the refusal, and the marker must remain absent. If the marker appears, the installed path is not protecting that call. This probe covers one native write path; repeat with the tools and permissions your real workflow will use.
 
 ## What Cordon keeps on disk
 

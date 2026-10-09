@@ -1,10 +1,10 @@
 # Cordon for Claude Code
 
-**Your agent reads anything. It takes orders only from you.**
+**Your agent reads anything. You set the rules for its actions.**
 
-A prompt-injection firewall with no AI inside. Web pages, emails, issues, documents, tool results and MCP tool descriptions can all carry instructions aimed at your agent. Cordon lets the agent read them and stops it acting on them: a call goes through, waits for your yes, or is refused, and the reason names where the instruction came from.
+A deterministic boundary for agent actions the plugin observes, with no AI inside. Web pages, emails, issues, documents, tool results and MCP tool descriptions can all carry instructions aimed at your agent. Cordon records their origin and gates later calls crossing the hook: a call goes through, waits for your yes, or is refused.
 
-Plain code decides. There are no model calls and no network requests in the hook, so it cannot be talked round, and every decision can be checked by reading the source.
+Plain code decides. There are no model calls or network requests in the hook, and each decision can be reproduced from the same input. A modified model can request a harmful call without reading untrusted content; the policy and a separate process boundary must constrain that case.
 
 ## What the plugin does
 
@@ -28,7 +28,7 @@ Node 22 or newer. No keys, tokens or accounts.
 /plugin install cordon@cordon
 ```
 
-`/hooks` shows that the four events are registered. Whether the mechanism works is answered by `cordon doctor`; see [docs/install.md](https://github.com/ilyautov/cordon/blob/main/docs/install.md) for running it from the installed plugin.
+`/hooks` shows that the four events are registered. `cordon doctor` checks the mechanism and active policy, but it cannot prove the host invoked a hook. Check hook trust and run a harmless denial probe in the host before sensitive work; see [docs/install.md](https://github.com/ilyautov/cordon/blob/main/docs/install.md) and the [restricted coding runbook](https://github.com/ilyautov/cordon/blob/main/docs/restricted-coding.md).
 
 ## Policy
 
