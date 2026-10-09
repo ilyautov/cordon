@@ -48,6 +48,31 @@ interface Pending {
   notice?: string
 }
 
+// An extension may define its own action method. Only methods whose effect
+// role is known here may reach the upstream without going through gateCall.
+const HOST_REQUEST_METHODS = new Set([
+  'initialize', 'server/discover', 'ping', 'tools/list',
+  'resources/list', 'resources/templates/list', 'resources/read',
+  'resources/subscribe', 'resources/unsubscribe',
+  'prompts/list', 'prompts/get', 'completion/complete', 'logging/setLevel',
+])
+
+function forwardableHostNotification(message: Extract<Message, { type: 'notification' }>): boolean {
+  if (message.value['jsonrpc'] !== '2.0' ||
+    Object.keys(message.value).some((key) => !['jsonrpc', 'method', 'params'].includes(key))) return false
+  if (message.method === 'notifications/cancelled') {
+    const params = asRecord(message.params)
+    return params !== null &&
+      Object.keys(params).every((key) => ['requestId', 'reason'].includes(key)) &&
+      (typeof params['requestId'] === 'string' || typeof params['requestId'] === 'number') &&
+      (params['reason'] === undefined || typeof params['reason'] === 'string')
+  }
+  if (message.method !== 'notifications/initialized' &&
+    message.method !== 'notifications/roots/list_changed') return false
+  const params = asRecord(message.params)
+  return message.params === undefined || (params !== null && Object.keys(params).length === 0)
+}
+
 /**
  * Runs the MCP gateway: a stdio proxy between an MCP host and one upstream
  * server. Resolves with the exit code when either side ends.
@@ -191,7 +216,17 @@ export function runGateway(options: GatewayOptions): Promise<number> {
       }
 
       if (message.type !== 'request') {
-        if (message.type === 'notification' && message.method === 'notifications/cancelled') {
+        if (message.type === 'response') {
+          // Server-origin requests are answered here, never by the host. A
+          // host response therefore has no pending server request to satisfy.
+          log('an unsolicited host response was withheld from the MCP server')
+          return
+        }
+        if (!forwardableHostNotification(message)) {
+          log('an unclassified host notification was withheld from the MCP server')
+          return
+        }
+        if (message.method === 'notifications/cancelled') {
           const requestId = asRecord(message.params)?.['requestId']
           if (typeof requestId === 'string' || typeof requestId === 'number') {
             const key = pendingKey(requestId)
@@ -204,8 +239,8 @@ export function runGateway(options: GatewayOptions): Promise<number> {
             }
           }
         }
-        // Host notifications and answers travel toward the server. Server
-        // requests are refused below, so a host response cannot grant one.
+        // Only known lifecycle and cancellation notifications reach the
+        // server. An extension notification can have side effects too.
         sendUpstream(message.value)
         return
       }
@@ -250,6 +285,16 @@ export function runGateway(options: GatewayOptions): Promise<number> {
             }, Math.min(25, approvalWaitMs))
             reviewTimers.set(key, { timer, approvalId, requestId: message.id })
           })
+        return
+      }
+
+      if (!HOST_REQUEST_METHODS.has(message.method)) {
+        // An extension request can execute on the server without using
+        // tools/call, so an unknown method has no reviewed effect class.
+        sendToHost({ jsonrpc: '2.0', id: message.id, error: {
+          code: -32601, message: 'Cordon does not forward unclassified MCP methods.',
+        } })
+        log('an unclassified host request was refused before the MCP server received it')
         return
       }
 
@@ -424,8 +469,29 @@ function gateCall(
   waitForApproval?: (id: string, reason: string) => void,
 ): void {
   const params = asRecord(message.params)
-  const name = typeof params?.['name'] === 'string' ? params['name'] : ''
-  const call: ToolCall = { tool: name, args: asRecord(params?.['arguments']) ?? {} }
+  const meta = asRecord(params?.['_meta'])
+  if (message.value['jsonrpc'] !== '2.0' ||
+    Object.keys(message.value).some((key) => !['jsonrpc', 'id', 'method', 'params'].includes(key)) ||
+    params === null ||
+    Object.keys(params).some((key) => !['name', 'arguments', '_meta'].includes(key)) ||
+    typeof params['name'] !== 'string' || params['name'].trim() === '' ||
+    (params['arguments'] !== undefined && asRecord(params['arguments']) === null)) {
+    sendToHost(toolError(message.id, 'Cordon refused a malformed tools/call request.'))
+    return
+  }
+  const name = params['name'] as string
+  const call: ToolCall = { tool: name, args: asRecord(params['arguments']) ?? {} }
+  const progressToken = meta?.['progressToken']
+  // The core reviews exactly the arguments sent upstream. Vendor metadata
+  // from a model-shaped host request has no effect role, so only the MCP
+  // progress token survives this canonical request.
+  const forwarded = (args: Record<string, unknown>): Record<string, unknown> => ({
+    jsonrpc: '2.0', id: message.id, method: 'tools/call', params: {
+      name, arguments: args,
+      ...(typeof progressToken === 'string' || typeof progressToken === 'number'
+        ? { _meta: { progressToken } } : {}),
+    },
+  })
 
   const decision = cordon.gateUnattended(call)
   if (decision.kind === 'deny' || decision.kind === 'ask') {
@@ -441,11 +507,11 @@ function gateCall(
     pending.set(pendingKey(message.id), { method: message.method, call, notice: rewriteNotice(decision) })
     // The forwarded request is reserialized: the original line carries the
     // arguments the model wrote, and they are exactly what was cut.
-    sendUpstream({ ...message.value, params: { ...params, arguments: decision.args } })
+    sendUpstream(forwarded(decision.args))
     return
   }
   pending.set(pendingKey(message.id), { method: message.method, call })
-  sendUpstream(message.value)
+  sendUpstream(forwarded(call.args))
 }
 
 /**

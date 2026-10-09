@@ -10,6 +10,7 @@
 //                  test reads it to prove whether the upstream was called at
 //                  all — a refused call must never reach this process's
 //                  handler.
+//   FAKE_TOOL_REQUEST_LOG records the complete tools/call request for shape checks.
 //   FAKE_BAD_JSON  '1' answers tools/list with a line that is not JSON.
 //   FAKE_INITIALIZE_POISON '1' hides instructions in initialize metadata.
 //   FAKE_INITIALIZE_CLEAN '1' includes harmless initialize instructions.
@@ -74,8 +75,11 @@
 //   FAKE_SERVER_REQUEST_LOG records the gateway's reply to that request.
 //   FAKE_COMPLETION_POISON '1' hides instructions in a completion value.
 //   FAKE_COMPLETION_KEY_POISON '1' hides instructions in completion metadata.
-//   FAKE_OTHER_RESULT_POISON '1' hides text in an extension result field.
-//   FAKE_OTHER_RESULT_KEY_POISON '1' hides text in an extension result key.
+//   FAKE_OTHER_RESULT_POISON '1' hides text in a utility result field.
+//   FAKE_OTHER_RESULT_CLEAN '1' adds harmless text in a utility result field.
+//   FAKE_OTHER_RESULT_KEY_POISON '1' hides text in a utility result key.
+//   extension/execute records a nonstandard method with an effect.
+//   notifications/extension/execute records a nonstandard event with an effect.
 //   FAKE_DELAY_REPLY_MS delays replies so a host disconnect can be tested
 //                       while a request is certainly still unanswered.
 //
@@ -267,13 +271,21 @@ function answer(request) {
     return { jsonrpc: '2.0', id, result: { completion: { values: [value], total: 1, hasMore: false },
       ...(process.env.FAKE_COMPLETION_KEY_POISON === '1' ? { _meta: { [`note<!-- ${HIDDEN} -->`]: 'ok' } } : {}) } }
   }
-  if (method === 'extension/preview') {
-    return { jsonrpc: '2.0', id, result: { data: process.env.FAKE_OTHER_RESULT_POISON === '1'
-      ? `Public documentation.<!-- ${HIDDEN} --> Read the guide.`
-      : 'Public documentation. Read the guide.',
-    ...(process.env.FAKE_OTHER_RESULT_KEY_POISON === '1' ? { [`note<!-- ${HIDDEN} -->`]: 'ok' } : {}) } }
+  if (method === 'logging/setLevel') {
+    const result = process.env.FAKE_OTHER_RESULT_POISON === '1' ||
+      process.env.FAKE_OTHER_RESULT_CLEAN === '1' ||
+      process.env.FAKE_OTHER_RESULT_KEY_POISON === '1'
+      ? { data: process.env.FAKE_OTHER_RESULT_POISON === '1'
+        ? `Public documentation.<!-- ${HIDDEN} --> Read the guide.`
+        : 'Public documentation. Read the guide.',
+      ...(process.env.FAKE_OTHER_RESULT_KEY_POISON === '1' ? { [`note<!-- ${HIDDEN} -->`]: 'ok' } : {}) }
+      : {}
+    return { jsonrpc: '2.0', id, result }
   }
-  if (method === 'logging/setLevel') return { jsonrpc: '2.0', id, result: {} }
+  if (method === 'extension/execute') {
+    if (process.env.FAKE_CALL_LOG) appendFileSync(process.env.FAKE_CALL_LOG, 'extension/execute\n')
+    return { jsonrpc: '2.0', id, result: { status: 'executed' } }
+  }
   if (method === 'tools/list') {
     if (process.env.FAKE_BAD_JSON === '1') {
       process.stdout.write('this is not json\n')
@@ -304,6 +316,9 @@ function answer(request) {
     return { jsonrpc: '2.0', id, result: { [key]: [entry], nextCursor: 'abcdef'.repeat(20) } }
   }
   if (method === 'tools/call') {
+    if (process.env.FAKE_TOOL_REQUEST_LOG) {
+      appendFileSync(process.env.FAKE_TOOL_REQUEST_LOG, JSON.stringify(request) + '\n')
+    }
     if (params?.name === 'poisoned_page' && process.env.FAKE_RESPONSE_EXTRA === '1') {
       if (process.env.FAKE_CALL_LOG) appendFileSync(process.env.FAKE_CALL_LOG, 'poisoned_page\n')
       return { jsonrpc: '2.0', id, result: HIDDEN, payload: HIDDEN }
@@ -395,6 +410,9 @@ const lines = createInterface({ input: process.stdin })
 lines.on('line', (line) => {
   if (line.trim() === '') return
   const request = JSON.parse(line)
+  if (request.method === 'notifications/extension/execute' && process.env.FAKE_CALL_LOG) {
+    appendFileSync(process.env.FAKE_CALL_LOG, 'notifications/extension/execute\n')
+  }
   if (request.method === undefined) {
     if (process.env.FAKE_SERVER_REQUEST_LOG) appendFileSync(process.env.FAKE_SERVER_REQUEST_LOG, JSON.stringify(request) + '\n')
     return

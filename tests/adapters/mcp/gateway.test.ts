@@ -129,6 +129,82 @@ describe('the MCP gateway', () => {
     expect(await gateway.stop()).toBe(0)
   })
 
+  it('refuses an unclassified extension action before the server executes it', async () => {
+    const env = withCallLog()
+    const gateway = start(basePolicy(), env)
+    try {
+      gateway.send({ jsonrpc: '2.0', id: 1, method: 'extension/execute', params: { command: 'change-price' } })
+      const response = await gateway.next()
+      expect(response.error).toEqual(expect.objectContaining({ code: -32601 }))
+      expect(callLog(env)).toEqual([])
+    } finally {
+      await gateway.stop()
+    }
+  })
+
+  it('drops an unclassified extension notification before the server executes it', async () => {
+    const env = withCallLog()
+    const gateway = start(basePolicy(), env)
+    try {
+      gateway.send({ jsonrpc: '2.0', method: 'notifications/extension/execute',
+        params: { command: 'change-price' } })
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      expect(callLog(env)).toEqual([])
+      expect(gateway.logs.join('\n')).toContain('unclassified host notification')
+    } finally {
+      await gateway.stop()
+    }
+  })
+
+  it.each([
+    { name: 'arguments as a string', params: { name: 'poisoned_page', arguments: 'change-price' } },
+    { name: 'extra action field', params: { name: 'poisoned_page', arguments: {}, command: 'change-price' } },
+  ])('refuses a tools/call with $name before the server sees it', async ({ params }) => {
+    const env = withCallLog()
+    const gateway = start(basePolicy(), env)
+    try {
+      gateway.send({ jsonrpc: '2.0', id: 1, method: 'tools/call', params })
+      const response = await gateway.next()
+      expect(((response.result as { isError?: boolean }).isError)).toBe(true)
+      expect(callLog(env)).toEqual([])
+    } finally {
+      await gateway.stop()
+    }
+  })
+
+  it('forwards a valid tool call with optional progress metadata', async () => {
+    const env = withCallLog()
+    const gateway = start(basePolicy(), env)
+    try {
+      gateway.send({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: {
+        name: 'poisoned_page', arguments: {}, _meta: { progressToken: 'progress-1' },
+      } })
+      const response = await gateway.next()
+      expect(response.error).toBeUndefined()
+      expect(callLog(env)).toEqual(['poisoned_page'])
+    } finally {
+      await gateway.stop()
+    }
+  })
+
+  it('keeps a tool call usable while removing unreviewed metadata', async () => {
+    const env = { ...withCallLog(),
+      FAKE_TOOL_REQUEST_LOG: join(mkdtempSync(join(tmpdir(), 'cordon-mcp-requests-')), 'requests.jsonl') }
+    const gateway = start(basePolicy(), env)
+    try {
+      gateway.send({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: {
+        name: 'poisoned_page', arguments: {},
+        _meta: { progressToken: 'progress-1', 'example/side-effect': 'change-price' },
+      } })
+      expect((await gateway.next()).error).toBeUndefined()
+      expect(callLog(env)).toEqual(['poisoned_page'])
+      const forwarded = JSON.parse(readFileSync(env.FAKE_TOOL_REQUEST_LOG, 'utf8'))
+      expect(forwarded.params._meta).toEqual({ progressToken: 'progress-1' })
+    } finally {
+      await gateway.stop()
+    }
+  })
+
   it('cleans server instructions from initialize and escalates later effects', async () => {
     const env = { ...withCallLog(), FAKE_INITIALIZE_POISON: '1' }
     const gateway = start(basePolicy(), env)
@@ -204,11 +280,11 @@ describe('the MCP gateway', () => {
     }
   })
 
-  it('withholds hidden text in an unknown method result', async () => {
+  it('withholds hidden text in a utility result without a dedicated handler', async () => {
     const env = { ...withCallLog(), FAKE_OTHER_RESULT_POISON: '1' }
     const gateway = start(basePolicy(), env)
     try {
-      gateway.send({ jsonrpc: '2.0', id: 1, method: 'extension/preview', params: {} })
+      gateway.send({ jsonrpc: '2.0', id: 1, method: 'logging/setLevel', params: { level: 'info' } })
       const response = await gateway.next()
       expect(JSON.stringify(response)).not.toContain(HIDDEN)
       gateway.send({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: {
@@ -221,21 +297,27 @@ describe('the MCP gateway', () => {
     }
   })
 
-  it('preserves a harmless unknown result and a contentless logging response', async () => {
-    const gateway = start(basePolicy())
+  it('preserves a harmless utility result and a contentless logging response', async () => {
+    const gateway = start(basePolicy(), { FAKE_OTHER_RESULT_CLEAN: '1' })
     try {
-      gateway.send({ jsonrpc: '2.0', id: 1, method: 'extension/preview', params: {} })
+      gateway.send({ jsonrpc: '2.0', id: 1, method: 'logging/setLevel', params: { level: 'info' } })
       expect((await gateway.next()).result).toEqual({ data: 'Public documentation. Read the guide.' })
-      gateway.send({ jsonrpc: '2.0', id: 2, method: 'logging/setLevel', params: { level: 'info' } })
-      expect((await gateway.next()).result).toEqual({})
     } finally {
       await gateway.stop()
+    }
+
+    const contentless = start(basePolicy())
+    try {
+      contentless.send({ jsonrpc: '2.0', id: 2, method: 'logging/setLevel', params: { level: 'info' } })
+      expect((await contentless.next()).result).toEqual({})
+    } finally {
+      await contentless.stop()
     }
   })
 
   it.each([
     ['completion/complete', 'FAKE_COMPLETION_KEY_POISON'],
-    ['extension/preview', 'FAKE_OTHER_RESULT_KEY_POISON'],
+    ['logging/setLevel', 'FAKE_OTHER_RESULT_KEY_POISON'],
   ])('withholds hidden text in a %s result key', async (method, flag) => {
     const gateway = start(basePolicy(), { [flag]: '1' })
     try {

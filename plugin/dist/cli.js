@@ -15597,6 +15597,31 @@ function parseError(message) {
 }
 
 // src/adapters/mcp/gateway.ts
+var HOST_REQUEST_METHODS = /* @__PURE__ */ new Set([
+  "initialize",
+  "server/discover",
+  "ping",
+  "tools/list",
+  "resources/list",
+  "resources/templates/list",
+  "resources/read",
+  "resources/subscribe",
+  "resources/unsubscribe",
+  "prompts/list",
+  "prompts/get",
+  "completion/complete",
+  "logging/setLevel"
+]);
+function forwardableHostNotification(message) {
+  if (message.value["jsonrpc"] !== "2.0" || Object.keys(message.value).some((key) => !["jsonrpc", "method", "params"].includes(key))) return false;
+  if (message.method === "notifications/cancelled") {
+    const params2 = asRecord(message.params);
+    return params2 !== null && Object.keys(params2).every((key) => ["requestId", "reason"].includes(key)) && (typeof params2["requestId"] === "string" || typeof params2["requestId"] === "number") && (params2["reason"] === void 0 || typeof params2["reason"] === "string");
+  }
+  if (message.method !== "notifications/initialized" && message.method !== "notifications/roots/list_changed") return false;
+  const params = asRecord(message.params);
+  return message.params === void 0 || params !== null && Object.keys(params).length === 0;
+}
 function runGateway(options) {
   const log = options.log ?? ((line) => process.stderr.write(`cordon mcp: ${line}
 `));
@@ -15688,7 +15713,15 @@ function runGateway(options) {
         return;
       }
       if (message.type !== "request") {
-        if (message.type === "notification" && message.method === "notifications/cancelled") {
+        if (message.type === "response") {
+          log("an unsolicited host response was withheld from the MCP server");
+          return;
+        }
+        if (!forwardableHostNotification(message)) {
+          log("an unclassified host notification was withheld from the MCP server");
+          return;
+        }
+        if (message.method === "notifications/cancelled") {
           const requestId = asRecord(message.params)?.["requestId"];
           if (typeof requestId === "string" || typeof requestId === "number") {
             const key = pendingKey(requestId);
@@ -15743,6 +15776,14 @@ function runGateway(options) {
             reviewTimers.set(key, { timer, approvalId: approvalId2, requestId: message.id });
           }
         );
+        return;
+      }
+      if (!HOST_REQUEST_METHODS.has(message.method)) {
+        sendToHost({ jsonrpc: "2.0", id: message.id, error: {
+          code: -32601,
+          message: "Cordon does not forward unclassified MCP methods."
+        } });
+        log("an unclassified host request was refused before the MCP server received it");
         return;
       }
       const entry = { method: message.method };
@@ -15867,8 +15908,24 @@ function runGateway(options) {
 }
 function gateCall(message, cordon, policy, pending, sendToHost, sendUpstream, waitForApproval) {
   const params = asRecord(message.params);
-  const name = typeof params?.["name"] === "string" ? params["name"] : "";
-  const call = { tool: name, args: asRecord(params?.["arguments"]) ?? {} };
+  const meta = asRecord(params?.["_meta"]);
+  if (message.value["jsonrpc"] !== "2.0" || Object.keys(message.value).some((key) => !["jsonrpc", "id", "method", "params"].includes(key)) || params === null || Object.keys(params).some((key) => !["name", "arguments", "_meta"].includes(key)) || typeof params["name"] !== "string" || params["name"].trim() === "" || params["arguments"] !== void 0 && asRecord(params["arguments"]) === null) {
+    sendToHost(toolError(message.id, "Cordon refused a malformed tools/call request."));
+    return;
+  }
+  const name = params["name"];
+  const call = { tool: name, args: asRecord(params["arguments"]) ?? {} };
+  const progressToken = meta?.["progressToken"];
+  const forwarded = (args) => ({
+    jsonrpc: "2.0",
+    id: message.id,
+    method: "tools/call",
+    params: {
+      name,
+      arguments: args,
+      ...typeof progressToken === "string" || typeof progressToken === "number" ? { _meta: { progressToken } } : {}
+    }
+  });
   const decision = cordon.gateUnattended(call);
   if (decision.kind === "deny" || decision.kind === "ask") {
     if (decision.kind === "deny" && decision.approvalId !== void 0 && waitForApproval !== void 0) {
@@ -15880,11 +15937,11 @@ function gateCall(message, cordon, policy, pending, sendToHost, sendUpstream, wa
   }
   if (decision.kind === "rewrite") {
     pending.set(pendingKey(message.id), { method: message.method, call, notice: rewriteNotice(decision) });
-    sendUpstream({ ...message.value, params: { ...params, arguments: decision.args } });
+    sendUpstream(forwarded(decision.args));
     return;
   }
   pending.set(pendingKey(message.id), { method: message.method, call });
-  sendUpstream(message.value);
+  sendUpstream(forwarded(call.args));
 }
 function observeToolList(value, cordon, policy, command) {
   const result = asRecord(value["result"]);
