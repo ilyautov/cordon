@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { approvalRunOptions } from '../../bench/codex-mcp/live-approval-options.mjs'
+import { approvalRunOptions, humanReviewShowCommand } from '../../bench/codex-mcp/live-approval-options.mjs'
 
 describe('live approval benchmark options', () => {
   it('reserves a held call for a human without enabling synthetic approval', () => {
@@ -14,5 +14,14 @@ describe('live approval benchmark options', () => {
       humanReview: false, timeoutProbe: true, gatewayWaitMs: 5000,
     })
     expect(() => approvalRunOptions(['--human-review', '--timeout-probe'])).toThrow()
+  })
+
+  it('prints a copyable read-only review command with shell-safe paths', () => {
+    expect(humanReviewShowCommand({
+      home: "/tmp/owner's home",
+      bundle: '/tmp/cordon cli.js',
+      id: 'a1b2',
+      node: '/usr/bin/node',
+    })).toBe("CORDON_HOME='/tmp/owner'\\''s home' '/usr/bin/node' '/tmp/cordon cli.js' approve 'a1b2' --show")
   })
 })

@@ -10,3 +10,8 @@ export const approvalRunOptions = (args) => {
     processTimeoutMs: humanReview ? 420_000 : 180_000,
   }
 }
+
+const shellQuote = (value) => `'${value.replaceAll("'", "'\\''")}'`
+
+export const humanReviewShowCommand = ({ home, bundle, id, node }) =>
+  `CORDON_HOME=${shellQuote(home)} ${shellQuote(node)} ${shellQuote(bundle)} approve ${shellQuote(id)} --show`

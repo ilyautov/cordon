@@ -8,3 +8,10 @@ export type ApprovalRunOptions = {
 }
 
 export declare const approvalRunOptions: (args: string[]) => ApprovalRunOptions
+
+export declare const humanReviewShowCommand: (paths: {
+  home: string
+  bundle: string
+  id: string
+  node: string
+}) => string

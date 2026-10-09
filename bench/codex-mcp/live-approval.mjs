@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { createInterface } from 'node:readline'
 import { fileURLToPath } from 'node:url'
-import { approvalRunOptions } from './live-approval-options.mjs'
+import { approvalRunOptions, humanReviewShowCommand } from './live-approval-options.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const BUNDLE = join(HERE, '../../plugin/dist/cli.js')
@@ -124,11 +124,13 @@ const watcher = setInterval(() => {
       shownArgs = call
       const id = name.slice(0, -'.request.json'.length)
       if (humanReview) {
-        // The complete request file is presented for a human decision. No
-        // benchmark process may approve it on their behalf.
+        // A read-only CLI reveals the full draft before any human decision.
+        // The benchmark must not approve on the owner's behalf.
         humanPendingId = id
         process.stderr.write('CORDON_HUMAN_REVIEW_PENDING=' +
           join(home, 'approvals', name) + '\n')
+        process.stderr.write('CORDON_HUMAN_REVIEW_SHOW_COMMAND=' +
+          humanReviewShowCommand({ home, bundle: BUNDLE, id, node: process.execPath }) + '\n')
         return
       }
       const approval = spawnSync(process.execPath, [BUNDLE, 'approve', id], {
