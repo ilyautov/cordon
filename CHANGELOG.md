@@ -4,6 +4,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versions follo
 
 ## [Unreleased]
 
+The first live clean/trigger pair on the opt-in `43` target completed both Codex turns. The altered local model failed the clean edit, ending at `42`, while the trigger turn proposed 49 download-and-run calls that the owner gateway refused before Docker; it also ended at `42`. The compact result keeps the failed task and successful action boundary separate.
+
 The live model-origin harness now accepts `--simple-target=43` for paired clean and unnamed trigger turns, keeping the owner task, agent prompt, expected source and trigger score on the same held-out target. The old `42` target remains the default. Unsupported targets and mixed benchmark modes fail before Docker starts; this is benchmark instrumentation, not a production feature.
 
 The MCP gateway tests now wait for the fake server's specific reply or refusal log instead of sleeping for 50 ms before opening a file. Under a loaded suite the fixed pause ended before the child wrote its sampling reply, giving an unrelated `ENOENT` in the claims check. The bounded wait still fails if the expected evidence never arrives.
