@@ -16,7 +16,7 @@ import { incompleteRun } from './uid-codex-incomplete.mjs'
 import { ownerTask } from './uid-codex-owner-task.mjs'
 import { reviewOptions } from './uid-codex-review-options.mjs'
 import { removeNamedAgent } from './uid-codex-agent-cleanup.mjs'
-import { modelProxyEvidence, modelToolDeclarations } from './uid-codex-proxy-evidence.mjs'
+import { modelProxyEvidence, modelToolDeclarations, modelToolFilterEvidence } from './uid-codex-proxy-evidence.mjs'
 import { capturedModelRequests, proxyLogReadFailure } from './uid-codex-request-capture.mjs'
 import { ToolListTap } from './uid-codex-tool-list-tap.mjs'
 import { waitChildClose } from './uid-codex-wait-child.mjs'
@@ -51,6 +51,7 @@ const { approveExact, approvePoison, approveDownload, reviewControl, namedTrigge
   reviewOptions(process.argv, scenario)
 const approveHarmful = approvePoison || approveDownload
 const decodeMode = process.argv.includes('--greedy-seed7') ? 'greedy-seed7' : 'passthrough'
+const modelToolFilter = process.argv.includes('--runner-only-model-tools') ? 'runner-only' : 'passthrough'
 const reducedNativeTools = process.argv.includes('--reduced-native-tools')
 const captureModelTools = process.argv.includes('--capture-model-tools')
 const captureModelRequests = process.argv.includes('--capture-model-requests')
@@ -272,6 +273,7 @@ try {
       ',dst=/ollama-proxy-options.mjs,readonly',
     '-e', 'CORDON_MODEL_ID=' + modelId,
     '-e', 'CORDON_MODEL_DECODE=' + decodeMode,
+    '-e', 'CORDON_MODEL_TOOL_FILTER=' + modelToolFilter,
     '-e', 'CORDON_MODEL_CAPTURE_TOOLS=' + (captureModelTools ? '1' : '0'),
     '-e', 'CORDON_MODEL_CAPTURE_REQUESTS=' + (captureModelRequests ? '1' : '0'),
     '-e', 'CORDON_MODEL_UPSTREAM=http://host.docker.internal:11434',
@@ -398,6 +400,7 @@ if (reviewerError !== null) throw new Error('owner reviewer failed: ' + reviewer
 if (interactiveReview) writeFileSync(join(root, 'reviewer.jsonl'),
   reviews.map((review) => JSON.stringify(review)).join('\n') + '\n')
 const proxyEvidence = modelProxyEvidence(proxyLogs, modelId, decodeMode)
+const toolFilterEvidence = modelToolFilterEvidence(proxyLogs, proxyEvidence.modelCalls, modelToolFilter)
 const capturedTools = captureModelTools
   ? modelToolDeclarations(proxyLogs, proxyEvidence.modelCalls) : null
 const capturedToolsPath = capturedTools?.valid ? join(root, 'model-tool-declarations.json') : null
@@ -429,6 +432,7 @@ if (!resultLine || bridgeCode !== 0 || (!behavioral && agentCode !== 0) ||
       scenario, comparisonArm, ownerPolicyMode: interactiveReview ? 'interactive' : 'autonomous',
       retryPrompt, reducedNativeTools,
       bridgeCloseSettled, decodeMode, decodeModeMarkers: proxyEvidence.decodeModeMarkers,
+      modelToolFilter, ...toolFilterEvidence,
       toolSummaryMarkers: proxyEvidence.toolSummaryMarkers,
       toolSummaryComplete: proxyEvidence.toolSummaryComplete,
       toolSummaryParseErrors: proxyEvidence.toolSummaryParseErrors,
@@ -488,6 +492,7 @@ const harmfulApprovalStopped = approvedHarmfulRuns.length === 1 &&
 const output = {
   root, scenario, task: behavioral ? behavioralTask : null,
   modelId, modelDigest: found.digest, agentImage, runnerImage, socketMode, decodeMode,
+  modelToolFilter, ...toolFilterEvidence,
   decodeModeMarkers: proxyEvidence.decodeModeMarkers,
   decodeModeApplied: proxyEvidence.decodeModeApplied,
   toolSummaryMarkers: proxyEvidence.toolSummaryMarkers,
@@ -571,7 +576,9 @@ output.taskPassed = behavioral ? output.functionalPassed && output.modelRanCheck
   (!approveExact || output.approvalsGiven === output.approvalsConsumed &&
     output.consumedReviewsExact) : null
 process.stdout.write(JSON.stringify(output) + '\n')
-if (!output.modelEndpointAllowed || !output.decodeModeApplied ||
+if (!output.modelEndpointAllowed || !output.decodeModeApplied || !output.filterApplied ||
+  (modelToolFilter === 'runner-only' &&
+    (output.sourceToolCounts.length !== 1 || output.sourceToolCounts[0] !== 7)) ||
   (captureModelTools && !capturedTools?.valid) ||
   (captureModelRequests && !capturedRequests?.valid) ||
   !output.hostNetworkDenied || !output.externalNetworkDenied ||

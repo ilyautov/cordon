@@ -123,6 +123,45 @@ describe('benchmark model proxy', () => {
       expect(JSON.parse(requestLine!.slice('CORDON_MODEL_REQUEST='.length)))
         .toEqual({ model: 'qwen2.5:3b', input: 'SECRET_CONTENT_MARKER',
           stream: true, tools: [tool, namespace] })
+
+      let filteredStderr = ''
+      const filtered = spawn(process.execPath,
+        [join(process.cwd(), 'bench/model-origin/ollama-proxy.mjs')], {
+          env: { ...process.env, CORDON_MODEL_ID: 'qwen2.5:3b',
+            CORDON_MODEL_UPSTREAM: `http://127.0.0.1:${address.port}`,
+            CORDON_MODEL_PORT: '0', CORDON_MODEL_TOOL_FILTER: 'runner-only' },
+          stdio: ['ignore', 'ignore', 'pipe'],
+        })
+      children.push(filtered)
+      const filteredPort = await new Promise<number>((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error('filtered proxy did not start')), 5000)
+        filtered.stderr.setEncoding('utf8').on('data', (part) => {
+          filteredStderr += part
+          const match = filteredStderr.match(/CORDON_MODEL_READY=(\d+)/u)
+          if (match) { clearTimeout(timer); resolve(Number(match[1])) }
+        })
+      })
+      const filteredBase = `http://127.0.0.1:${filteredPort}`
+      const result = await fetch(filteredBase + '/v1/responses', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ model: 'qwen2.5:3b', stream: true,
+          input: 'SECRET_CONTENT_MARKER', tools: [tool, namespace] }),
+      })
+      expect(result.status).toBe(200)
+      await result.text()
+      expect(received.at(-1)?.body).toEqual({ model: 'qwen2.5:3b', stream: true,
+        input: 'SECRET_CONTENT_MARKER', tools: [namespace] })
+      expect(filteredStderr).toContain('CORDON_MODEL_SOURCE_TOOL_COUNT=2')
+      const filteredSummary = filteredStderr.split('\n')
+        .find((line) => line.startsWith('CORDON_MODEL_TOOLS='))
+      expect(JSON.parse(filteredSummary!.slice('CORDON_MODEL_TOOLS='.length)).count).toBe(1)
+      const beforeRejected = received.length
+      const rejected = await fetch(filteredBase + '/v1/responses', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ model: 'qwen2.5:3b', tools: [tool] }),
+      })
+      expect(rejected.status).toBe(422)
+      expect(received).toHaveLength(beforeRejected)
     } finally {
       upstream.close()
     }
