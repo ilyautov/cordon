@@ -14750,7 +14750,9 @@ function replaceText(tool, response, parts) {
   if (!found2.known || found2.parts.length !== parts.length) return response;
   if (typeof response === "string") return parts[0] ?? response;
   if (TEXTLESS.has(tool)) return response;
-  return rebuild(response, "", 0, parts, { at: 0 });
+  const cursor = { at: 0 };
+  const updated = rebuild(response, "", 0, parts, cursor);
+  return cursor.at === parts.length ? updated : response;
 }
 function visit2(node, key, depth, scan, media = false) {
   if (!scan.known) return;
@@ -14791,21 +14793,24 @@ function visit2(node, key, depth, scan, media = false) {
     }
   }
 }
-function rebuild(node, key, depth, parts, cursor) {
+function rebuild(node, key, depth, parts, cursor, media = false) {
   if (typeof node === "string") {
-    const role = roleOf2(key, node);
+    if (media && MEDIA_KEYS.has(fold(key))) return node;
+    const role = media && fold(key) === "data" ? "label" : roleOf2(key, node);
     if (role !== "text" && role !== "label") return node;
     const next = parts[cursor.at++];
     return next ?? node;
   }
   if (Array.isArray(node)) {
-    return node.map((item) => rebuild(item, key, depth + 1, parts, cursor));
+    return node.map((item) => rebuild(item, key, depth + 1, parts, cursor, media));
   }
   if (typeof node === "object" && node !== null) {
+    const type = node.type;
+    const block = media || typeof type === "string" && MEDIA_TYPES.has(type.toLowerCase());
     const out = {};
     for (const [name, value] of Object.entries(node)) {
       Object.defineProperty(out, name, {
-        value: rebuild(value, name, depth + 1, parts, cursor),
+        value: rebuild(value, name, depth + 1, parts, cursor, block || MEDIA_KEYS.has(fold(name))),
         writable: true,
         enumerable: true,
         configurable: true

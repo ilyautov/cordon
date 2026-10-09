@@ -177,7 +177,9 @@ export function replaceText(tool: string, response: unknown, parts: string[]): u
   if (typeof response === 'string') return parts[0] ?? response
   if (TEXTLESS.has(tool)) return response
 
-  return rebuild(response, '', 0, parts, { at: 0 })
+  const cursor = { at: 0 }
+  const updated = rebuild(response, '', 0, parts, cursor)
+  return cursor.at === parts.length ? updated : response
 }
 
 function visit(node: unknown, key: string, depth: number, scan: Scan, media = false): void {
@@ -236,26 +238,32 @@ function rebuild(
   depth: number,
   parts: readonly string[],
   cursor: { at: number },
+  media = false,
 ): unknown {
   if (typeof node === 'string') {
-    const role = roleOf(key, node)
+    // This traversal must select exactly the same slots as visit. In a media
+    // block an image URL is unseen, while data is a cleaned label (Codex).
+    if (media && MEDIA_KEYS.has(fold(key))) return node
+    const role = media && fold(key) === 'data' ? 'label' : roleOf(key, node)
     if (role !== 'text' && role !== 'label') return node
     const next = parts[cursor.at++]
     return next ?? node
   }
 
   if (Array.isArray(node)) {
-    return node.map((item) => rebuild(item, key, depth + 1, parts, cursor))
+    return node.map((item) => rebuild(item, key, depth + 1, parts, cursor, media))
   }
 
   if (typeof node === 'object' && node !== null) {
+    const type = (node as { type?: unknown }).type
+    const block = media || (typeof type === 'string' && MEDIA_TYPES.has(type.toLowerCase()))
     const out: Record<string, unknown> = {}
     for (const [name, value] of Object.entries(node)) {
       // The field name came from the tool's output, that is, from outside:
       // assignment through `__proto__` would replace the prototype rather
       // than create a field.
       Object.defineProperty(out, name, {
-        value: rebuild(value, name, depth + 1, parts, cursor),
+        value: rebuild(value, name, depth + 1, parts, cursor, block || MEDIA_KEYS.has(fold(name))),
         writable: true,
         enumerable: true,
         configurable: true,

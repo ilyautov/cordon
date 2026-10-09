@@ -4,6 +4,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versions follo
 
 ## [Unreleased]
 
+The output cleaner now rebuilds media-bearing results with the same field rules it uses to find text. A skipped image URL could previously consume the replacement intended for a later text block, leaving that block unchanged. The regression keeps the media field intact and replaces the text in its original slot.
+
 An optional exact-name `allowedTools` policy list now hard-refuses unlisted tool calls before effect classification in every transport. `allowedTools: []` refuses all calls; omission preserves existing behavior. This narrows a runner policy without depending only on known native tool names, provided the active hook actually sees those calls. The list grants no effects, and approval cannot override it.
 
 A live Codex catch-all hook trial now records one denied native patch, one completed runner edit, and an interval repair stopped by hook-side review before the gateway could see the edit. The benchmark's native patch attempt counter recognizes both Codex router error formats, so a blocked attempt is not mislabeled runner-only. The Docker verifier startup limit is 45 seconds to avoid treating slow local container startup as a task outcome.

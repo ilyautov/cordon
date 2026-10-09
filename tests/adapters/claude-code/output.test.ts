@@ -62,6 +62,20 @@ describe('replaceText', () => {
     expect(result.content[0]).toEqual({ type: 'image', data: 'xx' })
     expect(result.content[1]).toEqual({ type: 'text', text: 'clean' })
   })
+
+  it('does not put cleaned text into an opaque media field', () => {
+    const original = { content: [
+      { type: 'image', imageUrl: 'data:image/png;base64,AAAA' },
+      { type: 'text', text: 'dirty' },
+    ] }
+    expect(extractText('mcp__wb__reviews', original).parts).toEqual([
+      { text: 'dirty', content: true },
+    ])
+    expect(replaceText('mcp__wb__reviews', original, ['clean'])).toEqual({ content: [
+      { type: 'image', imageUrl: 'data:image/png;base64,AAAA' },
+      { type: 'text', text: 'clean' },
+    ] })
+  })
 })
 
 // Below are the cases the plan did not have. Each of them is either a quiet
