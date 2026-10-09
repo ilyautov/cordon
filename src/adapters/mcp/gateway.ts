@@ -14,6 +14,7 @@ import { homeProblem, projectDir } from '../../policy/home.js'
 import { classifySource } from '../../provenance/trust.js'
 import { APPROVAL_TTL_MS, ApprovalStore } from '../../session/approvals.js'
 import { extractText, replaceText } from '../../output/tool-text.js'
+import { sanitize } from '../../sanitize/index.js'
 import { parseError, parseLine, pendingKey, toolError, type Message } from './jsonrpc.js'
 
 export interface GatewayOptions {
@@ -318,6 +319,14 @@ export function runGateway(options: GatewayOptions): Promise<number> {
         sendToHost(observeToolList(message.value, cordon, options.policy, options.command))
         return
       }
+      if (entry.method === 'initialize') {
+        sendToHost(observeInitialize(message.value, cordon, options.policy))
+        return
+      }
+      if (entry.method === 'server/discover') {
+        sendToHost(observeDiscover(message.value, cordon, options.policy))
+        return
+      }
       if (entry.method === 'resources/list' || entry.method === 'resources/templates/list' || entry.method === 'prompts/list') {
         sendToHost(observeCatalogList(message.value, entry.method, cordon, options.policy))
         return
@@ -436,6 +445,12 @@ function observeToolList(
   if (result === null || !Array.isArray(listed) ||
     Object.keys(value).some((key) => !RESPONSE_KEYS.has(key)) ||
     Object.keys(result).some((key) => !TOOL_LIST_KEYS.has(key)) ||
+    (result['resultType'] !== undefined && result['resultType'] !== 'complete') ||
+    (result['nextCursor'] !== undefined && typeof result['nextCursor'] !== 'string') ||
+    (result['ttlMs'] !== undefined && (!Number.isSafeInteger(result['ttlMs']) ||
+      (result['ttlMs'] as number) < 0)) ||
+    (result['cacheScope'] !== undefined && result['cacheScope'] !== 'public' &&
+      result['cacheScope'] !== 'private') ||
     listed.some((tool) => !readableListedTool(tool))) {
     return withholdUnreadableResponse(value, 'tools/list', source, cordon)
   }
@@ -453,7 +468,7 @@ function observeToolList(
     .map((tool) => asRecord(tool))
     .filter((tool): tool is Record<string, unknown> => tool !== null && typeof tool['name'] === 'string')
     .map((tool) => ({ name: tool['name'] as string, description: tool['description'], inputSchema: tool['inputSchema'],
-      title: tool['title'], annotations: tool['annotations'], outputSchema: tool['outputSchema'] }))
+      title: tool['title'], annotations: tool['annotations'], outputSchema: tool['outputSchema'], icons: tool['icons'] }))
   const held = new Set(cordon.admitTools(command, named).map((tool) => tool.name))
   const tools = listed.filter((tool) => !held.has(String(asRecord(tool)?.['name'])))
   value = { ...value, result: { ...result, tools } }
@@ -465,6 +480,12 @@ function observeToolList(
     const source = classifySource({ kind: 'mcp-description', label: name, tool: name }, policy)
     if (typeof entry['description'] === 'string') observeDescription(entry, 'description', name, source, cordon)
     if (typeof entry['title'] === 'string') observeDescription(entry, 'title', name, source, cordon)
+    if (entry['icons'] !== undefined) {
+      // Icon references are protocol identifiers. Rewriting them can change
+      // the resource fetched by the host, so withhold when cleaning is needed.
+      const text = JSON.stringify(entry['icons'])
+      if (cordon.observe(text, source).text !== text) return withholdUnreadableResponse(value, 'tools/list', source, cordon)
+    }
     const annotations = asRecord(entry['annotations'])
     if (annotations !== null && typeof annotations['title'] === 'string') {
       observeDescription(annotations, 'title', name, source, cordon)
@@ -473,21 +494,39 @@ function observeToolList(
     // and a scanner that looks only at the top level misses them: the
     // classic place to put the poisoned line once the top level is watched.
     const schema = asRecord(entry['inputSchema'])
-    if (schema !== null) observeSchema(schema, name, source, cordon, 0)
+    if (schema !== null && !observeSchema(schema, name, source, cordon, 0)) {
+      return withholdUnreadableResponse(value, 'tools/list', source, cordon)
+    }
+    if (schema !== null) {
+      // One provenance write per schema keeps wide but valid tool lists from
+      // turning every structural key into a session-store write.
+      const text = JSON.stringify(schema)
+      if (cordon.observe(text, source).text !== text) return withholdUnreadableResponse(value, 'tools/list', source, cordon)
+    }
     const outputSchema = asRecord(entry['outputSchema'])
-    if (outputSchema !== null) observeSchema(outputSchema, name, source, cordon, 0)
+    if (outputSchema !== null && !observeSchema(outputSchema, name, source, cordon, 0)) {
+      return withholdUnreadableResponse(value, 'tools/list', source, cordon)
+    }
+    if (outputSchema !== null) {
+      const text = JSON.stringify(outputSchema)
+      if (cordon.observe(text, source).text !== text) return withholdUnreadableResponse(value, 'tools/list', source, cordon)
+    }
   }
   return value
 }
 
 /** How deep a schema is walked. Deeper than any real schema, bounded against a hostile one. */
 const MAX_SCHEMA_DEPTH = 16
+const MAX_SCHEMA_NODES = 20_000
+const SCHEMA_VALUE_KEYS = new Set(['default', 'const', 'enum', 'examples'])
 
 function readableListedTool(value: unknown): boolean {
   const entry = asRecord(value)
   if (entry === null || typeof entry['name'] !== 'string' || entry['name'] === '' ||
+    Object.keys(entry).some((key) => !TOOL_ENTRY_KEYS.has(key)) ||
     (entry['description'] !== undefined && typeof entry['description'] !== 'string') ||
-    (entry['title'] !== undefined && typeof entry['title'] !== 'string')) return false
+    (entry['title'] !== undefined && typeof entry['title'] !== 'string') ||
+    (entry['icons'] !== undefined && !readableIcons(entry['icons']))) return false
   const input = asRecord(entry['inputSchema'])
   if (input === null || !readableSchemaText(input, 0)) return false
   if (entry['outputSchema'] !== undefined) {
@@ -500,6 +539,20 @@ function readableListedTool(value: unknown): boolean {
       key === 'title' ? typeof value !== 'string' : !TOOL_ANNOTATION_HINTS.has(key) || typeof value !== 'boolean')) return false
   }
   return true
+}
+
+function readableIcons(value: unknown): boolean {
+  return Array.isArray(value) && value.every((icon) => {
+    const entry = asRecord(icon)
+    return entry !== null && typeof entry['src'] === 'string' && entry['src'] !== '' &&
+      Object.keys(entry).every((key) => ['src', 'mimeType', 'sizes', 'theme'].includes(key)) &&
+      sanitize(entry['src']).clean === entry['src'] &&
+      (entry['mimeType'] === undefined || (typeof entry['mimeType'] === 'string' &&
+        sanitize(entry['mimeType']).clean === entry['mimeType'])) &&
+      (entry['theme'] === undefined || entry['theme'] === 'light' || entry['theme'] === 'dark') &&
+      (entry['sizes'] === undefined || (Array.isArray(entry['sizes']) && entry['sizes'].every((size) =>
+        typeof size === 'string' && sanitize(size).clean === size)))
+  })
 }
 
 function readableSchemaText(node: unknown, depth: number): boolean {
@@ -515,28 +568,57 @@ function readableSchemaText(node: unknown, depth: number): boolean {
 
 /**
  * Every `description` and `title` string inside a JSON Schema, at any depth
- * up to the bound. A schema deeper than the bound is not trusted to be
- * clean: the session is marked, as for any content that could not be read.
+ * up to the bound. A schema deeper than the bound is withheld: marking the
+ * session while forwarding unread instructions still gives them to the model.
  */
-function observeSchema(node: Record<string, unknown>, tool: string, source: Source, cordon: Cordon, depth: number): void {
-  if (depth > MAX_SCHEMA_DEPTH) {
-    cordon.markUnredacted()
-    return
-  }
+function observeSchema(
+  node: Record<string, unknown>,
+  tool: string,
+  source: Source,
+  cordon: Cordon,
+  depth: number,
+  budget = { nodes: 0 },
+): boolean {
+  if (depth > MAX_SCHEMA_DEPTH) return false
+  if (++budget.nodes > MAX_SCHEMA_NODES) return false
   for (const key of Object.keys(node)) {
+    if (sanitize(key).clean !== key) return false
     const value = node[key]
     if ((key === 'description' || key === 'title') && typeof value === 'string') {
       observeDescription(node, key, tool, source, cordon)
+    } else if (SCHEMA_VALUE_KEYS.has(key)) {
+      // Rewriting a default or an enum can make the advertised schema disagree
+      // with what the server accepts. Withhold the list if cleaning is needed.
+      if (!observeSchemaValue(value, depth + 1, budget)) return false
+    } else if (typeof value === 'string') {
+      if (sanitize(value).clean !== value) return false
     } else if (Array.isArray(value)) {
       for (const item of value) {
         const child = asRecord(item)
-        if (child !== null) observeSchema(child, tool, source, cordon, depth + 1)
+        if (child !== null) {
+          if (!observeSchema(child, tool, source, cordon, depth + 1, budget)) return false
+        } else if (!observeSchemaValue(item, depth + 1, budget)) return false
       }
     } else {
       const child = asRecord(value)
-      if (child !== null) observeSchema(child, tool, source, cordon, depth + 1)
+      if (child !== null && !observeSchema(child, tool, source, cordon, depth + 1, budget)) return false
     }
   }
+  return true
+}
+
+function observeSchemaValue(
+  value: unknown,
+  depth: number,
+  budget: { nodes: number },
+): boolean {
+  if (depth > MAX_SCHEMA_DEPTH || ++budget.nodes > MAX_SCHEMA_NODES) return false
+  if (typeof value === 'string') return sanitize(value).clean === value
+  if (Array.isArray(value)) return value.every((item) => observeSchemaValue(item, depth + 1, budget))
+  const record = asRecord(value)
+  if (record !== null) return Object.entries(record).every(([key, item]) =>
+    sanitize(key).clean === key && observeSchemaValue(item, depth + 1, budget))
+  return true
 }
 
 function observeDescription(entry: Record<string, unknown>, key: string, tool: string, source: Source, cordon: Cordon): void {
@@ -569,10 +651,62 @@ function withNotice(value: Record<string, unknown>, notice: string): Record<stri
   return { ...value, result: { ...result, content: [...content, { type: 'text', text: notice }] } }
 }
 
-const TOOL_RESULT_KEYS = new Set(['content', 'structuredContent', 'isError', '_meta'])
-const TOOL_LIST_KEYS = new Set(['tools', 'nextCursor', '_meta'])
+const TOOL_RESULT_KEYS = new Set(['resultType', 'content', 'structuredContent', 'isError', '_meta'])
+const TOOL_LIST_KEYS = new Set(['resultType', 'tools', 'nextCursor', '_meta', 'ttlMs', 'cacheScope'])
+const TOOL_ENTRY_KEYS = new Set(['name', 'description', 'inputSchema', 'title', 'annotations', 'outputSchema', 'icons'])
 const TOOL_ANNOTATION_HINTS = new Set(['readOnlyHint', 'destructiveHint', 'idempotentHint', 'openWorldHint'])
 const RESPONSE_KEYS = new Set(['jsonrpc', 'id', 'result'])
+const INITIALIZE_KEYS = new Set(['protocolVersion', 'capabilities', 'serverInfo', 'instructions', '_meta'])
+const DISCOVER_KEYS = new Set(['resultType', 'supportedVersions', 'capabilities', 'instructions', '_meta', 'ttlMs', 'cacheScope'])
+
+/** The server can send model-facing instructions before the host lists any tools. */
+function observeInitialize(
+  value: Record<string, unknown>,
+  cordon: Cordon,
+  policy: Policy,
+): Record<string, unknown> {
+  const source = classifySource({ kind: 'mcp-description', label: 'initialize' }, policy)
+  const result = asRecord(value['result'])
+  if (Object.keys(value).some((key) => !RESPONSE_KEYS.has(key)) ||
+    result === null || Object.keys(result).some((key) => !INITIALIZE_KEYS.has(key)) ||
+    typeof result['protocolVersion'] !== 'string' ||
+    asRecord(result['capabilities']) === null ||
+    asRecord(result['serverInfo']) === null ||
+    (result['instructions'] !== undefined && typeof result['instructions'] !== 'string')) {
+    return withholdUnreadableResponse(value, 'initialize', source, cordon)
+  }
+  const observed = observeReadableResult(result, 'initialize', source, cordon, [])
+  if (observed === null) return withholdUnreadableResponse(value, 'initialize', source, cordon)
+  return { jsonrpc: '2.0', id: value['id'], result: observed.value }
+}
+
+/** Modern MCP discovery carries the same model-facing instructions as initialize. */
+function observeDiscover(
+  value: Record<string, unknown>,
+  cordon: Cordon,
+  policy: Policy,
+): Record<string, unknown> {
+  const source = classifySource({ kind: 'mcp-description', label: 'server/discover' }, policy)
+  const result = asRecord(value['result'])
+  if (Object.keys(value).some((key) => !RESPONSE_KEYS.has(key)) ||
+    result === null || Object.keys(result).some((key) => !DISCOVER_KEYS.has(key)) ||
+    result['resultType'] !== 'complete' ||
+    !Array.isArray(result['supportedVersions']) ||
+    result['supportedVersions'].length === 0 ||
+    result['supportedVersions'].some((version: unknown) => typeof version !== 'string') ||
+    asRecord(result['capabilities']) === null ||
+    (result['instructions'] !== undefined && typeof result['instructions'] !== 'string') ||
+    (result['_meta'] !== undefined && asRecord(result['_meta']) === null) ||
+    (result['ttlMs'] !== undefined && (!Number.isSafeInteger(result['ttlMs']) ||
+      (result['ttlMs'] as number) < 0)) ||
+    (result['cacheScope'] !== undefined && result['cacheScope'] !== 'public' &&
+      result['cacheScope'] !== 'private')) {
+    return withholdUnreadableResponse(value, 'server/discover', source, cordon)
+  }
+  const observed = observeReadableResult(result, 'server/discover', source, cordon, [])
+  if (observed === null) return withholdUnreadableResponse(value, 'server/discover', source, cordon)
+  return { jsonrpc: '2.0', id: value['id'], result: observed.value }
+}
 
 function observeToolResult(
   value: Record<string, unknown>,
@@ -590,7 +724,8 @@ function observeToolResult(
   if (Object.keys(value).some((key) => !RESPONSE_KEYS.has(key)) ||
     !Array.isArray(content) ||
     Object.keys(result).some((key) => !TOOL_RESULT_KEYS.has(key)) ||
-    (result['isError'] !== undefined && typeof result['isError'] !== 'boolean')) {
+    (result['isError'] !== undefined && typeof result['isError'] !== 'boolean') ||
+    (result['resultType'] !== undefined && result['resultType'] !== 'complete')) {
     return withholdUnreadableResult(value, call.tool, source, cordon)
   }
 

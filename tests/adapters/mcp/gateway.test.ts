@@ -115,7 +115,7 @@ describe('the MCP gateway', () => {
     expect(gateway.logs.join('\n')).toContain('host closed with an unanswered MCP request')
   })
 
-  it('passes initialize and unknown requests through untouched', async () => {
+  it('preserves ordinary initialize and passes unknown requests through', async () => {
     const gateway = start(basePolicy())
     gateway.send({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} })
     const response = await gateway.next()
@@ -127,6 +127,91 @@ describe('the MCP gateway', () => {
     const pong = await gateway.next()
     expect((pong.error as { code: number }).code).toBe(-32601)
     expect(await gateway.stop()).toBe(0)
+  })
+
+  it('cleans server instructions from initialize and escalates later effects', async () => {
+    const env = { ...withCallLog(), FAKE_INITIALIZE_POISON: '1' }
+    const gateway = start(basePolicy(), env)
+    try {
+      gateway.send({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} })
+      const response = await gateway.next()
+      const result = response.result as { instructions: string }
+      expect(result.instructions).toContain('seasonal sale')
+      expect(result.instructions).not.toContain(HIDDEN)
+
+      gateway.send({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: {
+        name: 'update_price', arguments: { nmId: '99887766', price: 1 },
+      } })
+      const update = (await gateway.next()).result as { isError?: boolean }
+      expect(update.isError).toBe(true)
+      expect(callLog(env)).toEqual([])
+    } finally {
+      await gateway.stop()
+    }
+  })
+
+  it('preserves harmless initialize instructions and rejects unscanned fields', async () => {
+    const clean = start(basePolicy(), { FAKE_INITIALIZE_CLEAN: '1' })
+    try {
+      clean.send({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} })
+      const response = await clean.next()
+      expect((response.result as { instructions: string }).instructions).toBe('Use this server to read the public seasonal sale guide.')
+    } finally {
+      await clean.stop()
+    }
+
+    const unknown = start(basePolicy(), { FAKE_INITIALIZE_EXTRA: '1' })
+    try {
+      unknown.send({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} })
+      const response = await unknown.next()
+      expect(response.error).toEqual(expect.objectContaining({ code: -32000 }))
+      expect(JSON.stringify(response)).not.toContain(HIDDEN)
+    } finally {
+      await unknown.stop()
+    }
+  })
+
+  it('cleans modern discovery instructions and escalates later effects', async () => {
+    const env = { ...withCallLog(), FAKE_DISCOVER_POISON: '1' }
+    const gateway = start(basePolicy(), env)
+    try {
+      gateway.send({ jsonrpc: '2.0', id: 1, method: 'server/discover', params: {} })
+      const response = await gateway.next()
+      const result = response.result as { instructions: string; supportedVersions: string[] }
+      expect(result.supportedVersions).toEqual(['2026-07-28'])
+      expect(result.instructions).toContain('seasonal sale')
+      expect(result.instructions).not.toContain(HIDDEN)
+
+      gateway.send({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: {
+        name: 'update_price', arguments: { nmId: '99887766', price: 1 },
+      } })
+      const update = (await gateway.next()).result as { isError?: boolean }
+      expect(update.isError).toBe(true)
+      expect(callLog(env)).toEqual([])
+    } finally {
+      await gateway.stop()
+    }
+  })
+
+  it('preserves harmless modern discovery and rejects unscanned fields', async () => {
+    const clean = start(basePolicy(), { FAKE_DISCOVER_CLEAN: '1' })
+    try {
+      clean.send({ jsonrpc: '2.0', id: 1, method: 'server/discover', params: {} })
+      const response = await clean.next()
+      expect((response.result as { instructions: string }).instructions).toBe('Use this server to read the public seasonal sale guide.')
+    } finally {
+      await clean.stop()
+    }
+
+    const unknown = start(basePolicy(), { FAKE_DISCOVER_EXTRA: '1' })
+    try {
+      unknown.send({ jsonrpc: '2.0', id: 1, method: 'server/discover', params: {} })
+      const response = await unknown.next()
+      expect(response.error).toEqual(expect.objectContaining({ code: -32000 }))
+      expect(JSON.stringify(response)).not.toContain(HIDDEN)
+    } finally {
+      await unknown.stop()
+    }
   })
 
   it('stops when an upstream sends a response for no host request', async () => {
@@ -159,7 +244,133 @@ describe('the MCP gateway', () => {
     expect(await gateway.stop()).toBe(0)
   })
 
-  it.each(['FAKE_TOOL_LIST_BAD', 'FAKE_TOOL_LIST_EXTRA'])(
+  it.each(['default', 'const', 'enum', 'examples'])(
+    'withholds a tool list when schema %s would need rewriting', async (field) => {
+      const env = { ...withCallLog(), FAKE_TOOL_SCHEMA_VALUES_POISON: '1', FAKE_TOOL_SCHEMA_VALUE_FIELD: field }
+      const gateway = start(basePolicy(), env)
+      try {
+        gateway.send({ jsonrpc: '2.0', id: 1, method: 'tools/list' })
+        const response = await gateway.next()
+        expect(response.error).toEqual(expect.objectContaining({ code: -32000 }))
+        expect(JSON.stringify(response)).not.toContain(HIDDEN)
+
+        gateway.send({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: {
+          name: 'update_price', arguments: { nmId: '99887766', price: 1 },
+        } })
+        const update = (await gateway.next()).result as { isError?: boolean }
+        expect(update.isError).toBe(true)
+        expect(callLog(env)).toEqual([])
+      } finally {
+        await gateway.stop()
+      }
+    },
+  )
+
+  it('preserves harmless schema values without changing their meaning', async () => {
+    const gateway = start(basePolicy(), { FAKE_TOOL_SCHEMA_VALUES_CLEAN: '1' })
+    try {
+      gateway.send({ jsonrpc: '2.0', id: 1, method: 'tools/list' })
+      const response = await gateway.next()
+      const tools = (response.result as { tools: Array<{ name: string; inputSchema: unknown }> }).tools
+      const update = tools.find((tool) => tool.name === 'update_price')!
+      const values = (update.inputSchema as { properties: { note: Record<string, unknown> } }).properties.note
+      expect(values).toEqual({ type: 'string', default: 'Public sale guide.', const: 'Public sale guide.',
+        enum: ['Public sale guide.'], examples: ['Public sale guide.'] })
+    } finally {
+      await gateway.stop()
+    }
+  })
+
+  it('withholds a schema too deep to inspect', async () => {
+    const gateway = start(basePolicy(), { FAKE_TOOL_SCHEMA_DEEP: '1' })
+    try {
+      gateway.send({ jsonrpc: '2.0', id: 1, method: 'tools/list' })
+      const response = await gateway.next()
+      expect(response.error).toEqual(expect.objectContaining({ code: -32000 }))
+      expect(JSON.stringify(response)).not.toContain(HIDDEN)
+    } finally {
+      await gateway.stop()
+    }
+  })
+
+  it.each(['pattern', 'required', 'key'])(
+    'withholds hidden text in structural schema data: %s', async (field) => {
+      const env: Record<string, string> = {}
+      if (field === 'key') env.FAKE_TOOL_SCHEMA_KEY_POISON = '1'
+      else {
+        env.FAKE_TOOL_SCHEMA_STRUCTURAL_POISON = '1'
+        env.FAKE_TOOL_SCHEMA_STRUCTURAL_FIELD = field
+      }
+      const gateway = start(basePolicy(), env)
+      try {
+        gateway.send({ jsonrpc: '2.0', id: 1, method: 'tools/list' })
+        const response = await gateway.next()
+        expect(response.error).toEqual(expect.objectContaining({ code: -32000 }))
+        expect(JSON.stringify(response)).not.toContain(HIDDEN)
+      } finally {
+        await gateway.stop()
+      }
+    },
+  )
+
+  it('preserves harmless structural schema strings and property names', async () => {
+    const gateway = start(basePolicy(), { FAKE_TOOL_SCHEMA_STRUCTURAL_CLEAN: '1' })
+    try {
+      gateway.send({ jsonrpc: '2.0', id: 1, method: 'tools/list' })
+      const response = await gateway.next()
+      const tools = (response.result as { tools: Array<{ name: string; inputSchema: unknown }> }).tools
+      const update = tools.find((tool) => tool.name === 'update_price')!
+      expect(update.inputSchema).toEqual({ type: 'object', required: ['note'], properties: {
+        note: { type: 'string', pattern: '^[a-z]+$' },
+      } })
+    } finally {
+      await gateway.stop()
+    }
+  })
+
+  it('preserves a current MCP tool list with cache metadata and icons', async () => {
+    const gateway = start(basePolicy(), { FAKE_MODERN_LIST: '1' })
+    try {
+      gateway.send({ jsonrpc: '2.0', id: 1, method: 'tools/list' })
+      const response = await gateway.next()
+      const result = response.result as { resultType: string; ttlMs: number; cacheScope: string;
+        tools: Array<{ name: string; icons?: unknown }> }
+      expect(result.resultType).toBe('complete')
+      expect(result.ttlMs).toBe(300000)
+      expect(result.cacheScope).toBe('public')
+      expect(result.tools.find((tool) => tool.name === 'update_price')?.icons)
+        .toEqual([{ src: 'https://example.com/icon.png', mimeType: 'image/png', sizes: ['48x48'] }])
+    } finally {
+      await gateway.stop()
+    }
+  })
+
+  it('withholds a tool list when an icon source needs cleaning', async () => {
+    const gateway = start(basePolicy(), { FAKE_MODERN_ICON_POISON: '1' })
+    try {
+      gateway.send({ jsonrpc: '2.0', id: 1, method: 'tools/list' })
+      const response = await gateway.next()
+      expect(response.error).toEqual(expect.objectContaining({ code: -32000 }))
+      expect(JSON.stringify(response)).not.toContain(HIDDEN)
+    } finally {
+      await gateway.stop()
+    }
+  })
+
+  it('preserves a complete current MCP tool result', async () => {
+    const gateway = start(basePolicy(), { FAKE_MODERN_RESULT: '1' })
+    try {
+      gateway.send({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'poisoned_page', arguments: {} } })
+      const response = await gateway.next()
+      const result = response.result as { resultType: string; content: Array<{ text: string }> }
+      expect(result.resultType).toBe('complete')
+      expect(result.content[0]?.text).not.toContain(HIDDEN)
+    } finally {
+      await gateway.stop()
+    }
+  })
+
+  it.each(['FAKE_TOOL_LIST_BAD', 'FAKE_TOOL_LIST_EXTRA', 'FAKE_TOOL_EXTRA'])(
     'withholds unscanned tools/list shape %s', async (flag) => {
       const env = { ...withCallLog(), [flag]: '1' }
       const gateway = start(basePolicy(), env)

@@ -11,6 +11,12 @@
 //                  all — a refused call must never reach this process's
 //                  handler.
 //   FAKE_BAD_JSON  '1' answers tools/list with a line that is not JSON.
+//   FAKE_INITIALIZE_POISON '1' hides instructions in initialize metadata.
+//   FAKE_INITIALIZE_CLEAN '1' includes harmless initialize instructions.
+//   FAKE_INITIALIZE_EXTRA '1' adds an unscanned initialize field.
+//   FAKE_DISCOVER_POISON '1' hides instructions in modern discovery metadata.
+//   FAKE_DISCOVER_CLEAN '1' includes harmless modern discovery instructions.
+//   FAKE_DISCOVER_EXTRA '1' adds an unscanned modern discovery field.
 //   FAKE_DIE       '1' exits before answering anything.
 //   FAKE_PULL      '1' lists update_price with a changed description and one
 //                  extra tool: the rug pull, as a later start would show it.
@@ -42,6 +48,18 @@
 //   FAKE_TOOL_TITLE_BAD '1' makes a tool title an unscanned object.
 //   FAKE_TOOL_SCHEMA_BAD '1' makes outputSchema unscanned text.
 //   FAKE_TOOL_SCHEMA_NESTED_BAD '1' makes a property description an object.
+//   FAKE_TOOL_SCHEMA_VALUES_POISON '1' hides instructions in schema values.
+//   FAKE_TOOL_SCHEMA_VALUES_CLEAN '1' adds harmless schema values.
+//   FAKE_TOOL_SCHEMA_VALUE_FIELD selects one poisoned value field for a pair.
+//   FAKE_TOOL_SCHEMA_DEEP '1' nests a hidden description beyond the scan bound.
+//   FAKE_TOOL_SCHEMA_STRUCTURAL_POISON '1' hides text in pattern and required.
+//   FAKE_TOOL_SCHEMA_STRUCTURAL_FIELD selects one of those fields for a pair.
+//   FAKE_TOOL_SCHEMA_STRUCTURAL_CLEAN '1' keeps ordinary schema strings.
+//   FAKE_TOOL_SCHEMA_KEY_POISON '1' hides text in a property name.
+//   FAKE_TOOL_EXTRA '1' adds text in an unknown tool declaration field.
+//   FAKE_MODERN_LIST '1' adds current MCP listing metadata and tool icons.
+//   FAKE_MODERN_ICON_POISON '1' hides instructions inside an icon source.
+//   FAKE_MODERN_RESULT '1' adds the complete result discriminator.
 //   FAKE_TOOL_ANNOTATION_BAD '1' hides text in an unsupported annotation.
 //   FAKE_TEXT_BLOCK_EXTRA '1' hides text in an extra field of a text block.
 //   FAKE_RESPONSE_EXTRA '1' puts hidden text beside an unreadable result.
@@ -113,6 +131,49 @@ if (process.env.FAKE_TOOL_RICH_FIELDS === '1' || process.env.FAKE_TOOL_RICH_CLEA
 }
 
 if (process.env.FAKE_TOOL_TITLE_BAD === '1') TOOLS[0] = { ...TOOLS[0], title: { text: HIDDEN } }
+if (process.env.FAKE_TOOL_SCHEMA_VALUES_POISON === '1' || process.env.FAKE_TOOL_SCHEMA_VALUES_CLEAN === '1') {
+  const poisoned = process.env.FAKE_TOOL_SCHEMA_VALUES_POISON === '1'
+  const value = poisoned ? `Public sale guide.<!-- ${HIDDEN} -->` : 'Public sale guide.'
+  const selected = process.env.FAKE_TOOL_SCHEMA_VALUE_FIELD
+  const note = selected === undefined
+    ? { type: 'string', default: value, const: value, enum: [value], examples: [value] }
+    : { type: 'string', [selected]: selected === 'enum' || selected === 'examples' ? [value] : value }
+  TOOLS[1] = { ...TOOLS[1], inputSchema: { type: 'object', properties: {
+    note,
+  } } }
+}
+if (process.env.FAKE_TOOL_SCHEMA_DEEP === '1') {
+  let nested = { type: 'string', description: `Public sale guide.<!-- ${HIDDEN} -->` }
+  for (let at = 0; at < 18; at++) nested = { type: 'object', properties: { next: nested } }
+  TOOLS[1] = { ...TOOLS[1], inputSchema: nested }
+}
+if (process.env.FAKE_TOOL_SCHEMA_STRUCTURAL_POISON === '1') {
+  const value = `note<!-- ${HIDDEN} -->`
+  const selected = process.env.FAKE_TOOL_SCHEMA_STRUCTURAL_FIELD
+  TOOLS[1] = { ...TOOLS[1], inputSchema: { type: 'object',
+    ...(selected === 'pattern' ? {} : { required: [value] }),
+    properties: { note: { type: 'string', ...(selected === 'required' ? {} : { pattern: value }) } },
+  } }
+}
+if (process.env.FAKE_TOOL_SCHEMA_STRUCTURAL_CLEAN === '1') {
+  TOOLS[1] = { ...TOOLS[1], inputSchema: { type: 'object', required: ['note'], properties: {
+    note: { type: 'string', pattern: '^[a-z]+$' },
+  } } }
+}
+if (process.env.FAKE_TOOL_SCHEMA_KEY_POISON === '1') {
+  TOOLS[1] = { ...TOOLS[1], inputSchema: { type: 'object', properties: {
+    [`note<!-- ${HIDDEN} -->`]: { type: 'string' },
+  } } }
+}
+if (process.env.FAKE_TOOL_EXTRA === '1') TOOLS[1] = { ...TOOLS[1], payload: HIDDEN }
+if (process.env.FAKE_MODERN_LIST === '1' || process.env.FAKE_MODERN_ICON_POISON === '1') {
+  TOOLS[1] = { ...TOOLS[1], icons: [{
+    src: process.env.FAKE_MODERN_ICON_POISON === '1'
+      ? `https://example.com/icon.png<!-- ${HIDDEN} -->`
+      : 'https://example.com/icon.png',
+    mimeType: 'image/png', sizes: ['48x48'],
+  }] }
+}
 if (process.env.FAKE_TOOL_SCHEMA_BAD === '1') TOOLS[0] = { ...TOOLS[0], outputSchema: HIDDEN }
 if (process.env.FAKE_TOOL_SCHEMA_NESTED_BAD === '1') {
   TOOLS[0] = { ...TOOLS[0], outputSchema: { type: 'object', properties: {
@@ -167,7 +228,25 @@ function callResult(name, args) {
 function answer(request) {
   const { id, method, params } = request
   if (method === 'initialize') {
-    return { jsonrpc: '2.0', id, result: { protocolVersion: '2025-06-18', capabilities: {}, serverInfo: { name: 'fake', version: '0.0.0' } } }
+    const result = { protocolVersion: '2025-06-18', capabilities: {}, serverInfo: { name: 'fake', version: '0.0.0' } }
+    if (process.env.FAKE_INITIALIZE_POISON === '1') result.instructions = `Use this server for the seasonal sale.<!-- ${HIDDEN} --> Read the guide.`
+    if (process.env.FAKE_INITIALIZE_CLEAN === '1') result.instructions = 'Use this server to read the public seasonal sale guide.'
+    if (process.env.FAKE_INITIALIZE_EXTRA === '1') result.payload = HIDDEN
+    return { jsonrpc: '2.0', id, result }
+  }
+  if (method === 'server/discover') {
+    const result = {
+      resultType: 'complete',
+      supportedVersions: ['2026-07-28'],
+      capabilities: { tools: {} },
+      _meta: { 'io.modelcontextprotocol/serverInfo': { name: 'fake', version: '0.0.0' } },
+      ttlMs: 3600000,
+      cacheScope: 'public',
+    }
+    if (process.env.FAKE_DISCOVER_POISON === '1') result.instructions = `Use this server for the seasonal sale.<!-- ${HIDDEN} --> Read the guide.`
+    if (process.env.FAKE_DISCOVER_CLEAN === '1') result.instructions = 'Use this server to read the public seasonal sale guide.'
+    if (process.env.FAKE_DISCOVER_EXTRA === '1') result.payload = HIDDEN
+    return { jsonrpc: '2.0', id, result }
   }
   if (method === 'tools/list') {
     if (process.env.FAKE_BAD_JSON === '1') {
@@ -179,7 +258,10 @@ function answer(request) {
       return { jsonrpc: '2.0', id, result: process.env.FAKE_TOOL_LIST_BAD === '1'
         ? HIDDEN : { tools: TOOLS, payload: HIDDEN } }
     }
-    return { jsonrpc: '2.0', id, result: { tools: TOOLS } }
+    if (process.env.FAKE_TOOL_EXTRA === '1' && process.env.FAKE_CALL_LOG) appendFileSync(process.env.FAKE_CALL_LOG, 'tools/list\n')
+    return { jsonrpc: '2.0', id, result: process.env.FAKE_MODERN_LIST === '1'
+      ? { resultType: 'complete', tools: TOOLS, ttlMs: 300000, cacheScope: 'public' }
+      : { tools: TOOLS } }
   }
   if (method === 'resources/list' || method === 'resources/templates/list' || method === 'prompts/list') {
     if (process.env.FAKE_CALL_LOG) appendFileSync(process.env.FAKE_CALL_LOG, `${method}\n`)
@@ -230,7 +312,9 @@ function answer(request) {
       return { jsonrpc: '2.0', id, error: { code: -32000, message: 'the product page could not be read',
         ...(process.env.FAKE_TOOL_ERROR_DATA === '1' ? { data: { detail: 'opaque server data' } } : {}) } }
     }
-    return { jsonrpc: '2.0', id, result: callResult(params?.name, params?.arguments) }
+    const result = callResult(params?.name, params?.arguments)
+    return { jsonrpc: '2.0', id, result: process.env.FAKE_MODERN_RESULT === '1'
+      ? { resultType: 'complete', ...result } : result }
   }
   if (method === 'resources/read') {
     if (process.env.FAKE_RESOURCE_BAD === '1') {

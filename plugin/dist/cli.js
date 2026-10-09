@@ -9250,7 +9250,8 @@ function fingerprint(tool) {
     // newly added to an already pinned tool still changes its fingerprint.
     ...tool.title === void 0 ? {} : { title: tool.title },
     ...tool.annotations === void 0 ? {} : { annotations: tool.annotations },
-    ...tool.outputSchema === void 0 ? {} : { outputSchema: tool.outputSchema }
+    ...tool.outputSchema === void 0 ? {} : { outputSchema: tool.outputSchema },
+    ...tool.icons === void 0 ? {} : { icons: tool.icons }
   });
   return createHash("sha256").update(canonical2, "utf8").digest("hex");
 }
@@ -14663,6 +14664,7 @@ var TEXT_KEYS = /* @__PURE__ */ new Set([
   "output",
   "message",
   "description",
+  "instructions",
   "body",
   "error",
   "data"
@@ -15791,6 +15793,14 @@ function runGateway(options) {
         sendToHost(observeToolList(message.value, cordon, options.policy, options.command));
         return;
       }
+      if (entry.method === "initialize") {
+        sendToHost(observeInitialize(message.value, cordon, options.policy));
+        return;
+      }
+      if (entry.method === "server/discover") {
+        sendToHost(observeDiscover(message.value, cordon, options.policy));
+        return;
+      }
       if (entry.method === "resources/list" || entry.method === "resources/templates/list" || entry.method === "prompts/list") {
         sendToHost(observeCatalogList(message.value, entry.method, cordon, options.policy));
         return;
@@ -15862,7 +15872,7 @@ function observeToolList(value, cordon, policy, command) {
   const result = asRecord(value["result"]);
   const listed = result?.["tools"];
   const source = classifySource({ kind: "mcp-description", label: "tools/list" }, policy);
-  if (result === null || !Array.isArray(listed) || Object.keys(value).some((key) => !RESPONSE_KEYS.has(key)) || Object.keys(result).some((key) => !TOOL_LIST_KEYS.has(key)) || listed.some((tool) => !readableListedTool(tool))) {
+  if (result === null || !Array.isArray(listed) || Object.keys(value).some((key) => !RESPONSE_KEYS.has(key)) || Object.keys(result).some((key) => !TOOL_LIST_KEYS.has(key)) || result["resultType"] !== void 0 && result["resultType"] !== "complete" || result["nextCursor"] !== void 0 && typeof result["nextCursor"] !== "string" || result["ttlMs"] !== void 0 && (!Number.isSafeInteger(result["ttlMs"]) || result["ttlMs"] < 0) || result["cacheScope"] !== void 0 && result["cacheScope"] !== "public" && result["cacheScope"] !== "private" || listed.some((tool) => !readableListedTool(tool))) {
     return withholdUnreadableResponse(value, "tools/list", source, cordon);
   }
   if (result["_meta"] !== void 0) {
@@ -15876,7 +15886,8 @@ function observeToolList(value, cordon, policy, command) {
     inputSchema: tool["inputSchema"],
     title: tool["title"],
     annotations: tool["annotations"],
-    outputSchema: tool["outputSchema"]
+    outputSchema: tool["outputSchema"],
+    icons: tool["icons"]
   }));
   const held = new Set(cordon.admitTools(command, named2).map((tool) => tool.name));
   const tools = listed.filter((tool) => !held.has(String(asRecord(tool)?.["name"])));
@@ -15888,21 +15899,39 @@ function observeToolList(value, cordon, policy, command) {
     const source2 = classifySource({ kind: "mcp-description", label: name, tool: name }, policy);
     if (typeof entry["description"] === "string") observeDescription(entry, "description", name, source2, cordon);
     if (typeof entry["title"] === "string") observeDescription(entry, "title", name, source2, cordon);
+    if (entry["icons"] !== void 0) {
+      const text = JSON.stringify(entry["icons"]);
+      if (cordon.observe(text, source2).text !== text) return withholdUnreadableResponse(value, "tools/list", source2, cordon);
+    }
     const annotations = asRecord(entry["annotations"]);
     if (annotations !== null && typeof annotations["title"] === "string") {
       observeDescription(annotations, "title", name, source2, cordon);
     }
     const schema = asRecord(entry["inputSchema"]);
-    if (schema !== null) observeSchema(schema, name, source2, cordon, 0);
+    if (schema !== null && !observeSchema(schema, name, source2, cordon, 0)) {
+      return withholdUnreadableResponse(value, "tools/list", source2, cordon);
+    }
+    if (schema !== null) {
+      const text = JSON.stringify(schema);
+      if (cordon.observe(text, source2).text !== text) return withholdUnreadableResponse(value, "tools/list", source2, cordon);
+    }
     const outputSchema = asRecord(entry["outputSchema"]);
-    if (outputSchema !== null) observeSchema(outputSchema, name, source2, cordon, 0);
+    if (outputSchema !== null && !observeSchema(outputSchema, name, source2, cordon, 0)) {
+      return withholdUnreadableResponse(value, "tools/list", source2, cordon);
+    }
+    if (outputSchema !== null) {
+      const text = JSON.stringify(outputSchema);
+      if (cordon.observe(text, source2).text !== text) return withholdUnreadableResponse(value, "tools/list", source2, cordon);
+    }
   }
   return value;
 }
 var MAX_SCHEMA_DEPTH = 16;
+var MAX_SCHEMA_NODES = 2e4;
+var SCHEMA_VALUE_KEYS = /* @__PURE__ */ new Set(["default", "const", "enum", "examples"]);
 function readableListedTool(value) {
   const entry = asRecord(value);
-  if (entry === null || typeof entry["name"] !== "string" || entry["name"] === "" || entry["description"] !== void 0 && typeof entry["description"] !== "string" || entry["title"] !== void 0 && typeof entry["title"] !== "string") return false;
+  if (entry === null || typeof entry["name"] !== "string" || entry["name"] === "" || Object.keys(entry).some((key) => !TOOL_ENTRY_KEYS.has(key)) || entry["description"] !== void 0 && typeof entry["description"] !== "string" || entry["title"] !== void 0 && typeof entry["title"] !== "string" || entry["icons"] !== void 0 && !readableIcons(entry["icons"])) return false;
   const input = asRecord(entry["inputSchema"]);
   if (input === null || !readableSchemaText(input, 0)) return false;
   if (entry["outputSchema"] !== void 0) {
@@ -15915,6 +15944,12 @@ function readableListedTool(value) {
   }
   return true;
 }
+function readableIcons(value) {
+  return Array.isArray(value) && value.every((icon) => {
+    const entry = asRecord(icon);
+    return entry !== null && typeof entry["src"] === "string" && entry["src"] !== "" && Object.keys(entry).every((key) => ["src", "mimeType", "sizes", "theme"].includes(key)) && sanitize(entry["src"]).clean === entry["src"] && (entry["mimeType"] === void 0 || typeof entry["mimeType"] === "string" && sanitize(entry["mimeType"]).clean === entry["mimeType"]) && (entry["theme"] === void 0 || entry["theme"] === "light" || entry["theme"] === "dark") && (entry["sizes"] === void 0 || Array.isArray(entry["sizes"]) && entry["sizes"].every((size) => typeof size === "string" && sanitize(size).clean === size));
+  });
+}
 function readableSchemaText(node, depth) {
   if (depth > MAX_SCHEMA_DEPTH) return true;
   if (Array.isArray(node)) return node.every((item) => readableSchemaText(item, depth + 1));
@@ -15925,25 +15960,39 @@ function readableSchemaText(node, depth) {
     return readableSchemaText(value, depth + 1);
   });
 }
-function observeSchema(node, tool, source, cordon, depth) {
-  if (depth > MAX_SCHEMA_DEPTH) {
-    cordon.markUnredacted();
-    return;
-  }
+function observeSchema(node, tool, source, cordon, depth, budget = { nodes: 0 }) {
+  if (depth > MAX_SCHEMA_DEPTH) return false;
+  if (++budget.nodes > MAX_SCHEMA_NODES) return false;
   for (const key of Object.keys(node)) {
+    if (sanitize(key).clean !== key) return false;
     const value = node[key];
     if ((key === "description" || key === "title") && typeof value === "string") {
       observeDescription(node, key, tool, source, cordon);
+    } else if (SCHEMA_VALUE_KEYS.has(key)) {
+      if (!observeSchemaValue(value, depth + 1, budget)) return false;
+    } else if (typeof value === "string") {
+      if (sanitize(value).clean !== value) return false;
     } else if (Array.isArray(value)) {
       for (const item of value) {
         const child = asRecord(item);
-        if (child !== null) observeSchema(child, tool, source, cordon, depth + 1);
+        if (child !== null) {
+          if (!observeSchema(child, tool, source, cordon, depth + 1, budget)) return false;
+        } else if (!observeSchemaValue(item, depth + 1, budget)) return false;
       }
     } else {
       const child = asRecord(value);
-      if (child !== null) observeSchema(child, tool, source, cordon, depth + 1);
+      if (child !== null && !observeSchema(child, tool, source, cordon, depth + 1, budget)) return false;
     }
   }
+  return true;
+}
+function observeSchemaValue(value, depth, budget) {
+  if (depth > MAX_SCHEMA_DEPTH || ++budget.nodes > MAX_SCHEMA_NODES) return false;
+  if (typeof value === "string") return sanitize(value).clean === value;
+  if (Array.isArray(value)) return value.every((item) => observeSchemaValue(item, depth + 1, budget));
+  const record = asRecord(value);
+  if (record !== null) return Object.entries(record).every(([key, item]) => sanitize(key).clean === key && observeSchemaValue(item, depth + 1, budget));
+  return true;
 }
 function observeDescription(entry, key, tool, source, cordon) {
   const envelope = cordon.observe(entry[key], source);
@@ -15959,17 +16008,40 @@ function withNotice(value, notice) {
   const content = Array.isArray(result["content"]) ? result["content"] : [];
   return { ...value, result: { ...result, content: [...content, { type: "text", text: notice }] } };
 }
-var TOOL_RESULT_KEYS = /* @__PURE__ */ new Set(["content", "structuredContent", "isError", "_meta"]);
-var TOOL_LIST_KEYS = /* @__PURE__ */ new Set(["tools", "nextCursor", "_meta"]);
+var TOOL_RESULT_KEYS = /* @__PURE__ */ new Set(["resultType", "content", "structuredContent", "isError", "_meta"]);
+var TOOL_LIST_KEYS = /* @__PURE__ */ new Set(["resultType", "tools", "nextCursor", "_meta", "ttlMs", "cacheScope"]);
+var TOOL_ENTRY_KEYS = /* @__PURE__ */ new Set(["name", "description", "inputSchema", "title", "annotations", "outputSchema", "icons"]);
 var TOOL_ANNOTATION_HINTS = /* @__PURE__ */ new Set(["readOnlyHint", "destructiveHint", "idempotentHint", "openWorldHint"]);
 var RESPONSE_KEYS = /* @__PURE__ */ new Set(["jsonrpc", "id", "result"]);
+var INITIALIZE_KEYS = /* @__PURE__ */ new Set(["protocolVersion", "capabilities", "serverInfo", "instructions", "_meta"]);
+var DISCOVER_KEYS = /* @__PURE__ */ new Set(["resultType", "supportedVersions", "capabilities", "instructions", "_meta", "ttlMs", "cacheScope"]);
+function observeInitialize(value, cordon, policy) {
+  const source = classifySource({ kind: "mcp-description", label: "initialize" }, policy);
+  const result = asRecord(value["result"]);
+  if (Object.keys(value).some((key) => !RESPONSE_KEYS.has(key)) || result === null || Object.keys(result).some((key) => !INITIALIZE_KEYS.has(key)) || typeof result["protocolVersion"] !== "string" || asRecord(result["capabilities"]) === null || asRecord(result["serverInfo"]) === null || result["instructions"] !== void 0 && typeof result["instructions"] !== "string") {
+    return withholdUnreadableResponse(value, "initialize", source, cordon);
+  }
+  const observed = observeReadableResult(result, "initialize", source, cordon, []);
+  if (observed === null) return withholdUnreadableResponse(value, "initialize", source, cordon);
+  return { jsonrpc: "2.0", id: value["id"], result: observed.value };
+}
+function observeDiscover(value, cordon, policy) {
+  const source = classifySource({ kind: "mcp-description", label: "server/discover" }, policy);
+  const result = asRecord(value["result"]);
+  if (Object.keys(value).some((key) => !RESPONSE_KEYS.has(key)) || result === null || Object.keys(result).some((key) => !DISCOVER_KEYS.has(key)) || result["resultType"] !== "complete" || !Array.isArray(result["supportedVersions"]) || result["supportedVersions"].length === 0 || result["supportedVersions"].some((version) => typeof version !== "string") || asRecord(result["capabilities"]) === null || result["instructions"] !== void 0 && typeof result["instructions"] !== "string" || result["_meta"] !== void 0 && asRecord(result["_meta"]) === null || result["ttlMs"] !== void 0 && (!Number.isSafeInteger(result["ttlMs"]) || result["ttlMs"] < 0) || result["cacheScope"] !== void 0 && result["cacheScope"] !== "public" && result["cacheScope"] !== "private") {
+    return withholdUnreadableResponse(value, "server/discover", source, cordon);
+  }
+  const observed = observeReadableResult(result, "server/discover", source, cordon, []);
+  if (observed === null) return withholdUnreadableResponse(value, "server/discover", source, cordon);
+  return { jsonrpc: "2.0", id: value["id"], result: observed.value };
+}
 function observeToolResult(value, call, cordon, policy) {
   const source = classifySource({ kind: "tool", label: sourceLabel(call), tool: call.tool }, policy);
   const result = asRecord(value["result"]);
   if (result === null) return withholdUnreadableResult(value, call.tool, source, cordon);
   const texts = [];
   const content = result["content"];
-  if (Object.keys(value).some((key) => !RESPONSE_KEYS.has(key)) || !Array.isArray(content) || Object.keys(result).some((key) => !TOOL_RESULT_KEYS.has(key)) || result["isError"] !== void 0 && typeof result["isError"] !== "boolean") {
+  if (Object.keys(value).some((key) => !RESPONSE_KEYS.has(key)) || !Array.isArray(content) || Object.keys(result).some((key) => !TOOL_RESULT_KEYS.has(key)) || result["isError"] !== void 0 && typeof result["isError"] !== "boolean" || result["resultType"] !== void 0 && result["resultType"] !== "complete") {
     return withholdUnreadableResult(value, call.tool, source, cordon);
   }
   for (const [index, block] of content.entries()) {

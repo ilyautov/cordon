@@ -47,7 +47,7 @@ const TEXTLESS: ReadonlySet<string> = new Set(['Write', 'Edit', 'NotebookEdit', 
  */
 const TEXT_KEYS: ReadonlySet<string> = new Set([
   'text', 'stdout', 'stderr', 'content', 'result', 'output',
-  'message', 'description', 'body', 'error', 'data',
+  'message', 'description', 'instructions', 'body', 'error', 'data',
 ])
 
 /**
