@@ -55,6 +55,8 @@ On 8 October 2026, the `mandate` oracle was rerun on all four suites through the
 
 The 8 October rerun used the default `after` order and the scripted oracle, not a live vulnerable model. No result from the separate model-origin command probe is included in these attack rates.
 
+On 9 October, both `strict` and `mandate` were rerun through the `614e8b3` bundle (SHA-256 `33f2549ab103fa5cd694d9346edd91bf385985fac43849095cc11c310158f32d`) with AgentDojo 0.1.35 and the same default `after` order. Strict reproduced 54/97 clean tasks and 0/949 attack goals. Mandate reproduced 64/97 clean tasks and 0/949 attack goals; its four suites were run in two batches with the same bundle. [The compact regression record](../bench/agentdojo/results/oracle-regression-2026-10-09.json) pins per-suite counts, source hashes and hashes of the private raw reports. This rerun called no model and did not repeat the undefended, directory, interactive or live-agent arms. It does not measure the altered-model trigger or native Codex tools.
+
 Interactive travel reached 20 of 20 with 0.11.0: the last task had failed because quarantine cut a fragment out of an outgoing message, and a call that leaves the machine is now shown to the human whole instead of cut. Strict, directory and mandate are unchanged by it, and the attacks stayed at 0 in every column.
 
 On workspace the lookups recovered four tasks: an event with a contact the user named, a follow-up with the participants of a meeting the user named, and appends to a file the user named. Travel gained the booking at 'Le Marais Boutique', a quoted name. Slack lost the channel list's trust, as above; the mandate's gain there is the workspace's own channels and people named up front.

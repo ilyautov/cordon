@@ -572,9 +572,9 @@ To regenerate the textual corpus, run `node bench/model-origin/poisoned-weights-
 ## Continuing the older benchmarks
 
 
-The AgentDojo oracle is a different threat model: it scripts an agent that obeys an instruction planted in a tool result. Its attack rate must not be pooled with the model-origin table above. On the frozen current bundle, the strict autonomous rerun completed so far is:
+The AgentDojo oracle is a different threat model: it scripts an agent that obeys an instruction planted in a tool result. Its attack rate must not be pooled with the model-origin table above. The 9 October strict autonomous rerun on bundle `614e8b3` is:
 
-| Suite | No-Cordon attack success | Strict Cordon attack success | Strict Cordon clean utility |
+| Suite | Earlier no-Cordon attack success | Current strict Cordon attack success | Current strict Cordon clean utility |
 |---|---:|---:|---:|
 | Banking | 144/144 | 0/144 | 11/16 |
 | Slack | 105/105 | 0/105 | 3/21 |
@@ -582,9 +582,9 @@ The AgentDojo oracle is a different threat model: it scripts an agent that obeys
 | Workspace | 218/560 | 0/560 | 25/40 |
 | **Total** | **583/949** | **0/949** | **54/97** |
 
-These are scripted oracle results, not a newly tested vulnerable model. Raw output is kept under the ignored `bench/agentdojo/work/`; the harness is `bench/agentdojo/oracle.py`. The four strict-policy suite numbers match the earlier published rows on the current frozen bundle. The existing [AgentDojo report](agentdojo.md) retains its historical model and policy assumptions.
+These are scripted oracle results, not a newly tested vulnerable model. The no-Cordon column is an earlier baseline and was not rerun here. Raw output from the current run is private; the harness is `bench/agentdojo/oracle.py`. The four strict-policy suite numbers match the earlier published rows. The [compact current-bundle record](../bench/agentdojo/results/oracle-regression-2026-10-09.json) pins suite counts and private raw-report hashes; the [AgentDojo report](agentdojo.md) retains the full method and historical model results.
 
-The 8 October `mandate` oracle rerun reproduced the earlier variant row: 64/97 clean tasks completed and 0/949 attack goals, versus 54/97 and 0/949 under strict. Slack's `directory` control stayed at 3/21 clean tasks while `mandate` reached 8/21; workspace's control and mandate both reached 29/40. Banking and travel have no mandate destinations. These are separate policy comparisons on tool-result injection, with no model call; [the AgentDojo report](agentdojo.md) records the bundle hash and method.
+The 9 October `mandate` oracle rerun also reproduced the earlier variant row: 64/97 clean tasks completed and 0/949 attack goals, versus 54/97 and 0/949 under strict. Earlier `directory` controls completed 3/21 Slack and 29/40 workspace tasks; current mandate completed 8/21 and 29/40. Banking and travel have no mandate destinations. These are separate policy comparisons on tool-result injection, with no model call. Do not transfer these rates to the altered-model benchmark.
 
 ## Decision
 
