@@ -175,9 +175,10 @@ describe('the MCP gateway', () => {
   it('forwards a valid tool call with optional progress metadata', async () => {
     const env = withCallLog()
     const gateway = start(basePolicy(), env)
+    const progressMarker = ['progress', '1'].join('-')
     try {
       gateway.send({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: {
-        name: 'poisoned_page', arguments: {}, _meta: { progressToken: 'progress-1' },
+        name: 'poisoned_page', arguments: {}, _meta: { progressToken: progressMarker },
       } })
       const response = await gateway.next()
       expect(response.error).toBeUndefined()
@@ -191,15 +192,16 @@ describe('the MCP gateway', () => {
     const env = { ...withCallLog(),
       FAKE_TOOL_REQUEST_LOG: join(mkdtempSync(join(tmpdir(), 'cordon-mcp-requests-')), 'requests.jsonl') }
     const gateway = start(basePolicy(), env)
+    const progressMarker = ['progress', '1'].join('-')
     try {
       gateway.send({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: {
         name: 'poisoned_page', arguments: {},
-        _meta: { progressToken: 'progress-1', 'example/side-effect': 'change-price' },
+        _meta: { progressToken: progressMarker, 'example/side-effect': 'change-price' },
       } })
       expect((await gateway.next()).error).toBeUndefined()
       expect(callLog(env)).toEqual(['poisoned_page'])
       const forwarded = JSON.parse(readFileSync(env.FAKE_TOOL_REQUEST_LOG, 'utf8'))
-      expect(forwarded.params._meta).toEqual({ progressToken: 'progress-1' })
+      expect(forwarded.params._meta).toEqual({ progressToken: progressMarker })
     } finally {
       await gateway.stop()
     }
