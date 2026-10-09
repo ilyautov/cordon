@@ -1,7 +1,8 @@
 {
   "date": "2026-10-09",
-  "experiment": "real-container independent owner check before benchmark runner copyback",
-  "status": "passed in Linux CI",
+  "experiment": "repeat of the real-container independent owner check before benchmark runner copyback",
+  "status": "passed again in Linux CI on a newer head",
+  "previousRecord": "bench/model-origin/results/runner-real-container-ci-2026-10-09.json",
   "sourceCommit": "7b547ff8f39911b73dbf3011d15aa71dfc8adab0",
   "sourceSha256": {
     "bench/model-origin/runner.mjs": "1fc5eb7da8d216ba6e078f749d30f4c211f12c284f4fe043953019b436a59347",
