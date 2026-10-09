@@ -364,15 +364,36 @@ export function runGateway(options: GatewayOptions): Promise<number> {
         const tool = entry.call?.tool ?? entry.method
         const label = entry.call === undefined ? (entry.label ?? entry.method) : sourceLabel(entry.call)
         const source = classifySource({ kind: 'tool', label, tool }, options.policy)
-        if (error !== null && typeof error['message'] === 'string') {
-          observeInto(error, 'message', tool, source, cordon)
-        } else {
-          cordon.markUnredacted()
+        // A server-authored error is still a model-visible result. Unknown
+        // fields could carry instructions around the observed message.
+        if (message.value['jsonrpc'] !== '2.0' ||
+          Object.keys(message.value).some((key) => !['jsonrpc', 'id', 'error'].includes(key)) ||
+          error === null ||
+          Object.keys(error).some((key) => !['code', 'message', 'data'].includes(key)) ||
+          !Number.isSafeInteger(error['code']) || typeof error['message'] !== 'string') {
+          sendToHost(withholdUnreadableResponse(message.value, tool, source, cordon))
+          return
         }
-        // JSON-RPC error data has no MCP text-block shape. The host may show
-        // it to the model, so opaque data carries the same unredacted mark as
-        // an image or an unknown tool-result block.
-        if (error !== null && Object.hasOwn(error, 'data')) cordon.markUnredacted()
+        observeInto(error, 'message', tool, source, cordon)
+        // JSON-RPC error data has no prescribed shape, but the host may show
+        // all of it to the model. Inspect known text and withhold anything
+        // whose role or media bytes we cannot inspect.
+        if (Object.hasOwn(error, 'data')) {
+          const observed = observeReadableResult(error['data'], tool, source, cordon, [])
+          if (observed === null) {
+            sendToHost(withholdUnreadableResponse(message.value, tool, source, cordon))
+            return
+          }
+          // The generic text walker visits values, but a server can put an
+          // instruction in a field name. A changed serialized view means
+          // some model-visible text had no safe replacement location.
+          const serialized = JSON.stringify(observed.value)
+          if (cordon.observe(serialized, source).text !== serialized) {
+            sendToHost(withholdUnreadableResponse(message.value, tool, source, cordon))
+            return
+          }
+          error['data'] = observed.value
+        }
         sendToHost(message.value)
         return
       }

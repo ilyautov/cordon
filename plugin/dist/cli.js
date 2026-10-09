@@ -15835,12 +15835,24 @@ function runGateway(options) {
         const tool = entry.call?.tool ?? entry.method;
         const label = entry.call === void 0 ? entry.label ?? entry.method : sourceLabel(entry.call);
         const source = classifySource({ kind: "tool", label, tool }, options.policy);
-        if (error !== null && typeof error["message"] === "string") {
-          observeInto(error, "message", tool, source, cordon);
-        } else {
-          cordon.markUnredacted();
+        if (message.value["jsonrpc"] !== "2.0" || Object.keys(message.value).some((key) => !["jsonrpc", "id", "error"].includes(key)) || error === null || Object.keys(error).some((key) => !["code", "message", "data"].includes(key)) || !Number.isSafeInteger(error["code"]) || typeof error["message"] !== "string") {
+          sendToHost(withholdUnreadableResponse(message.value, tool, source, cordon));
+          return;
         }
-        if (error !== null && Object.hasOwn(error, "data")) cordon.markUnredacted();
+        observeInto(error, "message", tool, source, cordon);
+        if (Object.hasOwn(error, "data")) {
+          const observed = observeReadableResult(error["data"], tool, source, cordon, []);
+          if (observed === null) {
+            sendToHost(withholdUnreadableResponse(message.value, tool, source, cordon));
+            return;
+          }
+          const serialized = JSON.stringify(observed.value);
+          if (cordon.observe(serialized, source).text !== serialized) {
+            sendToHost(withholdUnreadableResponse(message.value, tool, source, cordon));
+            return;
+          }
+          error["data"] = observed.value;
+        }
         sendToHost(message.value);
         return;
       }
