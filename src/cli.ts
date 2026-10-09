@@ -1034,7 +1034,9 @@ function policyCommand(args: string[]): number {
   const path = file ?? join(cordonHome(), 'policy.yaml')
   let policy: Policy
   try {
-    policy = loadPolicyFile(path)
+    // An absent active policy uses the safe default; an explicitly named
+    // draft must exist, or a typo would be reported as a valid mandate.
+    policy = file === undefined ? loadPolicyFile(path) : parsePolicy(readFileSync(path, 'utf8'), path)
   } catch (error) {
     process.stderr.write(`cordon policy ${verb}: ${visible((error as Error).message)}\n`)
     return 1

@@ -7444,6 +7444,7 @@ var DEFAULT_POLICY = {
   },
   tools: {},
   blockedTools: [],
+  allowedTools: null,
   trustedSources: [],
   toolsReturn: {},
   arguments: {},
@@ -7532,6 +7533,9 @@ function validate(parsed, path) {
   }
   if (Object.hasOwn(input, "blockedTools")) {
     policy.blockedTools = asNames(input["blockedTools"], `${path}: blockedTools`);
+  }
+  if (Object.hasOwn(input, "allowedTools")) {
+    policy.allowedTools = asNames(input["allowedTools"], `${path}: allowedTools`);
   }
   if ("trustedSources" in input) {
     policy.trustedSources = asStrings(input.trustedSources, `${path}: trustedSources`);
@@ -7622,6 +7626,7 @@ var TOP_LEVEL = [
   "profile",
   "tools",
   "blockedTools",
+  "allowedTools",
   "trustedSources",
   "toolsReturn",
   "arguments",
@@ -8721,6 +8726,9 @@ function decide(call, ctx) {
   if (ctx.policy.blockedTools.includes(call.tool)) {
     return { kind: "deny", rule: "tool-blocked", reason: `tool ${call.tool} is blocked by the policy` };
   }
+  if (ctx.policy.allowedTools !== null && (!Array.isArray(ctx.policy.allowedTools) || !ctx.policy.allowedTools.includes(call.tool))) {
+    return { kind: "deny", rule: "tool-not-allowed", reason: `tool ${call.tool} is not on the policy's allowedTools list` };
+  }
   const parts = fields(own2);
   const selfHit = selfProtection(parts, ctx);
   if (selfHit) return selfHit;
@@ -9381,6 +9389,7 @@ var RULES = {
   failure: { class: "guard-failure", tier: "precaution" },
   pin: { class: "tool-rug-pull", tier: "evidence" },
   "tool-blocked": { class: "out-of-scope", tier: "precaution" },
+  "tool-not-allowed": { class: "out-of-scope", tier: "precaution" },
   "self-protection": { class: "guard-tampering", tier: "precaution" },
   "agent-config": { class: "guard-tampering", tier: "suspicion" },
   unscanned: { class: "unscanned-content", tier: "suspicion" },
@@ -16746,6 +16755,9 @@ function explain(policy) {
   if (policy.blockedTools.length > 0) {
     lines.push(`Blocked tools: ${policy.blockedTools.join(", ")}. These calls are refused even if their effects are granted; no approval lifts the refusal.`);
   }
+  if (policy.allowedTools !== null) {
+    lines.push(policy.allowedTools.length === 0 ? "Allowed tools: none. Every tool call is refused; no approval lifts the refusal." : `Allowed tools: ${policy.allowedTools.join(", ")}. Only these exact names reach the other checks; no approval lifts a refusal for an unlisted tool.`);
+  }
   for (const [tool, roles] of Object.entries(policy.arguments)) {
     for (const [field3, role] of Object.entries(roles)) {
       if (role === "controlled") {
@@ -16918,6 +16930,9 @@ exposure: true
 # Refuse an exact tool name even when its effects are granted. This can keep
 # the native shell closed while a separately isolated executor uses exec.
 # blockedTools: [Bash]
+# To refuse every tool except exact names, declare the complete set. An empty
+# list refuses all calls; omitting this field adds no name restriction.
+# allowedTools: [Read, mcp__sandbox__run, run]
 
 # Memory the agent reloads in later sessions, beyond CLAUDE.md and the like.
 # memory:
@@ -17675,7 +17690,7 @@ ${USAGE}
   const path = file ?? join16(cordonHome(), "policy.yaml");
   let policy;
   try {
-    policy = loadPolicyFile(path);
+    policy = file === void 0 ? loadPolicyFile(path) : parsePolicy(readFileSync7(path, "utf8"), path);
   } catch (error) {
     process.stderr.write(`cordon policy ${verb}: ${visible(error.message)}
 `);

@@ -567,6 +567,16 @@ describe('cordon policy check and explain', () => {
     expect(stderr).toContain('mode must be interactive or autonomous')
   })
 
+  it('does not report a missing explicit draft as the valid default policy', () => {
+    const missing = join(mkdtempSync(join(tmpdir(), 'cordon-policy-')), 'missing.yaml')
+    for (const verb of ['check', 'explain']) {
+      const { stdout, stderr, status } = run(['policy', verb, missing], '', {})
+      expect(status).toBe(1)
+      expect(stderr).toContain('ENOENT')
+      expect(stdout).not.toContain('valid')
+    }
+  })
+
   it('check fails on a warning, so a drafted mandate that grants too much does not pass quietly', () => {
     const { stdout, status } = run(['policy', 'check', file('destinations: ["*@gmail.com"]\n')], '', {})
     expect(status).toBe(1)
@@ -584,6 +594,13 @@ describe('cordon policy check and explain', () => {
     const home = mkdtempSync(join(tmpdir(), 'cordon-home-'))
     writeFileSync(join(home, 'policy.yaml'), 'mode: interactive\n')
     expect(run(['policy', 'explain'], '', { CORDON_HOME: home }).stdout).toContain('Mode: interactive')
+  })
+
+  it('with no file and no active policy, explains the safe default', () => {
+    const home = mkdtempSync(join(tmpdir(), 'cordon-home-'))
+    const { stdout, status } = run(['policy', 'explain'], '', { CORDON_HOME: home })
+    expect(status).toBe(0)
+    expect(stdout).toContain('The agent may: read, summarize.')
   })
 })
 

@@ -4,6 +4,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versions follo
 
 ## [Unreleased]
 
+An optional exact-name `allowedTools` policy list now hard-refuses unlisted tool calls before effect classification in every transport. `allowedTools: []` refuses all calls; omission preserves existing behavior. This narrows a runner policy without depending only on known native tool names, provided the active hook actually sees those calls. The list grants no effects, and approval cannot override it.
+
+`cordon policy check FILE` and `policy explain FILE` now fail if the explicitly named draft does not exist. Previously the loader substituted the safe default and `check` printed `valid`, which could make a misspelled draft path look reviewed. Omitting FILE still reads the active policy or the safe default when no policy is installed.
+
 The plugin's hook command quotes `${CLAUDE_PLUGIN_ROOT}`. Unquoted, a plugin root with a space in it (a home directory named `John Smith`) split the path, `node` was handed half of it, and every hook crashed, which Claude Code reads as "let it through". The plugin now carries its own README, a display name, a category and keywords for the Claude plugin directory, and the marketplace a description; `claude plugin validate` passes on both with no warning.
 
 ## [0.12.1] - 2026-09-28
