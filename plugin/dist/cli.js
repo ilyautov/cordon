@@ -13743,13 +13743,12 @@ var Cordon = class {
   /**
    * Cleans a piece of a tool's result and remembers where it came from.
    *
-   * `role` separates two questions that are not the same one. Everything the
-   * source put in front of the model is cleaned, without exception. Only what
-   * the source authored is recorded as provenance: a heading, a name or the
-   * query echoed back are the values the user hands over as arguments a moment
-   * later, and recording those would declare the user's own words untrusted.
-   * A miss in provenance costs one unmarked value; false taint there stops
-   * work that was never an attack, and stops it quietly.
+   * `role` separates two questions that are not the same one. Every text
+   * piece handed here is cleaned and counts as a read. Only content enters
+   * provenance: a heading, a name or the query echoed back can
+   * be the user's own value, and recording it would taint an honest retry.
+   * A label can still contain an instruction, so it cannot exempt a later
+   * action from the exposure rule merely because its field name is structural.
    */
   observe(text, source, role = "content") {
     const { clean, findings } = sanitize(text);
@@ -13757,9 +13756,9 @@ var Cordon = class {
     if (role === "content") {
       this.taint.record(clean, source);
       if (!substitute && clean !== text) this.taint.record(text, source);
-      const inert = INERT.test(clean.trim()) && INERT.test(text.trim());
-      if (source.trust === "untrusted" && !inert) this.exposure = { at: this.turn, source: source.label };
     }
+    const inert = INERT.test(clean.trim()) && INERT.test(text.trim());
+    if (source.trust === "untrusted" && !inert) this.exposure = { at: this.turn, source: source.label };
     if (source.trust === "untrusted" && source.kind !== "mcp-description") this.lastSource = source;
     if (source.trust === "untrusted") this.readIds = noteRead(this.readIds);
     this.persist();
