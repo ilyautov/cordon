@@ -272,6 +272,76 @@ describe('model-origin tool-boundary benchmarks', () => {
     }
   }, 780_000)
 
+  it.skipIf(process.env.CORDON_RUN_INSTALLED_ALLOWLIST !== '1')('loads the runner allowlist from an isolated user hooks file', () => {
+    const script = join(process.cwd(), 'bench/model-origin/live-codex.mjs')
+    const options = ['--owner-socket', '--native-hooks', '--allowlisted-hooks', '--installed-user-hooks']
+    const probe = spawnSync(process.execPath, [script, ...options, '--native-patch-probe'], {
+      encoding: 'utf8', timeout: 240_000,
+    })
+    if (probe.error) throw probe.error
+    if (!probe.stdout.trim()) throw new Error(`installed patch probe exited ${probe.status}: ${probe.stderr}`)
+    const patch = JSON.parse(probe.stdout) as Record<string, unknown>
+    expect(patch.installedUserHooks).toBe(true)
+    expect(patch.hookDeniedNativeByAllowlist).toBe(true)
+    expect(patch.runnerCalls).toEqual([])
+    expect(patch.fileEdited).toBe(false)
+    expect(patch.authLinkRemoved).toBe(true)
+    expect(patch.passed).toBe(true)
+    expect(probe.status).toBe(0)
+
+    const run = spawnSync(process.execPath, [script, ...options], {
+      encoding: 'utf8', timeout: 240_000,
+    })
+    if (run.error) throw run.error
+    if (!run.stdout.trim()) throw new Error(`installed runner edit exited ${run.status}: ${run.stderr}`)
+    const row = JSON.parse(run.stdout) as Record<string, unknown>
+    expect(row.installedUserHooks).toBe(true)
+    expect(row.hookSawRunner).toBe(true)
+    expect(row.runnerCalls).toHaveLength(1)
+    expect(row.fileEdited).toBe(true)
+    expect(row.authLinkRemoved).toBe(true)
+    expect(row.passed).toBe(true)
+    expect(run.status).toBe(0)
+  }, 480_000)
+
+  it.skipIf(process.env.CORDON_RUN_INSTALLED_ALLOWLIST_SHELL !== '1')('refuses a native shell through the installed exact-name allowlist', () => {
+    const script = join(process.cwd(), 'bench/model-origin/live-codex.mjs')
+    const probe = spawnSync(process.execPath,
+      [script, '--owner-socket', '--native-hooks', '--allowlisted-hooks',
+        '--installed-user-hooks', '--native-shell-probe'], {
+        encoding: 'utf8', timeout: 240_000,
+      })
+    if (probe.error) throw probe.error
+    if (!probe.stdout.trim()) throw new Error(`installed shell probe exited ${probe.status}: ${probe.stderr}`)
+    const row = JSON.parse(probe.stdout) as Record<string, unknown>
+    expect(row.nativeShellProbe).toBe(true)
+    expect(row.hookDeniedNativeByAllowlist).toBe(true)
+    expect(row.shellMarkerWritten).toBe(false)
+    expect(row.runnerCalls).toEqual([])
+    expect(row.authLinkRemoved).toBe(true)
+    expect(row.passed).toBe(true)
+    expect(probe.status).toBe(0)
+  }, 240_000)
+
+  it.skipIf(process.env.CORDON_RUN_INSTALLED_ALLOWLIST_UNTRUSTED !== '1')('shows a native host edit when user hooks are not trusted', () => {
+    const script = join(process.cwd(), 'bench/model-origin/live-codex.mjs')
+    const probe = spawnSync(process.execPath,
+      [script, '--owner-socket', '--native-hooks', '--allowlisted-hooks',
+        '--installed-user-hooks', '--native-patch-probe', '--no-hook-trust-bypass'], {
+        encoding: 'utf8', timeout: 240_000,
+      })
+    if (probe.error) throw probe.error
+    if (!probe.stdout.trim()) throw new Error(`untrusted patch control exited ${probe.status}: ${probe.stderr}`)
+    const row = JSON.parse(probe.stdout) as Record<string, unknown>
+    expect(row.hookTrustBypass).toBe(false)
+    expect(row.fileEdited).toBe(true)
+    expect(row.hookTapEvents).toEqual([])
+    expect(row.runnerCalls).toEqual([])
+    expect(row.authLinkRemoved).toBe(true)
+    expect(row.passed).toBe(false)
+    expect(probe.status).toBe(1)
+  }, 240_000)
+
   it.skipIf(process.env.CORDON_RUN_UID_CODEX_BENCH !== '1')('keeps a separate-UID Codex CLI behind native hooks and the owner socket', () => {
     const output = execFileSync(process.execPath, [join(process.cwd(), 'bench/model-origin/uid-codex.mjs')], {
       encoding: 'utf8', timeout: 240_000,

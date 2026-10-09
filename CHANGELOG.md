@@ -8,6 +8,8 @@ An optional exact-name `allowedTools` policy list now hard-refuses unlisted tool
 
 A live Codex catch-all hook trial now records one denied native patch, one completed runner edit, and an interval repair stopped by hook-side review before the gateway could see the edit. The benchmark's native patch attempt counter recognizes both Codex router error formats, so a blocked attempt is not mislabeled runner-only. The Docker verifier startup limit is 45 seconds to avoid treating slow local container startup as a task outcome.
 
+An isolated user-level Codex `hooks.json` trial now records denied native shell and patch calls plus a completed allowlisted runner edit when hook trust is bypassed for the disposable profile. A matched no-bypass, workspace-write control changed the scratch host file through native patch with no hook or Cordon journal event. Installation guidance now requires visible hook trust and a journaled refusal before relying on the policy.
+
 `cordon policy check FILE` and `policy explain FILE` now fail if the explicitly named draft does not exist. Previously the loader substituted the safe default and `check` printed `valid`, which could make a misspelled draft path look reviewed. Omitting FILE still reads the active policy or the safe default when no policy is installed.
 
 The plugin's hook command quotes `${CLAUDE_PLUGIN_ROOT}`. Unquoted, a plugin root with a space in it (a home directory named `John Smith`) split the path, `node` was handed half of it, and every hook crashed, which Claude Code reads as "let it through". The plugin now carries its own README, a display name, a category and keywords for the Claude plugin directory, and the marketplace a description; `claude plugin validate` passes on both with no warning.
