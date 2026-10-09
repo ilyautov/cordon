@@ -432,6 +432,30 @@ describe('model-origin tool-boundary benchmarks', () => {
     expect(row.ownerSourceEdited).toBe(true)
   }, 240_000)
 
+  it.skipIf(process.env.CORDON_RUN_NATIVE_INPUT_BENCH !== '1')('observes Codex native input through the installed hook', () => {
+    const run = spawnSync(process.execPath,
+      [join(process.cwd(), 'bench/model-origin/native-input-hook.mjs')], {
+        encoding: 'utf8', timeout: 60_000,
+      })
+    if (run.error) throw run.error
+    if (!run.stdout.trim()) throw new Error(`native input probe exited ${run.status}: ${run.stderr}`)
+    const row = JSON.parse(run.stdout) as Record<string, unknown>
+    expect(row.codexVersion).toBe('codex-cli 0.161.0')
+    expect(row.baseline).toMatchObject({
+      declaredInput: true,
+      returned: 'request_user_input is unavailable in Default mode',
+      preToolHookSeen: false,
+      timedOut: false,
+    })
+    expect(row.protected).toMatchObject({
+      declaredInput: true,
+      policyDenied: true,
+      preToolHookSeen: true,
+      timedOut: false,
+    })
+    expect(run.status).toBe(0)
+  }, 60_000)
+
   it.skipIf(process.env.CORDON_RUN_NATIVE_WEB_BENCH !== '1')('checks a live Codex web search on both sides of the hook', () => {
     const output = execFileSync(process.execPath, [join(process.cwd(), 'bench/model-origin/native-web.mjs')], {
       encoding: 'utf8', timeout: 240_000,
