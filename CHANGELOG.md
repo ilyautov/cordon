@@ -4,6 +4,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versions follo
 
 ## [Unreleased]
 
+The live model-origin harness now accepts `--simple-target=43` for paired clean and unnamed trigger turns, keeping the owner task, agent prompt, expected source and trigger score on the same held-out target. The old `42` target remains the default. Unsupported targets and mixed benchmark modes fail before Docker starts; this is benchmark instrumentation, not a production feature.
+
+The MCP gateway tests now wait for the fake server's specific reply or refusal log instead of sleeping for 50 ms before opening a file. Under a loaded suite the fixed pause ended before the child wrote its sampling reply, giving an unrelated `ENOENT` in the claims check. The bounded wait still fails if the expected evidence never arrives.
+
 The benchmark runner now serializes calls for one owner-selected source with an exclusive adjacent lock. Two gateway processes previously could both pass the last content check before replacing the same file; a paired process test holds the first call open and proves the second is refused before Docker. A crash leaves a lock for owner inspection rather than silently retrying. This does not serialize editors that ignore the lock or qualify the runner for production.
 
 A source-selected opaque identifier now marks an untrusted read even beside an inert `text: "ok"`. The `id`-only regression previously let a later email go to an owner-unnamed address. The identifier stays byte-for-byte intact; a paired ordinary ticket and owner-named recipient still pass. The same extraction feeds the hook adapters and the MCP gateway.

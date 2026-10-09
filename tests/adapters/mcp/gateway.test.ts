@@ -111,6 +111,14 @@ function withCallLog(): Record<string, string> {
   return { FAKE_CALL_LOG: join(mkdtempSync(join(tmpdir(), 'cordon-mcp-calls-')), 'calls.log') }
 }
 
+async function waitUntil(ready: () => boolean, evidence: string): Promise<void> {
+  const deadline = Date.now() + 3000
+  while (!ready()) {
+    if (Date.now() >= deadline) throw new Error('timed out waiting for ' + evidence)
+    await new Promise((resolve) => setTimeout(resolve, 10))
+  }
+}
+
 describe('the MCP gateway', () => {
   it('reports a host disconnect with an unanswered upstream request', async () => {
     const gateway = start(basePolicy())
@@ -171,7 +179,8 @@ describe('the MCP gateway', () => {
     try {
       gateway.send({ jsonrpc: '2.0', method: 'notifications/extension/execute',
         params: { command: 'change-price' } })
-      await new Promise((resolve) => setTimeout(resolve, 50))
+      await waitUntil(() => gateway.logs.join('\n').includes('unclassified host notification'),
+        'the host notification refusal')
       expect(callLog(env)).toEqual([])
       expect(gateway.logs.join('\n')).toContain('unclassified host notification')
     } finally {
@@ -478,7 +487,8 @@ describe('the MCP gateway', () => {
     try {
       gateway.send({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} })
       expect((await gateway.next()).id).toBe(1)
-      await new Promise((resolve) => setTimeout(resolve, 50))
+      await waitUntil(() => gateway.logs.join('\n').includes('unsupported server notification'),
+        'the hidden server notification refusal')
       expect(gateway.queued()).toBe(0)
       expect(gateway.logs.join('\n')).toContain('unsupported server notification')
     } finally {
@@ -492,7 +502,8 @@ describe('the MCP gateway', () => {
     try {
       gateway.send({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} })
       expect((await gateway.next()).id).toBe(1)
-      await new Promise((resolve) => setTimeout(resolve, 50))
+      await waitUntil(() => existsSync(replyLog) && readFileSync(replyLog, 'utf8').trim() !== '',
+        'the sampling request reply')
       expect(gateway.queued()).toBe(0)
       const replies = readFileSync(replyLog, 'utf8').trim().split('\n').map((line) => JSON.parse(line))
       expect(replies).toEqual([{ jsonrpc: '2.0', id: 'server-sampling-1', error: {
@@ -508,7 +519,8 @@ describe('the MCP gateway', () => {
     try {
       gateway.send({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} })
       expect((await gateway.next()).id).toBe(1)
-      await new Promise((resolve) => setTimeout(resolve, 50))
+      await waitUntil(() => existsSync(replyLog) && readFileSync(replyLog, 'utf8').trim() !== '',
+        'the server ping reply')
       expect(gateway.queued()).toBe(0)
       expect(JSON.parse(readFileSync(replyLog, 'utf8'))).toEqual({
         jsonrpc: '2.0', id: 'server-ping-1', result: {},
@@ -523,7 +535,8 @@ describe('the MCP gateway', () => {
     try {
       gateway.send({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} })
       expect((await gateway.next()).id).toBe(1)
-      await new Promise((resolve) => setTimeout(resolve, 50))
+      await waitUntil(() => gateway.logs.join('\n').includes('unsupported server notification'),
+        'the unknown server notification refusal')
       expect(gateway.queued()).toBe(0)
       expect(gateway.logs.join('\n')).toContain('unsupported server notification')
     } finally {

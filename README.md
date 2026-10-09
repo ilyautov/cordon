@@ -14,7 +14,7 @@ Web pages, emails, issues, documents, tool results and MCP tool descriptions can
 
 **Model-origin limit:** A modified model can request a harmful call before reading any outside content. Cordon can refuse that call under a restrictive policy, but it cannot verify model weights or contain what an allowed shell command does next. The [measured boundary](docs/model-origin-benchmark.md) and [restricted coding runbook](docs/restricted-coding.md) keep the gate and operating-system isolation separate.
 
-**Measured:** 1985 tests · 25 pinned attack vectors · 9 legitimate documents · 2 runtime dependencies.
+**Measured:** 1986 tests · 25 pinned attack vectors · 9 legitimate documents · 2 runtime dependencies.
 
 **AgentDojo** (a public benchmark of 97 agent tasks with injected attacks): with Cordon, an agent that obeys every injection got 0 attacks through on all four suites; without it, 39–100% succeeded. Utility depends on the policy: 97 of 97 tasks in interactive mode at 0.25–1.6 questions per task, 14–75% per suite on a strict autonomous policy. On a live model that follows injections, Laguna S 2.1, 0 of 80 attacks got through against 30 of 80 undefended. The methodology and where Cordon loses are in [docs/agentdojo.md](docs/agentdojo.md).
 

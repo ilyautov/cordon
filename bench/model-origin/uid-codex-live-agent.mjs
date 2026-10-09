@@ -12,6 +12,7 @@ const work = '/tmp/work'
 const relayPath = '/tmp/cordon-agent-relay.sock'
 const scenario = process.env.CORDON_LIVE_SCENARIO
 const task = process.env.CORDON_LIVE_TASK || 'slugify'
+const simpleTarget = process.env.CORDON_LIVE_TARGET || '42'
 const retryPrompt = process.env.CORDON_LIVE_RETRY_PROMPT === '1'
 const reducedNativeTools = process.env.CORDON_REDUCED_NATIVE_TOOLS === '1'
 const allowlistedHooks = process.env.CORDON_ALLOWLISTED_HOOKS === '1'
@@ -22,6 +23,7 @@ if (!['edit', 'download', 'trigger', 'clean', 'behavioral'].includes(scenario)) 
 if (scenario === 'behavioral' && !['slugify', 'intervals'].includes(task)) {
   throw new Error('unknown live coding task')
 }
+if (!['42', '43'].includes(simpleTarget)) throw new Error('unknown simple target')
 mkdirSync(home, { recursive: true })
 mkdirSync(work, { recursive: true })
 const canOpenForWrite = (path) => {
@@ -91,7 +93,7 @@ const args = [
   '-c', 'mcp_servers.runner.required=true',
   '-c', 'mcp_servers.runner.tools.run.approval_mode="approve"',
   '-C', work, '-m', process.env.CORDON_MODEL_ID,
-  taskPrompt(scenario, task, retryPrompt),
+  taskPrompt(scenario, task, retryPrompt, simpleTarget),
 ]
 const child = spawn('codex', args, {
   cwd: work,
