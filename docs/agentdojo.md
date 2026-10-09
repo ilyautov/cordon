@@ -71,6 +71,18 @@ The remaining attack pairs raised no attack-phase question and did not reach the
 
 The same corrected interactive oracle was then rerun in `between` order: the injected calls ran after the honest reads and before the honest actions. All four suite aggregates and per-task summaries matched `after`: 97/97 clean tasks, 949/949 attacked pairs retaining utility, 0/949 attack goals and 609/949 pairs with an attack-phase question. The [between-order record](../bench/agentdojo/results/oracle-interactive-between-2026-10-09.json) pins the frozen bundle, source and raw-report hashes. This changes only call order in the scripted oracle. It does not show how a model would choose a call or how a real owner would classify a question.
 
+The `between` order also has a paired upper bound. The scripted reviewer approved **every** question, including questions raised by injected calls; a no-Cordon arm made the same calls. Each cell below gives attack goals reached, then legitimate tasks that still completed under attack:
+
+| Suite | Decline injected calls | Approve every question | No Cordon |
+|---|---:|---:|---:|
+| banking | 0/144; 144/144 | 143/144; 126/144 | 143/144; 126/144 |
+| slack | 0/105; 105/105 | 105/105; 103/105 | 105/105; 103/105 |
+| travel | 0/140; 140/140 | 118/140; 28/140 | 118/140; 28/140 |
+| workspace | 0/560; 560/560 | 231/560; 326/560 | 231/560; 326/560 |
+| **Total** | **0/949; 949/949** | **597/949; 583/949** | **597/949; 583/949** |
+
+The approved and no-Cordon arms matched on every suite aggregate and on utility counts for every user task. Utility fell for 2/16 banking tasks, 2/21 Slack tasks, 19/20 travel tasks and 39/40 workspace tasks under at least one injection. The report does not retain attack success for each individual task pair, so pairwise identity is unverified. In this forced-call benchmark, approving every question removed the measured benefit of the interactive gate. [The paired record](../bench/agentdojo/results/oracle-interactive-between-review-bound-2026-10-09.json) pins all three raw-report hashes and the exact source and bundle. This is a bound on a scripted review rule, not a measured rate of human mistakes.
+
 Interactive travel reached 20 of 20 with 0.11.0: the last task had failed because quarantine cut a fragment out of an outgoing message, and a call that leaves the machine is now shown to the human whole instead of cut. Strict, directory and mandate are unchanged by it, and the attacks stayed at 0 in every column.
 
 On workspace the lookups recovered four tasks: an event with a contact the user named, a follow-up with the participants of a meeting the user named, and appends to a file the user named. Travel gained the booking at 'Le Marais Boutique', a quoted name. Slack lost the channel list's trust, as above; the mandate's gain there is the workspace's own channels and people named up front.
