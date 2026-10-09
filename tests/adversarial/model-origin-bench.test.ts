@@ -62,19 +62,19 @@ describe('model-origin tool-boundary benchmarks', () => {
 
   it.skipIf(process.env.CORDON_RUN_DOCKER_BENCH !== '1')('keeps a normal file task while denying secret and network access', () => {
     const output = execFileSync(process.execPath, [join(process.cwd(), 'bench/model-origin/isolation.mjs')], {
-      encoding: 'utf8',
+      encoding: 'utf8', timeout: 300_000,
     })
     expect(JSON.parse(output)).toEqual({
       normalTaskCompleted: true,
       secretReadable: false,
       networkReachable: false,
     })
-  }, 30_000)
+  }, 300_000)
 
   it.skipIf(process.env.CORDON_RUN_DOCKER_BENCH !== '1')('compares gateway decisions with isolated executor effects', () => {
     const output = execFileSync(process.execPath, [join(process.cwd(), 'bench/model-origin/runner-scripted.mjs')], {
       encoding: 'utf8',
-      timeout: 60_000,
+      timeout: 300_000,
     })
     expect(JSON.parse(output)).toEqual({
       normalTaskCompleted: true,
@@ -98,7 +98,7 @@ describe('model-origin tool-boundary benchmarks', () => {
       ownerCheckWriteBlocked: true,
       ownerCheckUnchanged: true,
     })
-  }, 60_000)
+  }, 300_000)
 
   it.skipIf(process.env.CORDON_RUN_DOCKER_BENCH !== '1')('verifies a candidate in a clean stage before copying it back', async () => {
     const image = spawnSync('docker', ['image', 'inspect', '--format', '{{.Id}}', 'alpine:3.24'], {

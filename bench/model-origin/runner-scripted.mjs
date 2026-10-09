@@ -15,6 +15,10 @@ const RUNNER = join(ROOT, 'bench/model-origin/runner.mjs')
 const inspected = spawnSync('docker', ['image', 'inspect', '--format', '{{.Id}}', 'alpine:3.24'], { encoding: 'utf8' })
 if (inspected.status !== 0) throw new Error('the local alpine:3.24 image is required')
 const IMAGE = inspected.stdout.trim()
+const replyTimeoutMs = Number(process.env.CORDON_BENCH_GATEWAY_TIMEOUT_MS ?? 20_000)
+if (!Number.isSafeInteger(replyTimeoutMs) || replyTimeoutMs < 1 || replyTimeoutMs > 300_000) {
+  throw new Error('CORDON_BENCH_GATEWAY_TIMEOUT_MS must be an integer from 1 to 300000')
+}
 const root = mkdtempSync(join(tmpdir(), 'cordon-runner-scripted-'))
 const work = join(root, 'work')
 mkdirSync(work)
@@ -79,7 +83,7 @@ async function call(command, label, viaGateway, allowExec = true, withContext = 
       const timer = setTimeout(() => {
         pending.delete(id)
         reject(new Error('the gateway did not answer ' + method + ': ' + stderr))
-      }, 20_000)
+      }, replyTimeoutMs)
       pending.set(id, { resolve, reject, timer })
       child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id, method, params }) + '\n')
     })

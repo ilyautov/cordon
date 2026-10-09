@@ -17,7 +17,7 @@ An opt-in `CORDON_RUNNER_VERIFY=1` mode now requires an owner-selected `CORDON_R
 
 The later [local runtime preflight](../bench/model-origin/results/docker-runtime-preflight-2026-10-09.json) also timed out on a container **without** bind mounts. The host disk was nearly full, but the cause was not isolated. The test now classifies plain container startup before mount setup and cleans its own timed-out container. That local attempt could not verify the executor.
 
-A dedicated [Linux CI trial](../bench/model-origin/results/runner-real-container-ci-2026-10-09.json) subsequently passed that full narrow copyback test in real containers: the invalid candidate stayed out of the owner source, and the valid candidate was copied after a fresh check. This qualifies only the observed CI path. The local Docker fault, production executor review, check coverage, and human approval remain separate work.
+A dedicated [Linux CI trial](../bench/model-origin/results/runner-real-container-ci-2026-10-09.json) subsequently passed that full narrow copyback test in real containers: the invalid candidate stayed out of the owner source, and the valid candidate was copied after a fresh check. A [later local repeat](../bench/model-origin/results/runner-local-container-repeat-2026-10-09.json) passed the same copyback test and the isolation and gateway scenarios after benchmark timeouts were adjusted for slow container startup. Why the earlier local Docker startup failed remains unknown. Production executor review, check coverage and human approval remain separate work.
 
 ## Experimental owner-side gateway transport
 
