@@ -1,0 +1,30 @@
+{
+  "date": "2026-10-09",
+  "experiment": "classify Docker startup separately from benchmark runner effects",
+  "status": "runtime setup unavailable; no runner command executed",
+  "docker": {
+    "serverVersion": "20.10.12",
+    "storageDriver": "overlay2",
+    "imageId": "sha256:33bee74c45f307e3268adc2010c0f55c48e7a6041e12cd12432bb1a46e498e43",
+    "runningContainersAtDiagnosis": 27,
+    "hostFilesystem": "1.8 TiB volume reported 100% used, 5.4 GiB available",
+    "unmountedReadOnlyControl": "timed out after 25 seconds",
+    "bindMountControl": "timed out after 25 seconds in both system temp and workspace directories",
+    "volumeControl": "volume creation succeeded, mounted container timed out after 35 seconds; disposable container and volume removed",
+    "copyIntoReadOnlyRoot": "docker cp refused because the container root filesystem was read-only",
+    "temporaryMemoryControl": "unmounted read-only container with /dev/shm input timed out after 30 seconds; no residual named container"
+  },
+  "boundedAcceptancePreflight": {
+    "testSourceSha256AtRun": "b35461d791d35805108c9e33f63f4baf035f26f3fdd415b4ec77f612aee54a65",
+    "testSourceSha256AfterTimeoutGuard": "a95f9c78044e88450de29470b9c239ea8e10e2f04ab6f49dd2e90335f9e16a12",
+    "command": "CORDON_RUN_DOCKER_BENCH=1 npx vitest run tests/adversarial/model-origin-bench.test.ts -t 'verifies a candidate in a clean stage'",
+    "result": "Docker container-start setup failed before the runner trial: timed out; cleanup exit 0",
+    "durationSeconds": 37.68,
+    "runnerCalls": 0,
+    "residualNamedPreflightContainers": 0,
+    "acceptanceResult": "not scored"
+  },
+  "sourceHashNote": "Docker image inspection gained a ten-second limit after the recorded container-start timeout; the preflight control flow and failure classification are unchanged.",
+  "inference": "Low host disk availability or Docker Desktop state may explain the startup stalls, but the cause was not isolated. The later unmounted timeout rules out treating this as only a bind-mount failure.",
+  "nextGate": "Restore reliable Docker container startup without altering other projects' running containers, then rerun the optional real-container runner verification and its network and file controls."
+}

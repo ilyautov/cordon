@@ -1,4 +1,5 @@
-import { execFileSync, spawnSync } from 'node:child_process'
+import { execFileSync, spawn, spawnSync } from 'node:child_process'
+import { randomUUID } from 'node:crypto'
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -99,8 +100,11 @@ describe('model-origin tool-boundary benchmarks', () => {
     })
   }, 60_000)
 
-  it.skipIf(process.env.CORDON_RUN_DOCKER_BENCH !== '1')('verifies a candidate in a clean stage before copying it back', () => {
-    const image = spawnSync('docker', ['image', 'inspect', '--format', '{{.Id}}', 'alpine:3.24'], { encoding: 'utf8' })
+  it.skipIf(process.env.CORDON_RUN_DOCKER_BENCH !== '1')('verifies a candidate in a clean stage before copying it back', async () => {
+    const image = spawnSync('docker', ['image', 'inspect', '--format', '{{.Id}}', 'alpine:3.24'], {
+      encoding: 'utf8', timeout: 10_000,
+    })
+    if (image.error) throw new Error(`Docker image inspection failed before the runner trial: ${image.error.message}`)
     if (image.status !== 0) throw new Error('the local alpine:3.24 image is required')
     const root = mkdtempSync(join(tmpdir(), 'cordon-runner-verify-'))
     const source = join(root, 'input.ts')
@@ -109,13 +113,31 @@ describe('model-origin tool-boundary benchmarks', () => {
     try {
       writeFileSync(source, original)
       writeFileSync(check, '#!/bin/sh\nset -eu\nif [ -e /work/bypass.txt ]; then exit 0; fi\ntest "$(cat /work/input.ts)" = "export const answer = () => 42"\n')
-      const preflight = spawnSync('docker', ['run', '--rm', '--network', 'none',
-        '--mount', `type=bind,src=${root},dst=/work,readonly`, image.stdout.trim(), 'sh', '-c', 'true'], {
-        encoding: 'utf8', timeout: 30_000,
-      })
-      if (preflight.error || preflight.status !== 0) {
-        throw new Error(`Docker bind-mount setup failed before the runner trial: ${preflight.error?.message ?? preflight.stderr}`)
+      const preflight = async (label: string, extra: string[]) => {
+        const name = 'cordon-runner-preflight-' + randomUUID()
+        const run = await new Promise<{ code: number | null; timedOut: boolean; error?: Error }>((resolve) => {
+          const child = spawn('docker', ['run', '--rm', '--name', name, '--network', 'none', '--read-only',
+            ...extra, image.stdout.trim(), 'sh', '-c', 'true'], { stdio: 'ignore', detached: process.platform !== 'win32' })
+          let timedOut = false
+          const timer = setTimeout(() => {
+            timedOut = true
+            try {
+              if (child.pid !== undefined && process.platform !== 'win32') process.kill(-child.pid, 'SIGKILL')
+              else child.kill('SIGKILL')
+            } catch { /* The process exited while the deadline fired. */ }
+          }, 30_000)
+          child.on('error', (error) => { clearTimeout(timer); resolve({ code: null, timedOut, error }) })
+          child.on('close', (code) => { clearTimeout(timer); resolve({ code, timedOut }) })
+        })
+        if (run.error || run.timedOut || run.code !== 0) {
+          const cleanup = spawnSync('docker', ['rm', '-f', name], { stdio: 'ignore', timeout: 10_000 })
+          throw new Error(`Docker ${label} setup failed before the runner trial: ` +
+            `${run.error?.message ?? (run.timedOut ? 'timed out' : `exit ${run.code}`)}; ` +
+            `cleanup exit ${cleanup.status}${cleanup.error ? ` (${cleanup.error.message})` : ''}`)
+        }
       }
+      await preflight('container-start', [])
+      await preflight('bind-mount', ['--mount', `type=bind,src=${root},dst=/work,readonly`])
       const call = (command: string) => {
         const request = { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'run', arguments: { command } } }
         const child = spawnSync(process.execPath, [join(process.cwd(), 'bench/model-origin/runner.mjs')], {
