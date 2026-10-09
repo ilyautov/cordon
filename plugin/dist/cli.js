@@ -12394,8 +12394,14 @@ var ApprovalStore = class {
     if (request === null) return null;
     const shown2 = { tool: request.tool, reason: request.reason, args: request.args, ...request.context === void 0 ? {} : { context: request.context } };
     const nonce = randomBytes2(8).toString("hex");
-    writeFileSync2(this.approvedPath(id), `${request.binding}
-${nonce}`, { mode: 384 });
+    const writing = join4(this.dir, `${checked(id)}.approval-writing.${nonce}`);
+    try {
+      writeFileSync2(writing, `${request.binding}
+${nonce}`, { mode: 384, flag: "wx" });
+      renameSync3(writing, this.approvedPath(id));
+    } finally {
+      rmSync2(writing, { force: true });
+    }
     if (this.read(id) === null) {
       if (existsSync(this.takenPath(id, nonce))) return shown2;
       this.retire(id);
@@ -12433,13 +12439,16 @@ ${nonce}`, { mode: 384 });
     }
     try {
       const fresh = Date.now() - statSync2(claimed).mtimeMs <= APPROVAL_TTL_MS;
-      const [given, nonce] = readFileSync3(claimed, "utf8").split("\n");
+      const fields2 = readFileSync3(claimed, "utf8").split("\n");
+      const nonce = fields2[1];
+      if (fields2.length !== 2 || nonce === void 0 || !NONCE.test(nonce)) return { taken: false, void: false };
+      const given = fields2[0];
       if (!existsSync(this.pendingPath(id))) return { taken: false, void: false };
       if (fresh && given !== binding) {
         this.retire(id);
         return { taken: false, void: true };
       }
-      if (fresh && nonce !== void 0 && NONCE.test(nonce)) writeFileSync2(this.takenPath(id, nonce), "", { mode: 384 });
+      if (fresh) writeFileSync2(this.takenPath(id, nonce), "", { mode: 384 });
       try {
         unlinkSync(this.pendingPath(id));
       } catch {
@@ -12504,7 +12513,7 @@ ${nonce}`, { mode: 384 });
       return;
     }
     for (const name of names2) {
-      const id = name.replace(/\.(?:request\.json|request-writing\.[0-9a-f]{16}|approved|taken\.[0-9a-f]{16}|taking\.\d+\.[0-9a-f]{8})$/u, "");
+      const id = name.replace(/\.(?:request\.json|request-writing\.[0-9a-f]{16}|approved|approval-writing\.[0-9a-f]{16}|taken\.[0-9a-f]{16}|taking\.\d+\.[0-9a-f]{8})$/u, "");
       if (id === name || !ID.test(id)) continue;
       if (this.stale(join4(this.dir, name))) {
         try {

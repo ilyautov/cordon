@@ -183,7 +183,16 @@ export class ApprovalStore {
     // retired mid-write read as taken, and a later question's cleanup erase
     // the mark of one that was (Codex).
     const nonce = randomBytes(8).toString('hex')
-    writeFileSync(this.approvedPath(id), `${request.binding}\n${nonce}`, { mode: 0o600 })
+    // A retry must not claim the file after the binding but before the nonce
+    // is written. Rename a complete private file over the previous approval;
+    // replacing an earlier approval for this same question is deliberate.
+    const writing = join(this.dir, `${checked(id)}.approval-writing.${nonce}`)
+    try {
+      writeFileSync(writing, `${request.binding}\n${nonce}`, { mode: 0o600, flag: 'wx' })
+      renameSync(writing, this.approvedPath(id))
+    } finally {
+      rmSync(writing, { force: true })
+    }
     // Retired while this ran: the approval would be void anyway, and the
     // owner must not read "approved once" about a question that is gone.
     // Gone because a retry took the approval is the opposite case, and the
@@ -234,7 +243,12 @@ export class ApprovalStore {
     }
     try {
       const fresh = Date.now() - statSync(claimed).mtimeMs <= APPROVAL_TTL_MS
-      const [given, nonce] = readFileSync(claimed, 'utf8').split('\n')
+      const fields = readFileSync(claimed, 'utf8').split('\n')
+      const nonce = fields[1]
+      // A partial or damaged approval must never become a usable capability,
+      // even if its first field happens to match the current binding.
+      if (fields.length !== 2 || nonce === undefined || !NONCE.test(nonce)) return { taken: false, void: false }
+      const given = fields[0]
       // An approval is only as good as its question. One whose question was
       // retired, by a retry under a newer context racing the owner's
       // `approve`, is void however it got written (Codex).
@@ -245,7 +259,7 @@ export class ApprovalStore {
       }
       // The mark an `approve` still running reads to tell a take from a
       // retirement; swept with the rest once stale.
-      if (fresh && nonce !== undefined && NONCE.test(nonce)) writeFileSync(this.takenPath(id, nonce), '', { mode: 0o600 })
+      if (fresh) writeFileSync(this.takenPath(id, nonce), '', { mode: 0o600 })
       try {
         unlinkSync(this.pendingPath(id))
       } catch {
@@ -318,7 +332,7 @@ export class ApprovalStore {
     }
     for (const name of names) {
       // A claimed approval left by a process that died mid-take is swept too.
-      const id = name.replace(/\.(?:request\.json|request-writing\.[0-9a-f]{16}|approved|taken\.[0-9a-f]{16}|taking\.\d+\.[0-9a-f]{8})$/u, '')
+      const id = name.replace(/\.(?:request\.json|request-writing\.[0-9a-f]{16}|approved|approval-writing\.[0-9a-f]{16}|taken\.[0-9a-f]{16}|taking\.\d+\.[0-9a-f]{8})$/u, '')
       if (id === name || !ID.test(id)) continue
       if (this.stale(join(this.dir, name))) {
         try {
