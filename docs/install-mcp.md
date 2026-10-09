@@ -32,6 +32,17 @@ you now write:
 
 The `--` separator is mandatory: without it the server's flags would be read as Cordon's own.
 
+Model-selected MCP requests outside `tools/call` also need declared effects. For a server whose resource and prompt methods only read data, add the exact method names to the active Cordon policy's `tools` map and grant `read` in the profile:
+
+```yaml
+tools:
+  resources/read: [read]
+  prompts/get: [read]
+  completion/complete: [read]
+```
+
+Declare `resources/subscribe`, `resources/unsubscribe` and `logging/setLevel` only when the host uses them, with the effects that server actually performs. An undeclared method is refused. `allowedTools` and `blockedTools` apply to these exact method names too. Connection discovery (`initialize`, `tools/list` and the catalog lists) remains available so the host can load the server and show its declarations.
+
 ## What is intercepted
 
 | MCP message | What the gateway does |
@@ -42,6 +53,7 @@ The `--` separator is mandatory: without it the server's flags would be read as 
 | `tools/list` (response) | tools are compared against the pins for this server (below), and a changed or new tool is removed from the list; every remaining description, top-level title and annotation title is observed as untrusted content. Schema descriptions and titles are cleaned, while every other string and property name in `inputSchema` and `outputSchema` is checked without rewriting it: if cleaning would change a value such as `default`, `const`, `enum`, `examples`, `pattern` or `required`, the whole list is withheld so the advertised schema cannot silently diverge from the server's. Current MCP `resultType`, cache hints and tool icons are accepted with validation; icons are pinned, and an icon needing cleaning withholds the list. Schemas deeper than 16 levels, over the node budget, unknown tool fields, malformed title, schema or annotation fields, unexpected result fields and unscannable metadata are withheld as JSON-RPC errors. The hidden layer is cut before the model sees the list, because tool poisoning lives exactly there |
 | `resources/list`, `resources/templates/list`, `prompts/list` (responses) | server-authored discovery text is observed before the host can show it to the model. Hidden text is stripped, and malformed or unknown result shapes are withheld as JSON-RPC errors. Pagination cursors and URI templates remain intact |
 | `tools/call` (request) | the call goes through the gate: allow passes it to the server, rewrite forwards it with the untrusted fragment cut out of the arguments, deny never reaches the server at all — the model gets a `CallToolResult` with `isError: true` and the reason. Malformed arguments and unexpected action fields are refused before the server sees them. A forwarded request contains exactly the name and arguments the gate checked; optional `progressToken` is preserved, while other metadata is dropped |
+| `resources/read`, `prompts/get`, `completion/complete`, subscription and log-level requests | these model-selected or state-changing methods go through the same certificate and exact-name tool lists as `tools/call`. An undeclared method, a missing effect, an unexpected parameter or a denied request returns a JSON-RPC error before the server sees it. Valid progress metadata survives; other request metadata is dropped. A narrowed request is refused because these methods have no safe result slot for a rewrite notice |
 | `tools/call` (response) | text blocks, including their additional fields, `structuredContent` and `_meta` are observed; hidden text is stripped when the policy permits substitution. Current MCP `resultType: "complete"` is accepted; `input_required` is withheld pending a separate multi-round-trip design. A non-object result, a missing or malformed `content` array, unexpected fields beside `result`, unknown nested shapes and text that needs cleaning in source view are withheld as `isError`, and the next consequential call escalates. A block without text (an image, audio) cannot be cleaned, so the session is marked and the next consequential call escalates |
 | JSON-RPC error responses | the server-authored message is observed as untrusted content. Inspectable `error.data` is cleaned too; hidden instructions in its property names, opaque data, malformed error fields and extra response fields are withheld before the host sees them. A withheld error marks the session so a later consequential call escalates |
 | `resources/read`, `prompts/get` (responses) | all readable result fields are observed, including metadata and text beside a content block. Missing required arrays, unknown text shapes and unexpected JSON-RPC fields are withheld as an error, and the next consequential call escalates. A resource is classified by the URI the host requested; the server cannot make an untrusted read trusted by changing the returned URI. Binary media is forwarded and marks the session as unredacted. `prompts/get` is the classic vector — the server writes what lands in the conversation as if it were the user's own words |

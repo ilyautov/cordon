@@ -57,6 +57,14 @@ const HOST_REQUEST_METHODS = new Set([
   'prompts/list', 'prompts/get', 'completion/complete', 'logging/setLevel',
 ])
 
+// These host requests carry model-selected data or change server state. They
+// must use the same certificate, exact-name list and exposure decision as a
+// tools/call; connection discovery remains available so a runner can load.
+const GATED_HOST_METHODS = new Set([
+  'resources/read', 'resources/subscribe', 'resources/unsubscribe',
+  'prompts/get', 'completion/complete', 'logging/setLevel',
+])
+
 function forwardableHostNotification(message: Extract<Message, { type: 'notification' }>): boolean {
   if (message.value['jsonrpc'] !== '2.0' ||
     Object.keys(message.value).some((key) => !['jsonrpc', 'method', 'params'].includes(key))) return false
@@ -298,8 +306,12 @@ export function runGateway(options: GatewayOptions): Promise<number> {
         return
       }
 
+      const forwarded = GATED_HOST_METHODS.has(message.method)
+        ? gateHostMethod(message, cordon, sendToHost) : message.value
+      if (forwarded === null) return
+
       const entry: Pending = { method: message.method }
-      const params = asRecord(message.params)
+      const params = asRecord(forwarded['params'])
       if (message.method === 'resources/read' && typeof params?.['uri'] === 'string') {
         entry.label = params['uri']
       }
@@ -307,7 +319,7 @@ export function runGateway(options: GatewayOptions): Promise<number> {
         entry.label = params['name']
       }
       pending.set(pendingKey(message.id), entry)
-      sendUpstream(message.value)
+      sendUpstream(forwarded)
     }
 
     const onUpstreamLine = (line: string): void => {
@@ -466,6 +478,66 @@ export function runGateway(options: GatewayOptions): Promise<number> {
       }
     })
   })
+}
+
+/** Gate model-selected MCP methods under their exact protocol names. */
+function gateHostMethod(
+  message: Extract<Message, { type: 'request' }>,
+  cordon: Cordon,
+  sendToHost: (message: Record<string, unknown>) => void,
+): Record<string, unknown> | null {
+  const params = asRecord(message.params)
+  if (message.value['jsonrpc'] !== '2.0' ||
+    Object.keys(message.value).some((key) => !['jsonrpc', 'id', 'method', 'params'].includes(key)) ||
+    params === null || !validHostMethodParams(message.method, params)) {
+    sendToHost({ jsonrpc: '2.0', id: message.id, error: {
+      code: -32602, message: `Cordon refused malformed ${message.method} parameters.`,
+    } })
+    return null
+  }
+
+  const decision = cordon.gateUnattended({ tool: message.method, args: params })
+  if (decision.kind !== 'allow') {
+    // A read method has no CallToolResult notice slot for a narrowed request.
+    // Refusing a rewrite keeps the host's requested URI or prompt identity
+    // from silently changing while it believes the original request ran.
+    sendToHost({ jsonrpc: '2.0', id: message.id, error: {
+      code: -32000,
+      message: decision.kind === 'rewrite'
+        ? `Cordon withheld a narrowed ${message.method} request; retry with reviewed parameters.`
+        : `Cordon refused ${message.method}: ${decision.reason}`,
+    } })
+    return null
+  }
+
+  const meta = asRecord(params['_meta'])
+  const progressToken = meta?.['progressToken']
+  return { jsonrpc: '2.0', id: message.id, method: message.method, params: {
+    ...Object.fromEntries(Object.entries(params).filter(([key]) => key !== '_meta')),
+    ...(typeof progressToken === 'string' || typeof progressToken === 'number'
+      ? { _meta: { progressToken } } : {}),
+  } }
+}
+
+function validHostMethodParams(method: string, params: Record<string, unknown>): boolean {
+  const allowed = method === 'prompts/get' ? ['name', 'arguments', '_meta']
+    : method === 'completion/complete' ? ['ref', 'argument', 'context', '_meta']
+      : method === 'logging/setLevel' ? ['level', '_meta'] : ['uri', '_meta']
+  if (Object.keys(params).some((key) => !allowed.includes(key))) return false
+  if (method === 'prompts/get') {
+    return typeof params['name'] === 'string' && params['name'] !== '' &&
+      (params['arguments'] === undefined || asRecord(params['arguments']) !== null)
+  }
+  if (method === 'completion/complete') {
+    const ref = asRecord(params['ref'])
+    const argument = asRecord(params['argument'])
+    return ref !== null && argument !== null &&
+      typeof ref['type'] === 'string' &&
+      typeof argument['name'] === 'string' && typeof argument['value'] === 'string' &&
+      (params['context'] === undefined || asRecord(params['context']) !== null)
+  }
+  if (method === 'logging/setLevel') return typeof params['level'] === 'string'
+  return typeof params['uri'] === 'string' && params['uri'] !== ''
 }
 
 /**

@@ -88,6 +88,10 @@ function basePolicy(): Policy {
     poisoned_page: ['read'],
     mystery_box: ['read'],
     update_price: ['update'],
+    'resources/read': ['read'],
+    'prompts/get': ['read'],
+    'completion/complete': ['read'],
+    'logging/setLevel': ['update'],
   }
   policy.toolsReturn = {
     poisoned_page: 'rendered',
@@ -151,6 +155,87 @@ describe('the MCP gateway', () => {
       await new Promise((resolve) => setTimeout(resolve, 50))
       expect(callLog(env)).toEqual([])
       expect(gateway.logs.join('\n')).toContain('unclassified host notification')
+    } finally {
+      await gateway.stop()
+    }
+  })
+
+  it.each([
+    ['resources/read', { uri: 'https://shop.example/page' }],
+    ['prompts/get', { name: 'greeting' }],
+    ['completion/complete', { ref: { type: 'ref/prompt', name: 'greeting' },
+      argument: { name: 'topic', value: 'public' } }],
+    ['resources/subscribe', { uri: 'https://shop.example/page' }],
+    ['resources/unsubscribe', { uri: 'https://shop.example/page' }],
+    ['logging/setLevel', { level: 'info' }],
+  ] as const)('applies the exact tool allowlist to %s before reaching the server', async (method, params) => {
+    const env = withCallLog()
+    const policy = basePolicy()
+    policy.allowedTools = ['poisoned_page']
+    const gateway = start(policy, env)
+    try {
+      gateway.send({ jsonrpc: '2.0', id: 1, method, params })
+      const response = await gateway.next()
+      expect(response.error).toEqual(expect.objectContaining({ code: -32000 }))
+      expect((response.error as { message: string }).message).toContain('allowedTools')
+      expect(callLog(env)).toEqual([])
+    } finally {
+      await gateway.stop()
+    }
+  })
+
+  it('keeps MCP discovery available under a runner-only allowlist', async () => {
+    const policy = basePolicy()
+    policy.allowedTools = ['poisoned_page']
+    const gateway = start(policy)
+    try {
+      gateway.send({ jsonrpc: '2.0', id: 1, method: 'tools/list' })
+      const response = await gateway.next()
+      expect((response.result as { tools: unknown[] }).tools.length).toBeGreaterThan(0)
+    } finally {
+      await gateway.stop()
+    }
+  })
+
+  it('requires a declared effect and certificate for resources/read', async () => {
+    const env = withCallLog()
+    const undeclared = basePolicy()
+    delete undeclared.tools['resources/read']
+    const first = start(undeclared, env)
+    try {
+      first.send({ jsonrpc: '2.0', id: 1, method: 'resources/read',
+        params: { uri: 'https://shop.example/page' } })
+      expect((await first.next()).error).toEqual(expect.objectContaining({
+        message: expect.stringContaining('not declared'),
+      }))
+      expect(callLog(env)).toEqual([])
+    } finally {
+      await first.stop()
+    }
+
+    const outside = basePolicy()
+    outside.profile.effects = ['update']
+    const second = start(outside, env)
+    try {
+      second.send({ jsonrpc: '2.0', id: 2, method: 'resources/read',
+        params: { uri: 'https://shop.example/page' } })
+      expect((await second.next()).error).toEqual(expect.objectContaining({
+        message: expect.stringContaining('certificate'),
+      }))
+      expect(callLog(env)).toEqual([])
+    } finally {
+      await second.stop()
+    }
+  })
+
+  it('refuses an extra action field in resources/read before the server sees it', async () => {
+    const env = withCallLog()
+    const gateway = start(basePolicy(), env)
+    try {
+      gateway.send({ jsonrpc: '2.0', id: 1, method: 'resources/read',
+        params: { uri: 'https://shop.example/page', command: 'change-price' } })
+      expect((await gateway.next()).error).toEqual(expect.objectContaining({ code: -32602 }))
+      expect(callLog(env)).toEqual([])
     } finally {
       await gateway.stop()
     }
@@ -273,7 +358,9 @@ describe('the MCP gateway', () => {
   it('preserves a harmless completion value', async () => {
     const gateway = start(basePolicy())
     try {
-      gateway.send({ jsonrpc: '2.0', id: 1, method: 'completion/complete', params: {} })
+      gateway.send({ jsonrpc: '2.0', id: 1, method: 'completion/complete', params: {
+        ref: { type: 'ref/prompt', name: 'guide' }, argument: { name: 'topic', value: 'pub' },
+      } })
       expect((await gateway.next()).result).toEqual({ completion: {
         values: ['Public documentation. Read the guide.'], total: 1, hasMore: false,
       } })
@@ -323,7 +410,10 @@ describe('the MCP gateway', () => {
   ])('withholds hidden text in a %s result key', async (method, flag) => {
     const gateway = start(basePolicy(), { [flag]: '1' })
     try {
-      gateway.send({ jsonrpc: '2.0', id: 1, method, params: {} })
+      const params = method === 'completion/complete'
+        ? { ref: { type: 'ref/prompt', name: 'guide' }, argument: { name: 'topic', value: 'pub' } }
+        : { level: 'info' }
+      gateway.send({ jsonrpc: '2.0', id: 1, method, params })
       const response = await gateway.next()
       expect(response.error).toEqual(expect.objectContaining({ code: -32000 }))
       expect(JSON.stringify(response)).not.toContain(HIDDEN)
