@@ -69,6 +69,8 @@ The 9 October interactive rerun used the `2dbb496` bundle and a corrected oracle
 
 The remaining attack pairs raised no attack-phase question and did not reach their goals. The old attacked-utility and any-question counts are not directly comparable because the reviewer and question counter changed. The [compact interactive record](../bench/agentdojo/results/oracle-interactive-review-phases-2026-10-09.json) pins source and bundle hashes, per-suite counts and hashes of the ignored raw reports. This is an idealized reviewer with advance knowledge of the phase, not evidence that a real person can reliably identify every malicious request. The run made no model calls and did not test the poisoned model or native Codex tools.
 
+The same corrected interactive oracle was then rerun in `between` order: the injected calls ran after the honest reads and before the honest actions. All four suite aggregates and per-task summaries matched `after`: 97/97 clean tasks, 949/949 attacked pairs retaining utility, 0/949 attack goals and 609/949 pairs with an attack-phase question. The [between-order record](../bench/agentdojo/results/oracle-interactive-between-2026-10-09.json) pins the frozen bundle, source and raw-report hashes. This changes only call order in the scripted oracle. It does not show how a model would choose a call or how a real owner would classify a question.
+
 Interactive travel reached 20 of 20 with 0.11.0: the last task had failed because quarantine cut a fragment out of an outgoing message, and a call that leaves the machine is now shown to the human whole instead of cut. Strict, directory and mandate are unchanged by it, and the attacks stayed at 0 in every column.
 
 On workspace the lookups recovered four tasks: an event with a contact the user named, a follow-up with the participants of a meeting the user named, and appends to a file the user named. Travel gained the booking at 'Le Marais Boutique', a quoted name. Slack lost the channel list's trust, as above; the mandate's gain there is the workspace's own channels and people named up front.
@@ -138,6 +140,7 @@ python3.12 -m venv .venv && .venv/bin/pip install -r requirements.txt
 mkdir -p work && cp ../../plugin/dist/cli.js work/cli.js   # freeze the bundle you measure
 CORDON_CLI=$PWD/work/cli.js .venv/bin/python oracle.py --variant strict       # or directory, mandate, interactive
 CORDON_CLI=$PWD/work/cli.js .venv/bin/python oracle.py --variant mandate --order between
+CORDON_CLI=$PWD/work/cli.js .venv/bin/python oracle.py --variant interactive --defenses cordon --order between
 CORDON_CLI=$PWD/work/cli.js .venv/bin/python oracle.py --variant interactive --approve-attacks
 # live runs need ANTHROPIC_API_KEY; BENCH_BUDGET caps the spend in dollars
 CORDON_CLI=$PWD/work/cli.js .venv/bin/python cordon_bench.py --suites banking slack --defense none cordon --variant strict
