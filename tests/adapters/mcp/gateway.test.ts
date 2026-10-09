@@ -171,6 +171,107 @@ describe('the MCP gateway', () => {
     }
   })
 
+  it('cleans server logging notifications before the host reads them', async () => {
+    const env = { ...withCallLog(), FAKE_SERVER_NOTIFICATION_POISON: '1' }
+    const gateway = start(basePolicy(), env)
+    try {
+      gateway.send({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} })
+      expect((await gateway.next()).id).toBe(1)
+      const notice = await gateway.next()
+      expect(notice.method).toBe('notifications/message')
+      expect((notice.params as { data: string }).data).toBe('Public documentation. Read the guide.')
+      expect(JSON.stringify(notice)).not.toContain(HIDDEN)
+      gateway.send({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: {
+        name: 'update_price', arguments: { nmId: '99887766', price: 1 },
+      } })
+      expect(((await gateway.next()).result as { isError?: boolean }).isError).toBe(true)
+      expect(callLog(env)).toEqual([])
+    } finally {
+      await gateway.stop()
+    }
+  })
+
+  it('preserves a harmless server logging notification', async () => {
+    const gateway = start(basePolicy(), { FAKE_SERVER_NOTIFICATION_CLEAN: '1' })
+    try {
+      gateway.send({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} })
+      expect((await gateway.next()).id).toBe(1)
+      expect(await gateway.next()).toEqual({ jsonrpc: '2.0', method: 'notifications/message',
+        params: { level: 'info', data: 'Public documentation. Read the guide.' } })
+    } finally {
+      await gateway.stop()
+    }
+  })
+
+  it('withholds a logging notification with hidden text in a data key', async () => {
+    const gateway = start(basePolicy(), { FAKE_SERVER_NOTIFICATION_KEY_POISON: '1' })
+    try {
+      gateway.send({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} })
+      expect((await gateway.next()).id).toBe(1)
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      expect(gateway.queued()).toBe(0)
+      expect(gateway.logs.join('\n')).toContain('unsupported server notification')
+    } finally {
+      await gateway.stop()
+    }
+  })
+
+  it('refuses a server-origin sampling request before it reaches the host', async () => {
+    const replyLog = join(mkdtempSync(join(tmpdir(), 'cordon-mcp-sampling-')), 'reply.jsonl')
+    const gateway = start(basePolicy(), { FAKE_SERVER_REQUEST_POISON: '1', FAKE_SERVER_REQUEST_LOG: replyLog })
+    try {
+      gateway.send({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} })
+      expect((await gateway.next()).id).toBe(1)
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      expect(gateway.queued()).toBe(0)
+      const replies = readFileSync(replyLog, 'utf8').trim().split('\n').map((line) => JSON.parse(line))
+      expect(replies).toEqual([{ jsonrpc: '2.0', id: 'server-sampling-1', error: {
+        code: -32601, message: 'Cordon does not forward server-origin requests.' } }])
+    } finally {
+      await gateway.stop()
+    }
+  })
+
+  it('answers a contentless server ping without showing it to the host', async () => {
+    const replyLog = join(mkdtempSync(join(tmpdir(), 'cordon-mcp-ping-')), 'reply.jsonl')
+    const gateway = start(basePolicy(), { FAKE_SERVER_PING: '1', FAKE_SERVER_REQUEST_LOG: replyLog })
+    try {
+      gateway.send({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} })
+      expect((await gateway.next()).id).toBe(1)
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      expect(gateway.queued()).toBe(0)
+      expect(JSON.parse(readFileSync(replyLog, 'utf8'))).toEqual({
+        jsonrpc: '2.0', id: 'server-ping-1', result: {},
+      })
+    } finally {
+      await gateway.stop()
+    }
+  })
+
+  it('drops an unknown server notification instead of forwarding its data', async () => {
+    const gateway = start(basePolicy(), { FAKE_SERVER_NOTIFICATION_UNKNOWN: '1' })
+    try {
+      gateway.send({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} })
+      expect((await gateway.next()).id).toBe(1)
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      expect(gateway.queued()).toBe(0)
+      expect(gateway.logs.join('\n')).toContain('unsupported server notification')
+    } finally {
+      await gateway.stop()
+    }
+  })
+
+  it('preserves a contentless tool-list change signal', async () => {
+    const gateway = start(basePolicy(), { FAKE_SERVER_LIST_CHANGED: '1' })
+    try {
+      gateway.send({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} })
+      expect((await gateway.next()).id).toBe(1)
+      expect(await gateway.next()).toEqual({ jsonrpc: '2.0', method: 'notifications/tools/list_changed' })
+    } finally {
+      await gateway.stop()
+    }
+  })
+
   it('cleans modern discovery instructions and escalates later effects', async () => {
     const env = { ...withCallLog(), FAKE_DISCOVER_POISON: '1' }
     const gateway = start(basePolicy(), env)

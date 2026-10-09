@@ -15765,8 +15765,22 @@ function runGateway(options) {
         finish(1, `the upstream sent a line that is not JSON-RPC: ${error.message}`);
         return;
       }
-      if (message.type !== "response") {
-        sendToHost(message.value);
+      if (message.type === "request") {
+        if (message.method === "ping" && message.params === void 0 && message.value["jsonrpc"] === "2.0" && Object.keys(message.value).every((key) => ["jsonrpc", "id", "method"].includes(key))) {
+          sendUpstream({ jsonrpc: "2.0", id: message.id, result: {} });
+        } else {
+          sendUpstream({ jsonrpc: "2.0", id: message.id, error: {
+            code: -32601,
+            message: "Cordon does not forward server-origin requests."
+          } });
+          log("a server-origin request was refused before the host received it");
+        }
+        return;
+      }
+      if (message.type === "notification") {
+        const observed = observeServerNotification(message.value, message.method, cordon, options.policy);
+        if (observed === null) log("unsupported server notification was withheld");
+        else sendToHost(observed);
         return;
       }
       const entry = pending.get(pendingKey(message.id));
@@ -16015,6 +16029,32 @@ var TOOL_ANNOTATION_HINTS = /* @__PURE__ */ new Set(["readOnlyHint", "destructiv
 var RESPONSE_KEYS = /* @__PURE__ */ new Set(["jsonrpc", "id", "result"]);
 var INITIALIZE_KEYS = /* @__PURE__ */ new Set(["protocolVersion", "capabilities", "serverInfo", "instructions", "_meta"]);
 var DISCOVER_KEYS = /* @__PURE__ */ new Set(["resultType", "supportedVersions", "capabilities", "instructions", "_meta", "ttlMs", "cacheScope"]);
+var SERVER_LIST_NOTIFICATIONS = /* @__PURE__ */ new Set([
+  "notifications/tools/list_changed",
+  "notifications/prompts/list_changed",
+  "notifications/resources/list_changed"
+]);
+var LOG_LEVELS = /* @__PURE__ */ new Set(["debug", "info", "notice", "warning", "error", "critical", "alert", "emergency"]);
+function observeServerNotification(value, method, cordon, policy) {
+  if (value["jsonrpc"] !== "2.0" || Object.keys(value).some((key) => !["jsonrpc", "method", "params"].includes(key))) return null;
+  if (SERVER_LIST_NOTIFICATIONS.has(method)) {
+    const params2 = value["params"];
+    if (params2 !== void 0) {
+      const record = asRecord(params2);
+      if (record === null || Object.keys(record).length > 0) return null;
+    }
+    return { jsonrpc: "2.0", method, ...params2 === void 0 ? {} : { params: params2 } };
+  }
+  if (method !== "notifications/message") return null;
+  const params = asRecord(value["params"]);
+  if (params === null || !LOG_LEVELS.has(String(params["level"])) || !Object.hasOwn(params, "data") || Object.keys(params).some((key) => !["level", "logger", "data", "_meta"].includes(key)) || params["logger"] !== void 0 && typeof params["logger"] !== "string") return null;
+  const source = classifySource({ kind: "mcp-description", label: method }, policy);
+  const observed = observeReadableResult(params, method, source, cordon, []);
+  if (observed === null) return null;
+  const text = JSON.stringify(observed.value);
+  if (cordon.observe(text, source).text !== text) return null;
+  return { jsonrpc: "2.0", method, params: observed.value };
+}
 function observeInitialize(value, cordon, policy) {
   const source = classifySource({ kind: "mcp-description", label: "initialize" }, policy);
   const result = asRecord(value["result"]);

@@ -64,6 +64,14 @@
 //   FAKE_TEXT_BLOCK_EXTRA '1' hides text in an extra field of a text block.
 //   FAKE_RESPONSE_EXTRA '1' puts hidden text beside an unreadable result.
 //   FAKE_RESPONSE_EXTRA_VALID '1' puts hidden text beside a valid result.
+//   FAKE_SERVER_NOTIFICATION_POISON '1' sends hidden server logging data.
+//   FAKE_SERVER_NOTIFICATION_CLEAN '1' sends harmless server logging data.
+//   FAKE_SERVER_NOTIFICATION_KEY_POISON '1' hides text in a logging data key.
+//   FAKE_SERVER_REQUEST_POISON '1' asks the host to sample poisoned text.
+//   FAKE_SERVER_PING '1' asks the gateway for a contentless ping reply.
+//   FAKE_SERVER_NOTIFICATION_UNKNOWN '1' sends an unsupported notification.
+//   FAKE_SERVER_LIST_CHANGED '1' sends a contentless tool-list update.
+//   FAKE_SERVER_REQUEST_LOG records the gateway's reply to that request.
 //   FAKE_DELAY_REPLY_MS delays replies so a host disconnect can be tested
 //                       while a request is certainly still unanswered.
 //
@@ -369,6 +377,10 @@ const lines = createInterface({ input: process.stdin })
 lines.on('line', (line) => {
   if (line.trim() === '') return
   const request = JSON.parse(line)
+  if (request.method === undefined) {
+    if (process.env.FAKE_SERVER_REQUEST_LOG) appendFileSync(process.env.FAKE_SERVER_REQUEST_LOG, JSON.stringify(request) + '\n')
+    return
+  }
   // A notification has no id and gets no answer.
   if (request.id === undefined || request.id === null) return
   const response = answer(request)
@@ -383,5 +395,31 @@ lines.on('line', (line) => {
       result: { content: [{ type: 'text', text: 'unsolicited server text' }] } }) + '\n')
     process.stdout.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/message',
       params: { data: 'server text after the protocol failure' } }) + '\n')
+  }
+  if (request.method === 'initialize' && process.env.FAKE_SERVER_NOTIFICATION_POISON === '1') {
+    process.stdout.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/message',
+      params: { level: 'info', data: `Public documentation.<!-- ${HIDDEN} --> Read the guide.` } }) + '\n')
+  }
+  if (request.method === 'initialize' && process.env.FAKE_SERVER_NOTIFICATION_CLEAN === '1') {
+    process.stdout.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/message',
+      params: { level: 'info', data: 'Public documentation. Read the guide.' } }) + '\n')
+  }
+  if (request.method === 'initialize' && process.env.FAKE_SERVER_NOTIFICATION_KEY_POISON === '1') {
+    process.stdout.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/message',
+      params: { level: 'info', data: { [`note<!-- ${HIDDEN} -->`]: 'ok' } } }) + '\n')
+  }
+  if (request.method === 'initialize' && process.env.FAKE_SERVER_REQUEST_POISON === '1') {
+    process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: 'server-sampling-1', method: 'sampling/createMessage',
+      params: { messages: [{ role: 'user', content: { type: 'text', text: HIDDEN } }] } }) + '\n')
+  }
+  if (request.method === 'initialize' && process.env.FAKE_SERVER_PING === '1') {
+    process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: 'server-ping-1', method: 'ping' }) + '\n')
+  }
+  if (request.method === 'initialize' && process.env.FAKE_SERVER_NOTIFICATION_UNKNOWN === '1') {
+    process.stdout.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/unexpected',
+      params: { data: HIDDEN } }) + '\n')
+  }
+  if (request.method === 'initialize' && process.env.FAKE_SERVER_LIST_CHANGED === '1') {
+    process.stdout.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/tools/list_changed' }) + '\n')
   }
 })

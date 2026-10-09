@@ -204,8 +204,8 @@ export function runGateway(options: GatewayOptions): Promise<number> {
             }
           }
         }
-        // Notifications and the host's answers to the upstream's own
-        // requests (sampling, roots) carry nothing the gateway decides on.
+        // Host notifications and answers travel toward the server. Server
+        // requests are refused below, so a host response cannot grant one.
         sendUpstream(message.value)
         return
       }
@@ -281,9 +281,26 @@ export function runGateway(options: GatewayOptions): Promise<number> {
         return
       }
 
-      if (message.type !== 'response') {
-        // The upstream's own requests and notifications go to the host.
-        sendToHost(message.value)
+      if (message.type === 'request') {
+        // A server can ask the host to sample or elicit model input. Forwarding
+        // that request makes server-authored content an instruction before the
+        // tool-result gate sees it. Ping is contentless and answered here.
+        if (message.method === 'ping' && message.params === undefined &&
+          message.value['jsonrpc'] === '2.0' &&
+          Object.keys(message.value).every((key) => ['jsonrpc', 'id', 'method'].includes(key))) {
+          sendUpstream({ jsonrpc: '2.0', id: message.id, result: {} })
+        } else {
+          sendUpstream({ jsonrpc: '2.0', id: message.id, error: {
+            code: -32601, message: 'Cordon does not forward server-origin requests.',
+          } })
+          log('a server-origin request was refused before the host received it')
+        }
+        return
+      }
+      if (message.type === 'notification') {
+        const observed = observeServerNotification(message.value, message.method, cordon, options.policy)
+        if (observed === null) log('unsupported server notification was withheld')
+        else sendToHost(observed)
         return
       }
 
@@ -658,6 +675,44 @@ const TOOL_ANNOTATION_HINTS = new Set(['readOnlyHint', 'destructiveHint', 'idemp
 const RESPONSE_KEYS = new Set(['jsonrpc', 'id', 'result'])
 const INITIALIZE_KEYS = new Set(['protocolVersion', 'capabilities', 'serverInfo', 'instructions', '_meta'])
 const DISCOVER_KEYS = new Set(['resultType', 'supportedVersions', 'capabilities', 'instructions', '_meta', 'ttlMs', 'cacheScope'])
+const SERVER_LIST_NOTIFICATIONS = new Set([
+  'notifications/tools/list_changed', 'notifications/prompts/list_changed',
+  'notifications/resources/list_changed',
+])
+const LOG_LEVELS = new Set(['debug', 'info', 'notice', 'warning', 'error', 'critical', 'alert', 'emergency'])
+
+function observeServerNotification(
+  value: Record<string, unknown>,
+  method: string,
+  cordon: Cordon,
+  policy: Policy,
+): Record<string, unknown> | null {
+  if (value['jsonrpc'] !== '2.0' || Object.keys(value).some((key) =>
+    !['jsonrpc', 'method', 'params'].includes(key))) return null
+  if (SERVER_LIST_NOTIFICATIONS.has(method)) {
+    const params = value['params']
+    if (params !== undefined) {
+      const record = asRecord(params)
+      if (record === null || Object.keys(record).length > 0) return null
+    }
+    return { jsonrpc: '2.0', method, ...(params === undefined ? {} : { params }) }
+  }
+  if (method !== 'notifications/message') return null
+  const params = asRecord(value['params'])
+  if (params === null || !LOG_LEVELS.has(String(params['level'])) ||
+    !Object.hasOwn(params, 'data') ||
+    Object.keys(params).some((key) => !['level', 'logger', 'data', '_meta'].includes(key)) ||
+    (params['logger'] !== undefined && typeof params['logger'] !== 'string')) return null
+  const source = classifySource({ kind: 'mcp-description', label: method }, policy)
+  const observed = observeReadableResult(params, method, source, cordon, [])
+  if (observed === null) return null
+  // Arbitrary JSON logging data may carry text in property names, which the
+  // generic text extractor treats as structure. The full serialized message
+  // has to survive the sanitizer unchanged before the host sees those keys.
+  const text = JSON.stringify(observed.value)
+  if (cordon.observe(text, source).text !== text) return null
+  return { jsonrpc: '2.0', method, params: observed.value }
+}
 
 /** The server can send model-facing instructions before the host lists any tools. */
 function observeInitialize(
