@@ -253,6 +253,14 @@ export function runGateway(options: GatewayOptions): Promise<number> {
         return
       }
 
+      const key = pendingKey(message.id)
+      if (pending.has(key) || reviewTimers.has(key)) {
+        // Reusing an id while its first call is unresolved overwrites the
+        // response's method and source, so no later result can be routed safely.
+        finish(1, `duplicate in-flight host request id ${key}`)
+        return
+      }
+
       if (message.method === 'tools/call') {
         gateCall(message, cordon, options.policy, pending, sendToHost, sendUpstream,
           approvalWaitMs === 0 ? undefined : (approvalId, reason) => {

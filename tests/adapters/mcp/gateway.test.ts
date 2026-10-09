@@ -119,6 +119,25 @@ describe('the MCP gateway', () => {
     expect(gateway.logs.join('\n')).toContain('host closed with an unanswered MCP request')
   })
 
+  it('stops on a reused in-flight host id before forwarding a second effect', async () => {
+    const env = { ...withCallLog(), FAKE_DELAY_REPLY_MS: '250' }
+    const gateway = start(basePolicy(), env)
+    try {
+      gateway.send({ jsonrpc: '2.0', id: 1, method: 'tools/call',
+        params: { name: 'poisoned_page', arguments: {} } })
+      gateway.send({ jsonrpc: '2.0', id: 1, method: 'resources/read',
+        params: { uri: 'https://shop.example/page' } })
+      expect(await Promise.race([
+        gateway.done,
+        new Promise<number>((resolve) => setTimeout(() => resolve(-1), 2000)),
+      ])).toBe(1)
+      expect(gateway.logs.join('\n')).toContain('duplicate in-flight host request id')
+      expect(callLog(env)).not.toContain('resources/read')
+    } finally {
+      await gateway.stop()
+    }
+  })
+
   it('preserves ordinary initialize and passes unknown requests through', async () => {
     const gateway = start(basePolicy())
     gateway.send({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} })

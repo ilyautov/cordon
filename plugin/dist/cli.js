@@ -15732,17 +15732,22 @@ function runGateway(options) {
         if (message.method === "notifications/cancelled") {
           const requestId = asRecord(message.params)?.["requestId"];
           if (typeof requestId === "string" || typeof requestId === "number") {
-            const key = pendingKey(requestId);
-            const held = reviewTimers.get(key);
+            const key2 = pendingKey(requestId);
+            const held = reviewTimers.get(key2);
             if (held !== void 0) {
               clearInterval(held.timer);
-              reviewTimers.delete(key);
+              reviewTimers.delete(key2);
               retireIfLastWaiter(held.approvalId, "the host cancelled its MCP request");
               return;
             }
           }
         }
         sendUpstream(message.value);
+        return;
+      }
+      const key = pendingKey(message.id);
+      if (pending.has(key) || reviewTimers.has(key)) {
+        finish(1, `duplicate in-flight host request id ${key}`);
         return;
       }
       if (message.method === "tools/call") {
@@ -15754,15 +15759,15 @@ function runGateway(options) {
           sendToHost,
           sendUpstream,
           approvalWaitMs === 0 ? void 0 : (approvalId2, reason) => {
-            const key = pendingKey(message.id);
-            if (reviewTimers.has(key)) throw new Error(`a second review is waiting under request ${key}`);
+            const key2 = pendingKey(message.id);
+            if (reviewTimers.has(key2)) throw new Error(`a second review is waiting under request ${key2}`);
             const approvals = new ApprovalStore(options.cordonHome);
             const deadline = Date.now() + approvalWaitMs;
             const timer = setInterval(() => {
               try {
                 if (Date.now() >= deadline) {
                   clearInterval(timer);
-                  reviewTimers.delete(key);
+                  reviewTimers.delete(key2);
                   retireIfLastWaiter(approvalId2, "the owner did not approve before the wait ended");
                   sendToHost(toolError(message.id, `Cordon approval wait timed out for ${message.method}: ${reason}`));
                   return;
@@ -15781,7 +15786,7 @@ function runGateway(options) {
                 finish(1, `approval wait failed: ${error.message}`);
               }
             }, Math.min(25, approvalWaitMs));
-            reviewTimers.set(key, { timer, approvalId: approvalId2, requestId: message.id });
+            reviewTimers.set(key2, { timer, approvalId: approvalId2, requestId: message.id });
           }
         );
         return;
