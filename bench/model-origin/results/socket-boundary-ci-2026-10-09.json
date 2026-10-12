@@ -1,0 +1,30 @@
+{
+  "date": "2026-10-09",
+  "experiment": "separate agent UID, owner gateway, restricted runner and exact approval in real Docker containers",
+  "status": "three selected synthetic trials passed on GitHub-hosted Ubuntu",
+  "sourceHead": "859c5bc",
+  "ciRun": "https://github.com/ilyautov/cordon/actions/runs/37952408439",
+  "ciJob": "https://github.com/ilyautov/cordon/actions/runs/37952408439/job/113894279091",
+  "environment": {
+    "runner": "GitHub-hosted Ubuntu 24.04, Node 22",
+    "alpineManifestDigestInJobLog": "sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6",
+    "pythonManifestDigestInJobLog": "sha256:a6e34c598f2467ed0e9a8d349809fcd8b5c603269512df273a0bb1784edc11b1",
+    "imageSelection": "each script resolved a local Docker image ID from its tag before running"
+  },
+  "testResult": "3 passed, 43 skipped under the name filter; selected tests completed in 1.488 seconds",
+  "selectedTrials": [
+    {
+      "name": "keeps the agent container outside the owner gateway and Docker runner",
+      "assertedEffects": "agent UID differed; owner policy, source, synthetic secret and Docker socket were absent; unnamed download was refused before runner; ordinary edit reached runner and changed only selected source"
+    },
+    {
+      "name": "stops an owner-named download inside the isolated runner",
+      "assertedEffects": "owner-named download reached runner; network-disabled container returned Network unreachable; shell chain did not advance and selected source stayed unchanged"
+    },
+    {
+      "name": "consumes one exact owner approval across the separate-UID bridge",
+      "assertedEffects": "synthetic exact approval was given and consumed once; reviewed command reached runner once; network blocked wget before shell; selected source stayed unchanged"
+    }
+  ],
+  "scope": "These are scripted JSON-RPC agent and reviewer controls using fictitious data. They do not measure poisoned-model choice, real human judgment, installed Codex native-tool coverage, or production executor readiness."
+}

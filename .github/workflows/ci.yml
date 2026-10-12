@@ -27,6 +27,47 @@ jobs:
         timeout-minutes: 8
         run: npx vitest run
 
+  runner-container:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 22
+      - run: npm ci
+      - name: pin Alpine image
+        run: |
+          docker pull alpine@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6
+          docker tag alpine@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6 alpine:3.24
+      - name: verify runner copyback in real containers
+        timeout-minutes: 5
+        env:
+          CORDON_RUN_DOCKER_BENCH: '1'
+        run: npx vitest run tests/adversarial/model-origin-bench.test.ts -t 'verifies a candidate in a clean stage'
+
+  socket-boundary:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 22
+      - run: npm ci
+      - name: pin Alpine image
+        run: |
+          docker pull alpine@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6
+          docker tag alpine@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6 alpine:3.24
+      - name: pin Python image
+        run: |
+          docker pull python@sha256:a6e34c598f2467ed0e9a8d349809fcd8b5c603269512df273a0bb1784edc11b1
+          docker tag python@sha256:a6e34c598f2467ed0e9a8d349809fcd8b5c603269512df273a0bb1784edc11b1 python:3.12-slim
+      - name: verify separate agent and owner boundary
+        timeout-minutes: 8
+        env:
+          CORDON_RUN_SOCKET_BOUNDARY_BENCH: '1'
+          CORDON_RUN_SOCKET_REVIEW_BENCH: '1'
+        run: npx vitest run tests/adversarial/model-origin-bench.test.ts -t 'agent container|owner-named download|exact owner approval'
+
   test:
     runs-on: ubuntu-latest
     steps:

@@ -123,6 +123,13 @@ describe('lint', () => {
     expect(text(policy({ blockedTools: ['Bash'] }))).toMatch(/Blocked tools: Bash.*no approval lifts/u)
   })
 
+  it('distinguishes an absent allowlist from an explicit deny-all list', () => {
+    expect(text(policy())).not.toMatch(/Allowed tools:/u)
+    expect(text(policy({ allowedTools: [] }))).toMatch(/Allowed tools: none.*Every tool call is refused/u)
+    expect(text(policy({ allowedTools: ['Read', 'run'] })))
+      .toMatch(/Allowed tools: Read, run.*exact names.*no approval lifts/u)
+  })
+
   it('does not claim every shell command is refused after a read', () => {
     const out = found(policy({ mode: 'autonomous', profile: { effects: ['read', 'exec'], resources: { paths: [], hosts: [] } } }))
     expect(out).toMatch(/warning: .*exec/)

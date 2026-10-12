@@ -196,6 +196,41 @@ describe('gate', () => {
     }
   })
 
+  it('refuses every unlisted tool without an approval path, even when its effect is granted', () => {
+    for (const mode of ['interactive', 'autonomous'] as const) {
+      const ctx = setup({
+        mode,
+        profile: { effects: ['read', 'create', 'update', 'exec'], resources: { paths: [], hosts: [] } },
+        allowedTools: ['Read', 'mcp__sandbox__run', 'run'],
+        tools: { mcp__sandbox__run: ['exec'], run: ['exec'] },
+      })
+      expect(gate({ tool: 'Bash', args: { command: 'pwd' } }, ctx))
+        .toMatchObject({ kind: 'deny', rule: 'tool-not-allowed' })
+      expect(gate({ tool: 'apply_patch', args: { patch: 'bad' } }, ctx))
+        .toMatchObject({ kind: 'deny', rule: 'tool-not-allowed' })
+      expect(gate({ tool: 'mcp__sandbox__run', args: { command: 'pwd' } }, ctx).kind).toBe('allow')
+      expect(gate({ tool: 'run', args: { command: 'pwd' } }, ctx).kind).toBe('allow')
+      expect(gate({ tool: 'Read', args: { file_path: '/work/input.ts' } }, ctx).kind).toBe('allow')
+    }
+    const none = setup({ allowedTools: [] })
+    expect(gate({ tool: 'Read', args: { file_path: '/work/input.ts' } }, none))
+      .toMatchObject({ kind: 'deny', rule: 'tool-not-allowed' })
+  })
+
+  it('keeps a blocked tool refused even when it is listed as allowed', () => {
+    const ctx = setup({ allowedTools: ['Bash'], blockedTools: ['Bash'] })
+    expect(gate({ tool: 'Bash', args: { command: 'pwd' } }, ctx))
+      .toMatchObject({ kind: 'deny', rule: 'tool-blocked' })
+  })
+
+  it('does not turn an allowed name into an effect grant', () => {
+    const ctx = setup({ allowedTools: ['Bash'] })
+    expect(gate({ tool: 'Bash', args: { command: 'pwd' } }, ctx))
+      .toMatchObject({ kind: 'deny', rule: 'certificate' })
+    expect(gate({ tool: 'bash', args: { command: 'pwd' } }, ctx))
+      .toMatchObject({ kind: 'deny', rule: 'tool-not-allowed' })
+  })
+
   it('writing into its own config is forbidden even with a wide certificate', () => {
     const ctx = setup({
       mode: 'interactive',

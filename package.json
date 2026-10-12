@@ -1,7 +1,7 @@
 {
   "name": "@ilyautov/cordon",
   "version": "0.12.1",
-  "description": "A prompt-injection firewall for AI agents, with no AI inside: your agent reads anything and takes orders only from you. For Claude Code, Codex CLI, Kimi Code, DeepSeek Harness, Gemini CLI, MCP hosts and LangChain.",
+  "description": "A deterministic policy gate for observable AI agent actions, with no AI inside. For Claude Code, Codex CLI, Kimi Code, DeepSeek Harness, Gemini CLI, MCP hosts and LangChain.",
   "keywords": [
     "prompt-injection",
     "indirect-prompt-injection",

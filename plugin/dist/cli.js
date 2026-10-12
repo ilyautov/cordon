@@ -7444,6 +7444,7 @@ var DEFAULT_POLICY = {
   },
   tools: {},
   blockedTools: [],
+  allowedTools: null,
   trustedSources: [],
   toolsReturn: {},
   arguments: {},
@@ -7532,6 +7533,9 @@ function validate(parsed, path) {
   }
   if (Object.hasOwn(input, "blockedTools")) {
     policy.blockedTools = asNames(input["blockedTools"], `${path}: blockedTools`);
+  }
+  if (Object.hasOwn(input, "allowedTools")) {
+    policy.allowedTools = asNames(input["allowedTools"], `${path}: allowedTools`);
   }
   if ("trustedSources" in input) {
     policy.trustedSources = asStrings(input.trustedSources, `${path}: trustedSources`);
@@ -7622,6 +7626,7 @@ var TOP_LEVEL = [
   "profile",
   "tools",
   "blockedTools",
+  "allowedTools",
   "trustedSources",
   "toolsReturn",
   "arguments",
@@ -8721,6 +8726,9 @@ function decide(call, ctx) {
   if (ctx.policy.blockedTools.includes(call.tool)) {
     return { kind: "deny", rule: "tool-blocked", reason: `tool ${call.tool} is blocked by the policy` };
   }
+  if (ctx.policy.allowedTools !== null && (!Array.isArray(ctx.policy.allowedTools) || !ctx.policy.allowedTools.includes(call.tool))) {
+    return { kind: "deny", rule: "tool-not-allowed", reason: `tool ${call.tool} is not on the policy's allowedTools list` };
+  }
   const parts = fields(own2);
   const selfHit = selfProtection(parts, ctx);
   if (selfHit) return selfHit;
@@ -9242,7 +9250,8 @@ function fingerprint(tool) {
     // newly added to an already pinned tool still changes its fingerprint.
     ...tool.title === void 0 ? {} : { title: tool.title },
     ...tool.annotations === void 0 ? {} : { annotations: tool.annotations },
-    ...tool.outputSchema === void 0 ? {} : { outputSchema: tool.outputSchema }
+    ...tool.outputSchema === void 0 ? {} : { outputSchema: tool.outputSchema },
+    ...tool.icons === void 0 ? {} : { icons: tool.icons }
   });
   return createHash("sha256").update(canonical2, "utf8").digest("hex");
 }
@@ -9381,6 +9390,7 @@ var RULES = {
   failure: { class: "guard-failure", tier: "precaution" },
   pin: { class: "tool-rug-pull", tier: "evidence" },
   "tool-blocked": { class: "out-of-scope", tier: "precaution" },
+  "tool-not-allowed": { class: "out-of-scope", tier: "precaution" },
   "self-protection": { class: "guard-tampering", tier: "precaution" },
   "agent-config": { class: "guard-tampering", tier: "suspicion" },
   unscanned: { class: "unscanned-content", tier: "suspicion" },
@@ -12324,7 +12334,7 @@ function isEntry(value) {
 
 // src/session/approvals.ts
 import { createHash as createHash3, randomBytes as randomBytes2 } from "node:crypto";
-import { existsSync, readdirSync as readdirSync2, readFileSync as readFileSync3, renameSync as renameSync3, rmSync as rmSync2, statSync as statSync2, unlinkSync, writeFileSync as writeFileSync2 } from "node:fs";
+import { existsSync, linkSync, readdirSync as readdirSync2, readFileSync as readFileSync3, renameSync as renameSync3, rmSync as rmSync2, statSync as statSync2, unlinkSync, writeFileSync as writeFileSync2 } from "node:fs";
 import { join as join4 } from "node:path";
 var APPROVAL_TTL_MS = 60 * 60 * 1e3;
 var ID = /^[0-9a-f]{16}$/u;
@@ -12373,10 +12383,16 @@ var ApprovalStore = class {
         }
       }
     }
+    const writing = join4(this.dir, `${checked(id)}.request-writing.${randomBytes2(8).toString("hex")}`);
     try {
-      writeFileSync2(this.pendingPath(id), body, { encoding: "utf8", mode: 384, flag: "wx" });
-    } catch (error) {
-      if (error.code !== "EEXIST") throw error;
+      writeFileSync2(writing, body, { encoding: "utf8", mode: 384, flag: "wx" });
+      try {
+        linkSync(writing, this.pendingPath(id));
+      } catch (error) {
+        if (error.code !== "EEXIST") throw error;
+      }
+    } finally {
+      rmSync2(writing, { force: true });
     }
   }
   /**
@@ -12388,8 +12404,14 @@ var ApprovalStore = class {
     if (request === null) return null;
     const shown2 = { tool: request.tool, reason: request.reason, args: request.args, ...request.context === void 0 ? {} : { context: request.context } };
     const nonce = randomBytes2(8).toString("hex");
-    writeFileSync2(this.approvedPath(id), `${request.binding}
-${nonce}`, { mode: 384 });
+    const writing = join4(this.dir, `${checked(id)}.approval-writing.${nonce}`);
+    try {
+      writeFileSync2(writing, `${request.binding}
+${nonce}`, { mode: 384, flag: "wx" });
+      renameSync3(writing, this.approvedPath(id));
+    } finally {
+      rmSync2(writing, { force: true });
+    }
     if (this.read(id) === null) {
       if (existsSync(this.takenPath(id, nonce))) return shown2;
       this.retire(id);
@@ -12427,13 +12449,16 @@ ${nonce}`, { mode: 384 });
     }
     try {
       const fresh = Date.now() - statSync2(claimed).mtimeMs <= APPROVAL_TTL_MS;
-      const [given, nonce] = readFileSync3(claimed, "utf8").split("\n");
+      const fields2 = readFileSync3(claimed, "utf8").split("\n");
+      const nonce = fields2[1];
+      if (fields2.length !== 2 || nonce === void 0 || !NONCE.test(nonce)) return { taken: false, void: false };
+      const given = fields2[0];
       if (!existsSync(this.pendingPath(id))) return { taken: false, void: false };
       if (fresh && given !== binding) {
         this.retire(id);
         return { taken: false, void: true };
       }
-      if (fresh && nonce !== void 0 && NONCE.test(nonce)) writeFileSync2(this.takenPath(id, nonce), "", { mode: 384 });
+      if (fresh) writeFileSync2(this.takenPath(id, nonce), "", { mode: 384 });
       try {
         unlinkSync(this.pendingPath(id));
       } catch {
@@ -12498,7 +12523,7 @@ ${nonce}`, { mode: 384 });
       return;
     }
     for (const name of names2) {
-      const id = name.replace(/\.(?:request\.json|approved|taken\.[0-9a-f]{16}|taking\.\d+\.[0-9a-f]{8})$/u, "");
+      const id = name.replace(/\.(?:request\.json|request-writing\.[0-9a-f]{16}|approved|approval-writing\.[0-9a-f]{16}|taken\.[0-9a-f]{16}|taking\.\d+\.[0-9a-f]{8})$/u, "");
       if (id === name || !ID.test(id)) continue;
       if (this.stale(join4(this.dir, name))) {
         try {
@@ -13718,13 +13743,12 @@ var Cordon = class {
   /**
    * Cleans a piece of a tool's result and remembers where it came from.
    *
-   * `role` separates two questions that are not the same one. Everything the
-   * source put in front of the model is cleaned, without exception. Only what
-   * the source authored is recorded as provenance: a heading, a name or the
-   * query echoed back are the values the user hands over as arguments a moment
-   * later, and recording those would declare the user's own words untrusted.
-   * A miss in provenance costs one unmarked value; false taint there stops
-   * work that was never an attack, and stops it quietly.
+   * `role` separates two questions that are not the same one. Every text
+   * piece handed here is cleaned and counts as a read. Only content enters
+   * provenance: a heading, a name or the query echoed back can
+   * be the user's own value, and recording it would taint an honest retry.
+   * A label can still contain an instruction, so it cannot exempt a later
+   * action from the exposure rule merely because its field name is structural.
    */
   observe(text, source, role = "content") {
     const { clean, findings } = sanitize(text);
@@ -13732,9 +13756,9 @@ var Cordon = class {
     if (role === "content") {
       this.taint.record(clean, source);
       if (!substitute && clean !== text) this.taint.record(text, source);
-      const inert = INERT.test(clean.trim()) && INERT.test(text.trim());
-      if (source.trust === "untrusted" && !inert) this.exposure = { at: this.turn, source: source.label };
     }
+    const inert = INERT.test(clean.trim()) && INERT.test(text.trim());
+    if (source.trust === "untrusted" && !inert) this.exposure = { at: this.turn, source: source.label };
     if (source.trust === "untrusted" && source.kind !== "mcp-description") this.lastSource = source;
     if (source.trust === "untrusted") this.readIds = noteRead(this.readIds);
     this.persist();
@@ -13998,11 +14022,10 @@ var Cordon = class {
     this.persist();
   }
   /**
-   * Marks the fact of a read whose content Cordon did not see: an image in
-   * a result, or a harness that hands the hook only the text of what the
-   * model got. The inert exemption in `observe` rests on having seen the
-   * whole result, so it cannot apply here; an untrusted source marks the
-   * session whatever its text said.
+   * Marks the fact of a read whose content Cordon did not clean: an image,
+   * a source-selected opaque identifier, or a harness that hands the hook
+   * only part of what the model got. These values must keep their spelling,
+   * but an inert `text: "ok"` beside them cannot exempt the later action.
    */
   observeUnseen(source) {
     if (source.trust !== "untrusted") return;
@@ -14639,6 +14662,7 @@ var TEXT_KEYS = /* @__PURE__ */ new Set([
   "output",
   "message",
   "description",
+  "instructions",
   "body",
   "error",
   "data"
@@ -14710,21 +14734,57 @@ var MAX_NODES = 2e4;
 var MAX_TEXT = 8e6;
 var TOKEN_LIMIT = 64;
 var LINK_KEYS = /* @__PURE__ */ new Set(["uri", "url", "urls", "href", "link", "links"]);
+var STRUCTURAL_VALUES = /* @__PURE__ */ new Set([
+  "text",
+  "image",
+  "audio",
+  "video",
+  "document",
+  "resource",
+  "resource_link",
+  "user",
+  "assistant",
+  "tool",
+  "system",
+  "base64",
+  "json",
+  "utf8",
+  "utf-8",
+  "ok",
+  "success",
+  "error",
+  "completed",
+  "pending",
+  "failed",
+  "true",
+  "false"
+]);
+function inertOpaque(key, value) {
+  const folded = fold(key);
+  if (value === "" || /^-?\d+(?:\.\d+)?$/u.test(value) || STRUCTURAL_VALUES.has(value.toLowerCase())) return true;
+  if (folded === "mimetype" || folded === "mediatype") return /^[\w.+-]+\/[\w.+-]+$/u.test(value);
+  if (folded === "sha" || folded === "hash") return /^[a-f0-9]{32,128}$/iu.test(value);
+  if (folded === "timestamp" || folded === "date") return /^\d{4}-\d{2}-\d{2}(?:T[\d:.+-]+Z?)?$/u.test(value);
+  if (folded === "version") return /^v?\d+(?:\.\d+)*(?:[-+][\w.-]+)?$/u.test(value);
+  return false;
+}
 var MEDIA_TYPES = /* @__PURE__ */ new Set(["image", "audio", "video", "document", "input_image", "input_audio", "image_url"]);
 var MEDIA_KEYS = /* @__PURE__ */ new Set(["blob", "inlinedata", "filedata", "imageurl"]);
 function extractText(tool, response, textless = false) {
-  if (textless || TEXTLESS.has(tool)) return { known: true, parts: [], unseen: false, links: [] };
-  if (typeof response === "string") return { known: true, parts: [{ text: response, content: true }], unseen: false, links: [] };
-  const scan = { parts: [], known: true, nodes: 0, size: 0, unseen: false, links: [] };
+  if (textless || TEXTLESS.has(tool)) return { known: true, parts: [], unseen: false, links: [], opaque: false };
+  if (typeof response === "string") return { known: true, parts: [{ text: response, content: true }], unseen: false, links: [], opaque: false };
+  const scan = { parts: [], known: true, nodes: 0, size: 0, unseen: false, links: [], opaque: false };
   visit2(response, "", 0, scan);
-  return scan.known ? { known: true, parts: scan.parts, unseen: scan.unseen, links: scan.links } : { known: false, parts: [], unseen: false, links: [] };
+  return scan.known ? { known: true, parts: scan.parts, unseen: scan.unseen, links: scan.links, opaque: scan.opaque } : { known: false, parts: [], unseen: false, links: [], opaque: false };
 }
 function replaceText(tool, response, parts) {
   const found2 = extractText(tool, response);
   if (!found2.known || found2.parts.length !== parts.length) return response;
   if (typeof response === "string") return parts[0] ?? response;
   if (TEXTLESS.has(tool)) return response;
-  return rebuild(response, "", 0, parts, { at: 0 });
+  const cursor = { at: 0 };
+  const updated = rebuild(response, "", 0, parts, cursor);
+  return cursor.at === parts.length ? updated : response;
 }
 function visit2(node, key, depth, scan, media = false) {
   if (!scan.known) return;
@@ -14740,6 +14800,7 @@ function visit2(node, key, depth, scan, media = false) {
       return;
     }
     if (role === "opaque" && node !== "" && LINK_KEYS.has(fold(key))) scan.links.push(node);
+    if (role === "opaque" && !LINK_KEYS.has(fold(key)) && !inertOpaque(key, node)) scan.opaque = true;
     if (role === "text" || role === "label") {
       scan.size += node.length;
       if (scan.size > MAX_TEXT) {
@@ -14765,21 +14826,24 @@ function visit2(node, key, depth, scan, media = false) {
     }
   }
 }
-function rebuild(node, key, depth, parts, cursor) {
+function rebuild(node, key, depth, parts, cursor, media = false) {
   if (typeof node === "string") {
-    const role = roleOf2(key, node);
+    if (media && MEDIA_KEYS.has(fold(key))) return node;
+    const role = media && fold(key) === "data" ? "label" : roleOf2(key, node);
     if (role !== "text" && role !== "label") return node;
     const next = parts[cursor.at++];
     return next ?? node;
   }
   if (Array.isArray(node)) {
-    return node.map((item) => rebuild(item, key, depth + 1, parts, cursor));
+    return node.map((item) => rebuild(item, key, depth + 1, parts, cursor, media));
   }
   if (typeof node === "object" && node !== null) {
+    const type = node.type;
+    const block = media || typeof type === "string" && MEDIA_TYPES.has(type.toLowerCase());
     const out = {};
     for (const [name, value] of Object.entries(node)) {
       Object.defineProperty(out, name, {
-        value: rebuild(value, name, depth + 1, parts, cursor),
+        value: rebuild(value, name, depth + 1, parts, cursor, block || MEDIA_KEYS.has(fold(name))),
         writable: true,
         enumerable: true,
         configurable: true
@@ -15108,6 +15172,7 @@ function observe(cordon, event, env, dialect) {
     return envelope.text;
   });
   cordon.observeLinks(extracted.links, source);
+  if (extracted.opaque) cordon.observeUnseen(source);
   if (extracted.unseen) cordon.markUnredacted();
   else if (dialect.partialResults && !dialect.textless(event.call)) cordon.observeUnseen(source);
   cordon.recordLookup(event.call, cleaned.filter((_, index) => extracted.parts[index].content));
@@ -15571,6 +15636,39 @@ function parseError(message) {
 }
 
 // src/adapters/mcp/gateway.ts
+var HOST_REQUEST_METHODS = /* @__PURE__ */ new Set([
+  "initialize",
+  "server/discover",
+  "ping",
+  "tools/list",
+  "resources/list",
+  "resources/templates/list",
+  "resources/read",
+  "resources/subscribe",
+  "resources/unsubscribe",
+  "prompts/list",
+  "prompts/get",
+  "completion/complete",
+  "logging/setLevel"
+]);
+var GATED_HOST_METHODS = /* @__PURE__ */ new Set([
+  "resources/read",
+  "resources/subscribe",
+  "resources/unsubscribe",
+  "prompts/get",
+  "completion/complete",
+  "logging/setLevel"
+]);
+function forwardableHostNotification(message) {
+  if (message.value["jsonrpc"] !== "2.0" || Object.keys(message.value).some((key) => !["jsonrpc", "method", "params"].includes(key))) return false;
+  if (message.method === "notifications/cancelled") {
+    const params2 = asRecord(message.params);
+    return params2 !== null && Object.keys(params2).every((key) => ["requestId", "reason"].includes(key)) && (typeof params2["requestId"] === "string" || typeof params2["requestId"] === "number") && (params2["reason"] === void 0 || typeof params2["reason"] === "string");
+  }
+  if (message.method !== "notifications/initialized" && message.method !== "notifications/roots/list_changed") return false;
+  const params = asRecord(message.params);
+  return message.params === void 0 || params !== null && Object.keys(params).length === 0;
+}
 function runGateway(options) {
   const log = options.log ?? ((line) => process.stderr.write(`cordon mcp: ${line}
 `));
@@ -15662,20 +15760,33 @@ function runGateway(options) {
         return;
       }
       if (message.type !== "request") {
-        if (message.type === "notification" && message.method === "notifications/cancelled") {
+        if (message.type === "response") {
+          log("an unsolicited host response was withheld from the MCP server");
+          return;
+        }
+        if (!forwardableHostNotification(message)) {
+          log("an unclassified host notification was withheld from the MCP server");
+          return;
+        }
+        if (message.method === "notifications/cancelled") {
           const requestId = asRecord(message.params)?.["requestId"];
           if (typeof requestId === "string" || typeof requestId === "number") {
-            const key = pendingKey(requestId);
-            const held = reviewTimers.get(key);
+            const key2 = pendingKey(requestId);
+            const held = reviewTimers.get(key2);
             if (held !== void 0) {
               clearInterval(held.timer);
-              reviewTimers.delete(key);
+              reviewTimers.delete(key2);
               retireIfLastWaiter(held.approvalId, "the host cancelled its MCP request");
               return;
             }
           }
         }
         sendUpstream(message.value);
+        return;
+      }
+      const key = pendingKey(message.id);
+      if (pending.has(key) || reviewTimers.has(key)) {
+        finish(1, `duplicate in-flight host request id ${key}`);
         return;
       }
       if (message.method === "tools/call") {
@@ -15687,15 +15798,15 @@ function runGateway(options) {
           sendToHost,
           sendUpstream,
           approvalWaitMs === 0 ? void 0 : (approvalId2, reason) => {
-            const key = pendingKey(message.id);
-            if (reviewTimers.has(key)) throw new Error(`a second review is waiting under request ${key}`);
+            const key2 = pendingKey(message.id);
+            if (reviewTimers.has(key2)) throw new Error(`a second review is waiting under request ${key2}`);
             const approvals = new ApprovalStore(options.cordonHome);
             const deadline = Date.now() + approvalWaitMs;
             const timer = setInterval(() => {
               try {
                 if (Date.now() >= deadline) {
                   clearInterval(timer);
-                  reviewTimers.delete(key);
+                  reviewTimers.delete(key2);
                   retireIfLastWaiter(approvalId2, "the owner did not approve before the wait ended");
                   sendToHost(toolError(message.id, `Cordon approval wait timed out for ${message.method}: ${reason}`));
                   return;
@@ -15707,20 +15818,30 @@ function runGateway(options) {
                   reviewTimers.delete(waitingKey);
                   sendToHost(toolError(
                     held.requestId,
-                    `Cordon recorded owner approval ${approvalId2}; retry the identical call once. The retry is checked again before any tool execution.`
+                    `Cordon recorded owner approval ${approvalId2} for the call that produced this result. Retry exactly the same tool call with the same tool name and arguments JSON; do not alter any argument. Cordon rechecks the retry before execution.`
                   ));
                 }
               } catch (error) {
                 finish(1, `approval wait failed: ${error.message}`);
               }
             }, Math.min(25, approvalWaitMs));
-            reviewTimers.set(key, { timer, approvalId: approvalId2, requestId: message.id });
+            reviewTimers.set(key2, { timer, approvalId: approvalId2, requestId: message.id });
           }
         );
         return;
       }
+      if (!HOST_REQUEST_METHODS.has(message.method)) {
+        sendToHost({ jsonrpc: "2.0", id: message.id, error: {
+          code: -32601,
+          message: "Cordon does not forward unclassified MCP methods."
+        } });
+        log("an unclassified host request was refused before the MCP server received it");
+        return;
+      }
+      const forwarded = GATED_HOST_METHODS.has(message.method) ? gateHostMethod(message, cordon, sendToHost) : message.value;
+      if (forwarded === null) return;
       const entry = { method: message.method };
-      const params = asRecord(message.params);
+      const params = asRecord(forwarded["params"]);
       if (message.method === "resources/read" && typeof params?.["uri"] === "string") {
         entry.label = params["uri"];
       }
@@ -15728,7 +15849,7 @@ function runGateway(options) {
         entry.label = params["name"];
       }
       pending.set(pendingKey(message.id), entry);
-      sendUpstream(message.value);
+      sendUpstream(forwarded);
     };
     const onUpstreamLine = (line) => {
       if (settled) return;
@@ -15739,8 +15860,22 @@ function runGateway(options) {
         finish(1, `the upstream sent a line that is not JSON-RPC: ${error.message}`);
         return;
       }
-      if (message.type !== "response") {
-        sendToHost(message.value);
+      if (message.type === "request") {
+        if (message.method === "ping" && message.params === void 0 && message.value["jsonrpc"] === "2.0" && Object.keys(message.value).every((key) => ["jsonrpc", "id", "method"].includes(key))) {
+          sendUpstream({ jsonrpc: "2.0", id: message.id, result: {} });
+        } else {
+          sendUpstream({ jsonrpc: "2.0", id: message.id, error: {
+            code: -32601,
+            message: "Cordon does not forward server-origin requests."
+          } });
+          log("a server-origin request was refused before the host received it");
+        }
+        return;
+      }
+      if (message.type === "notification") {
+        const observed = observeServerNotification(message.value, message.method, cordon, options.policy);
+        if (observed === null) log("unsupported server notification was withheld");
+        else sendToHost(observed);
         return;
       }
       const entry = pending.get(pendingKey(message.id));
@@ -15754,17 +15889,40 @@ function runGateway(options) {
         const tool = entry.call?.tool ?? entry.method;
         const label = entry.call === void 0 ? entry.label ?? entry.method : sourceLabel(entry.call);
         const source = classifySource({ kind: "tool", label, tool }, options.policy);
-        if (error !== null && typeof error["message"] === "string") {
-          observeInto(error, "message", tool, source, cordon);
-        } else {
-          cordon.markUnredacted();
+        if (message.value["jsonrpc"] !== "2.0" || Object.keys(message.value).some((key) => !["jsonrpc", "id", "error"].includes(key)) || error === null || Object.keys(error).some((key) => !["code", "message", "data"].includes(key)) || !Number.isSafeInteger(error["code"]) || typeof error["message"] !== "string") {
+          sendToHost(withholdUnreadableResponse(message.value, tool, source, cordon));
+          return;
         }
-        if (error !== null && Object.hasOwn(error, "data")) cordon.markUnredacted();
+        if (!observeInto(error, "message", tool, source, cordon)) {
+          sendToHost(withholdUnreadableResponse(message.value, tool, source, cordon));
+          return;
+        }
+        if (Object.hasOwn(error, "data")) {
+          const observed = observeReadableResult(error["data"], tool, source, cordon, []);
+          if (observed === null) {
+            sendToHost(withholdUnreadableResponse(message.value, tool, source, cordon));
+            return;
+          }
+          const serialized = JSON.stringify(observed.value);
+          if (cordon.observe(serialized, source).text !== serialized) {
+            sendToHost(withholdUnreadableResponse(message.value, tool, source, cordon));
+            return;
+          }
+          error["data"] = observed.value;
+        }
         sendToHost(message.value);
         return;
       }
       if (entry.method === "tools/list") {
         sendToHost(observeToolList(message.value, cordon, options.policy, options.command));
+        return;
+      }
+      if (entry.method === "initialize") {
+        sendToHost(observeInitialize(message.value, cordon, options.policy));
+        return;
+      }
+      if (entry.method === "server/discover") {
+        sendToHost(observeDiscover(message.value, cordon, options.policy));
         return;
       }
       if (entry.method === "resources/list" || entry.method === "resources/templates/list" || entry.method === "prompts/list") {
@@ -15784,7 +15942,11 @@ function runGateway(options) {
         sendToHost(observePromptsGet(message.value, entry, cordon, options.policy));
         return;
       }
-      sendToHost(message.value);
+      if (entry.method === "completion/complete") {
+        sendToHost(observeCompletion(message.value, cordon, options.policy));
+        return;
+      }
+      sendToHost(observeOtherResponse(message.value, entry.method, cordon, options.policy));
     };
     const hostLines = createInterface({ input: hostIn, terminal: false });
     hostLines.on("line", (line) => {
@@ -15813,10 +15975,64 @@ function runGateway(options) {
     });
   });
 }
+function gateHostMethod(message, cordon, sendToHost) {
+  const params = asRecord(message.params);
+  if (message.value["jsonrpc"] !== "2.0" || Object.keys(message.value).some((key) => !["jsonrpc", "id", "method", "params"].includes(key)) || params === null || !validHostMethodParams(message.method, params)) {
+    sendToHost({ jsonrpc: "2.0", id: message.id, error: {
+      code: -32602,
+      message: `Cordon refused malformed ${message.method} parameters.`
+    } });
+    return null;
+  }
+  const decision = cordon.gateUnattended({ tool: message.method, args: params });
+  if (decision.kind !== "allow") {
+    sendToHost({ jsonrpc: "2.0", id: message.id, error: {
+      code: -32e3,
+      message: decision.kind === "rewrite" ? `Cordon withheld a narrowed ${message.method} request; retry with reviewed parameters.` : `Cordon refused ${message.method}: ${decision.reason}`
+    } });
+    return null;
+  }
+  const meta = asRecord(params["_meta"]);
+  const progressToken = meta?.["progressToken"];
+  return { jsonrpc: "2.0", id: message.id, method: message.method, params: {
+    ...Object.fromEntries(Object.entries(params).filter(([key]) => key !== "_meta")),
+    ...typeof progressToken === "string" || typeof progressToken === "number" ? { _meta: { progressToken } } : {}
+  } };
+}
+function validHostMethodParams(method, params) {
+  const allowed = method === "prompts/get" ? ["name", "arguments", "_meta"] : method === "completion/complete" ? ["ref", "argument", "context", "_meta"] : method === "logging/setLevel" ? ["level", "_meta"] : ["uri", "_meta"];
+  if (Object.keys(params).some((key) => !allowed.includes(key))) return false;
+  if (method === "prompts/get") {
+    return typeof params["name"] === "string" && params["name"] !== "" && (params["arguments"] === void 0 || asRecord(params["arguments"]) !== null);
+  }
+  if (method === "completion/complete") {
+    const ref = asRecord(params["ref"]);
+    const argument = asRecord(params["argument"]);
+    return ref !== null && argument !== null && typeof ref["type"] === "string" && typeof argument["name"] === "string" && typeof argument["value"] === "string" && (params["context"] === void 0 || asRecord(params["context"]) !== null);
+  }
+  if (method === "logging/setLevel") return typeof params["level"] === "string";
+  return typeof params["uri"] === "string" && params["uri"] !== "";
+}
 function gateCall(message, cordon, policy, pending, sendToHost, sendUpstream, waitForApproval) {
   const params = asRecord(message.params);
-  const name = typeof params?.["name"] === "string" ? params["name"] : "";
-  const call = { tool: name, args: asRecord(params?.["arguments"]) ?? {} };
+  const meta = asRecord(params?.["_meta"]);
+  if (message.value["jsonrpc"] !== "2.0" || Object.keys(message.value).some((key) => !["jsonrpc", "id", "method", "params"].includes(key)) || params === null || Object.keys(params).some((key) => !["name", "arguments", "_meta"].includes(key)) || typeof params["name"] !== "string" || params["name"].trim() === "" || params["arguments"] !== void 0 && asRecord(params["arguments"]) === null) {
+    sendToHost(toolError(message.id, "Cordon refused a malformed tools/call request."));
+    return;
+  }
+  const name = params["name"];
+  const call = { tool: name, args: asRecord(params["arguments"]) ?? {} };
+  const progressToken = meta?.["progressToken"];
+  const forwarded = (args) => ({
+    jsonrpc: "2.0",
+    id: message.id,
+    method: "tools/call",
+    params: {
+      name,
+      arguments: args,
+      ...typeof progressToken === "string" || typeof progressToken === "number" ? { _meta: { progressToken } } : {}
+    }
+  });
   const decision = cordon.gateUnattended(call);
   if (decision.kind === "deny" || decision.kind === "ask") {
     if (decision.kind === "deny" && decision.approvalId !== void 0 && waitForApproval !== void 0) {
@@ -15828,17 +16044,17 @@ function gateCall(message, cordon, policy, pending, sendToHost, sendUpstream, wa
   }
   if (decision.kind === "rewrite") {
     pending.set(pendingKey(message.id), { method: message.method, call, notice: rewriteNotice(decision) });
-    sendUpstream({ ...message.value, params: { ...params, arguments: decision.args } });
+    sendUpstream(forwarded(decision.args));
     return;
   }
   pending.set(pendingKey(message.id), { method: message.method, call });
-  sendUpstream(message.value);
+  sendUpstream(forwarded(call.args));
 }
 function observeToolList(value, cordon, policy, command) {
   const result = asRecord(value["result"]);
   const listed = result?.["tools"];
   const source = classifySource({ kind: "mcp-description", label: "tools/list" }, policy);
-  if (result === null || !Array.isArray(listed) || Object.keys(value).some((key) => !RESPONSE_KEYS.has(key)) || Object.keys(result).some((key) => !TOOL_LIST_KEYS.has(key)) || listed.some((tool) => !readableListedTool(tool))) {
+  if (result === null || !Array.isArray(listed) || Object.keys(value).some((key) => !RESPONSE_KEYS.has(key)) || Object.keys(result).some((key) => !TOOL_LIST_KEYS.has(key)) || result["resultType"] !== void 0 && result["resultType"] !== "complete" || result["nextCursor"] !== void 0 && typeof result["nextCursor"] !== "string" || result["ttlMs"] !== void 0 && (!Number.isSafeInteger(result["ttlMs"]) || result["ttlMs"] < 0) || result["cacheScope"] !== void 0 && result["cacheScope"] !== "public" && result["cacheScope"] !== "private" || listed.some((tool) => !readableListedTool(tool))) {
     return withholdUnreadableResponse(value, "tools/list", source, cordon);
   }
   if (result["_meta"] !== void 0) {
@@ -15852,7 +16068,8 @@ function observeToolList(value, cordon, policy, command) {
     inputSchema: tool["inputSchema"],
     title: tool["title"],
     annotations: tool["annotations"],
-    outputSchema: tool["outputSchema"]
+    outputSchema: tool["outputSchema"],
+    icons: tool["icons"]
   }));
   const held = new Set(cordon.admitTools(command, named2).map((tool) => tool.name));
   const tools = listed.filter((tool) => !held.has(String(asRecord(tool)?.["name"])));
@@ -15864,21 +16081,39 @@ function observeToolList(value, cordon, policy, command) {
     const source2 = classifySource({ kind: "mcp-description", label: name, tool: name }, policy);
     if (typeof entry["description"] === "string") observeDescription(entry, "description", name, source2, cordon);
     if (typeof entry["title"] === "string") observeDescription(entry, "title", name, source2, cordon);
+    if (entry["icons"] !== void 0) {
+      const text = JSON.stringify(entry["icons"]);
+      if (cordon.observe(text, source2).text !== text) return withholdUnreadableResponse(value, "tools/list", source2, cordon);
+    }
     const annotations = asRecord(entry["annotations"]);
     if (annotations !== null && typeof annotations["title"] === "string") {
       observeDescription(annotations, "title", name, source2, cordon);
     }
     const schema = asRecord(entry["inputSchema"]);
-    if (schema !== null) observeSchema(schema, name, source2, cordon, 0);
+    if (schema !== null && !observeSchema(schema, name, source2, cordon, 0)) {
+      return withholdUnreadableResponse(value, "tools/list", source2, cordon);
+    }
+    if (schema !== null) {
+      const text = JSON.stringify(schema);
+      if (cordon.observe(text, source2).text !== text) return withholdUnreadableResponse(value, "tools/list", source2, cordon);
+    }
     const outputSchema = asRecord(entry["outputSchema"]);
-    if (outputSchema !== null) observeSchema(outputSchema, name, source2, cordon, 0);
+    if (outputSchema !== null && !observeSchema(outputSchema, name, source2, cordon, 0)) {
+      return withholdUnreadableResponse(value, "tools/list", source2, cordon);
+    }
+    if (outputSchema !== null) {
+      const text = JSON.stringify(outputSchema);
+      if (cordon.observe(text, source2).text !== text) return withholdUnreadableResponse(value, "tools/list", source2, cordon);
+    }
   }
   return value;
 }
 var MAX_SCHEMA_DEPTH = 16;
+var MAX_SCHEMA_NODES = 2e4;
+var SCHEMA_VALUE_KEYS = /* @__PURE__ */ new Set(["default", "const", "enum", "examples"]);
 function readableListedTool(value) {
   const entry = asRecord(value);
-  if (entry === null || typeof entry["name"] !== "string" || entry["name"] === "" || entry["description"] !== void 0 && typeof entry["description"] !== "string" || entry["title"] !== void 0 && typeof entry["title"] !== "string") return false;
+  if (entry === null || typeof entry["name"] !== "string" || entry["name"] === "" || Object.keys(entry).some((key) => !TOOL_ENTRY_KEYS.has(key)) || entry["description"] !== void 0 && typeof entry["description"] !== "string" || entry["title"] !== void 0 && typeof entry["title"] !== "string" || entry["icons"] !== void 0 && !readableIcons(entry["icons"])) return false;
   const input = asRecord(entry["inputSchema"]);
   if (input === null || !readableSchemaText(input, 0)) return false;
   if (entry["outputSchema"] !== void 0) {
@@ -15891,6 +16126,12 @@ function readableListedTool(value) {
   }
   return true;
 }
+function readableIcons(value) {
+  return Array.isArray(value) && value.every((icon) => {
+    const entry = asRecord(icon);
+    return entry !== null && typeof entry["src"] === "string" && entry["src"] !== "" && Object.keys(entry).every((key) => ["src", "mimeType", "sizes", "theme"].includes(key)) && sanitize(entry["src"]).clean === entry["src"] && (entry["mimeType"] === void 0 || typeof entry["mimeType"] === "string" && sanitize(entry["mimeType"]).clean === entry["mimeType"]) && (entry["theme"] === void 0 || entry["theme"] === "light" || entry["theme"] === "dark") && (entry["sizes"] === void 0 || Array.isArray(entry["sizes"]) && entry["sizes"].every((size) => typeof size === "string" && sanitize(size).clean === size));
+  });
+}
 function readableSchemaText(node, depth) {
   if (depth > MAX_SCHEMA_DEPTH) return true;
   if (Array.isArray(node)) return node.every((item) => readableSchemaText(item, depth + 1));
@@ -15901,25 +16142,39 @@ function readableSchemaText(node, depth) {
     return readableSchemaText(value, depth + 1);
   });
 }
-function observeSchema(node, tool, source, cordon, depth) {
-  if (depth > MAX_SCHEMA_DEPTH) {
-    cordon.markUnredacted();
-    return;
-  }
+function observeSchema(node, tool, source, cordon, depth, budget = { nodes: 0 }) {
+  if (depth > MAX_SCHEMA_DEPTH) return false;
+  if (++budget.nodes > MAX_SCHEMA_NODES) return false;
   for (const key of Object.keys(node)) {
+    if (sanitize(key).clean !== key) return false;
     const value = node[key];
     if ((key === "description" || key === "title") && typeof value === "string") {
       observeDescription(node, key, tool, source, cordon);
+    } else if (SCHEMA_VALUE_KEYS.has(key)) {
+      if (!observeSchemaValue(value, depth + 1, budget)) return false;
+    } else if (typeof value === "string") {
+      if (sanitize(value).clean !== value) return false;
     } else if (Array.isArray(value)) {
       for (const item of value) {
         const child = asRecord(item);
-        if (child !== null) observeSchema(child, tool, source, cordon, depth + 1);
+        if (child !== null) {
+          if (!observeSchema(child, tool, source, cordon, depth + 1, budget)) return false;
+        } else if (!observeSchemaValue(item, depth + 1, budget)) return false;
       }
     } else {
       const child = asRecord(value);
-      if (child !== null) observeSchema(child, tool, source, cordon, depth + 1);
+      if (child !== null && !observeSchema(child, tool, source, cordon, depth + 1, budget)) return false;
     }
   }
+  return true;
+}
+function observeSchemaValue(value, depth, budget) {
+  if (depth > MAX_SCHEMA_DEPTH || ++budget.nodes > MAX_SCHEMA_NODES) return false;
+  if (typeof value === "string") return sanitize(value).clean === value;
+  if (Array.isArray(value)) return value.every((item) => observeSchemaValue(item, depth + 1, budget));
+  const record = asRecord(value);
+  if (record !== null) return Object.entries(record).every(([key, item]) => sanitize(key).clean === key && observeSchemaValue(item, depth + 1, budget));
+  return true;
 }
 function observeDescription(entry, key, tool, source, cordon) {
   const envelope = cordon.observe(entry[key], source);
@@ -15935,17 +16190,109 @@ function withNotice(value, notice) {
   const content = Array.isArray(result["content"]) ? result["content"] : [];
   return { ...value, result: { ...result, content: [...content, { type: "text", text: notice }] } };
 }
-var TOOL_RESULT_KEYS = /* @__PURE__ */ new Set(["content", "structuredContent", "isError", "_meta"]);
-var TOOL_LIST_KEYS = /* @__PURE__ */ new Set(["tools", "nextCursor", "_meta"]);
+var TOOL_RESULT_KEYS = /* @__PURE__ */ new Set(["resultType", "content", "structuredContent", "isError", "_meta"]);
+var TOOL_LIST_KEYS = /* @__PURE__ */ new Set(["resultType", "tools", "nextCursor", "_meta", "ttlMs", "cacheScope"]);
+var TOOL_ENTRY_KEYS = /* @__PURE__ */ new Set(["name", "description", "inputSchema", "title", "annotations", "outputSchema", "icons"]);
 var TOOL_ANNOTATION_HINTS = /* @__PURE__ */ new Set(["readOnlyHint", "destructiveHint", "idempotentHint", "openWorldHint"]);
 var RESPONSE_KEYS = /* @__PURE__ */ new Set(["jsonrpc", "id", "result"]);
+var INITIALIZE_KEYS = /* @__PURE__ */ new Set(["protocolVersion", "capabilities", "serverInfo", "instructions", "_meta"]);
+var DISCOVER_KEYS = /* @__PURE__ */ new Set(["resultType", "supportedVersions", "capabilities", "instructions", "_meta", "ttlMs", "cacheScope"]);
+var SERVER_LIST_NOTIFICATIONS = /* @__PURE__ */ new Set([
+  "notifications/tools/list_changed",
+  "notifications/prompts/list_changed",
+  "notifications/resources/list_changed"
+]);
+var LOG_LEVELS = /* @__PURE__ */ new Set(["debug", "info", "notice", "warning", "error", "critical", "alert", "emergency"]);
+function observeServerNotification(value, method, cordon, policy) {
+  if (value["jsonrpc"] !== "2.0" || Object.keys(value).some((key) => !["jsonrpc", "method", "params"].includes(key))) return null;
+  if (SERVER_LIST_NOTIFICATIONS.has(method)) {
+    const params2 = value["params"];
+    if (params2 !== void 0) {
+      const record = asRecord(params2);
+      if (record === null || Object.keys(record).length > 0) return null;
+    }
+    return { jsonrpc: "2.0", method, ...params2 === void 0 ? {} : { params: params2 } };
+  }
+  if (method !== "notifications/message") return null;
+  const params = asRecord(value["params"]);
+  if (params === null || !LOG_LEVELS.has(String(params["level"])) || !Object.hasOwn(params, "data") || Object.keys(params).some((key) => !["level", "logger", "data", "_meta"].includes(key)) || params["logger"] !== void 0 && typeof params["logger"] !== "string") return null;
+  const source = classifySource({ kind: "mcp-description", label: method }, policy);
+  const observed = observeReadableResult(params, method, source, cordon, []);
+  if (observed === null) return null;
+  const text = JSON.stringify(observed.value);
+  if (cordon.observe(text, source).text !== text) return null;
+  return { jsonrpc: "2.0", method, params: observed.value };
+}
+function observeInitialize(value, cordon, policy) {
+  const source = classifySource({ kind: "mcp-description", label: "initialize" }, policy);
+  const result = asRecord(value["result"]);
+  if (Object.keys(value).some((key) => !RESPONSE_KEYS.has(key)) || result === null || Object.keys(result).some((key) => !INITIALIZE_KEYS.has(key)) || typeof result["protocolVersion"] !== "string" || asRecord(result["capabilities"]) === null || asRecord(result["serverInfo"]) === null || result["instructions"] !== void 0 && typeof result["instructions"] !== "string") {
+    return withholdUnreadableResponse(value, "initialize", source, cordon);
+  }
+  const observed = observeReadableResult(result, "initialize", source, cordon, []);
+  if (observed === null) return withholdUnreadableResponse(value, "initialize", source, cordon);
+  return { jsonrpc: "2.0", id: value["id"], result: observed.value };
+}
+function observeDiscover(value, cordon, policy) {
+  const source = classifySource({ kind: "mcp-description", label: "server/discover" }, policy);
+  const result = asRecord(value["result"]);
+  if (Object.keys(value).some((key) => !RESPONSE_KEYS.has(key)) || result === null || Object.keys(result).some((key) => !DISCOVER_KEYS.has(key)) || result["resultType"] !== "complete" || !Array.isArray(result["supportedVersions"]) || result["supportedVersions"].length === 0 || result["supportedVersions"].some((version) => typeof version !== "string") || asRecord(result["capabilities"]) === null || result["instructions"] !== void 0 && typeof result["instructions"] !== "string" || result["_meta"] !== void 0 && asRecord(result["_meta"]) === null || result["ttlMs"] !== void 0 && (!Number.isSafeInteger(result["ttlMs"]) || result["ttlMs"] < 0) || result["cacheScope"] !== void 0 && result["cacheScope"] !== "public" && result["cacheScope"] !== "private") {
+    return withholdUnreadableResponse(value, "server/discover", source, cordon);
+  }
+  const observed = observeReadableResult(result, "server/discover", source, cordon, []);
+  if (observed === null) return withholdUnreadableResponse(value, "server/discover", source, cordon);
+  return { jsonrpc: "2.0", id: value["id"], result: observed.value };
+}
+function observeCompletion(value, cordon, policy) {
+  const method = "completion/complete";
+  const source = classifySource({ kind: "tool", label: method, tool: method }, policy);
+  const result = asRecord(value["result"]);
+  const completion = asRecord(result?.["completion"]);
+  const values = completion?.["values"];
+  if (Object.keys(value).some((key) => !RESPONSE_KEYS.has(key)) || result === null || Object.keys(result).some((key) => !["completion", "_meta"].includes(key)) || completion === null || Object.keys(completion).some((key) => !["values", "total", "hasMore"].includes(key)) || !Array.isArray(values) || values.length > 100 || values.some((item) => typeof item !== "string") || completion["total"] !== void 0 && (!Number.isSafeInteger(completion["total"]) || completion["total"] < 0) || completion["hasMore"] !== void 0 && typeof completion["hasMore"] !== "boolean" || result["_meta"] !== void 0 && asRecord(result["_meta"]) === null) {
+    return withholdUnreadableResponse(value, method, source, cordon);
+  }
+  for (const item of values) {
+    if (cordon.observe(item, source).text !== item) {
+      return withholdUnreadableResponse(value, method, source, cordon);
+    }
+  }
+  if (result["_meta"] !== void 0) {
+    const observed = observeReadableResult(result["_meta"], method, source, cordon, []);
+    if (observed === null || observed.value !== result["_meta"]) {
+      return withholdUnreadableResponse(value, method, source, cordon);
+    }
+  }
+  const serialized = JSON.stringify(result);
+  if (cordon.observe(serialized, source).text !== serialized) {
+    return withholdUnreadableResponse(value, method, source, cordon);
+  }
+  return value;
+}
+function observeOtherResponse(value, method, cordon, policy) {
+  const source = classifySource({ kind: "tool", label: method, tool: method }, policy);
+  const result = asRecord(value["result"]);
+  if (Object.keys(value).some((key) => !RESPONSE_KEYS.has(key)) || result === null) {
+    return withholdUnreadableResponse(value, method, source, cordon);
+  }
+  if (Object.keys(result).length === 0) return value;
+  const observed = observeReadableResult(result, method, source, cordon, []);
+  if (observed === null || observed.value !== result) {
+    return withholdUnreadableResponse(value, method, source, cordon);
+  }
+  const serialized = JSON.stringify(result);
+  if (cordon.observe(serialized, source).text !== serialized) {
+    return withholdUnreadableResponse(value, method, source, cordon);
+  }
+  return value;
+}
 function observeToolResult(value, call, cordon, policy) {
   const source = classifySource({ kind: "tool", label: sourceLabel(call), tool: call.tool }, policy);
   const result = asRecord(value["result"]);
   if (result === null) return withholdUnreadableResult(value, call.tool, source, cordon);
   const texts = [];
   const content = result["content"];
-  if (Object.keys(value).some((key) => !RESPONSE_KEYS.has(key)) || !Array.isArray(content) || Object.keys(result).some((key) => !TOOL_RESULT_KEYS.has(key)) || result["isError"] !== void 0 && typeof result["isError"] !== "boolean") {
+  if (Object.keys(value).some((key) => !RESPONSE_KEYS.has(key)) || !Array.isArray(content) || Object.keys(result).some((key) => !TOOL_RESULT_KEYS.has(key)) || result["isError"] !== void 0 && typeof result["isError"] !== "boolean" || result["resultType"] !== void 0 && result["resultType"] !== "complete") {
     return withholdUnreadableResult(value, call.tool, source, cordon);
   }
   for (const [index, block] of content.entries()) {
@@ -15982,6 +16329,7 @@ function observeReadableResult(value, tool, source, cordon, texts, allowUnseen =
     return envelope.text;
   });
   cordon.observeLinks(extracted.links, source);
+  if (extracted.opaque) cordon.observeUnseen(source);
   if (!changed2) return { value };
   if (!substitutable) return null;
   const next = replaceText("", value, cleaned);
@@ -16037,11 +16385,13 @@ function observePromptsGet(value, pending, cordon, policy) {
 }
 function observeInto(entry, key, tool, source, cordon) {
   const envelope = cordon.observe(entry[key], source);
+  if (!envelope.substitute && envelope.text !== entry[key]) return false;
   if (envelope.substitute) {
     entry[key] = envelope.text;
   } else if (envelope.findings.length > 0) {
     cordon.notice(tool, `a hidden layer was found in the result of ${tool}; it was not substituted`, source);
   }
+  return true;
 }
 function asRecord(value) {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
@@ -16731,6 +17081,9 @@ function explain(policy) {
   if (policy.blockedTools.length > 0) {
     lines.push(`Blocked tools: ${policy.blockedTools.join(", ")}. These calls are refused even if their effects are granted; no approval lifts the refusal.`);
   }
+  if (policy.allowedTools !== null) {
+    lines.push(policy.allowedTools.length === 0 ? "Allowed tools: none. Every tool call is refused; no approval lifts the refusal." : `Allowed tools: ${policy.allowedTools.join(", ")}. Only these exact names reach the other checks; no approval lifts a refusal for an unlisted tool.`);
+  }
   for (const [tool, roles] of Object.entries(policy.arguments)) {
     for (const [field3, role] of Object.entries(roles)) {
       if (role === "controlled") {
@@ -16903,6 +17256,9 @@ exposure: true
 # Refuse an exact tool name even when its effects are granted. This can keep
 # the native shell closed while a separately isolated executor uses exec.
 # blockedTools: [Bash]
+# To refuse every tool except exact names, declare the complete set. An empty
+# list refuses all calls; omitting this field adds no name restriction.
+# allowedTools: [Read, mcp__sandbox__run, run]
 
 # Memory the agent reloads in later sessions, beyond CLAUDE.md and the like.
 # memory:
@@ -16928,7 +17284,7 @@ notify:
 }
 
 // src/cli.ts
-var USAGE = "usage: cordon scan <file|-> [--json] | cordon hook [--harness claude-code|gemini|codex|kimi|deepseek] | cordon mcp [--wait-for-approval-ms N] -- <server command...> | cordon mcp serve --socket PATH [--wait-for-approval-ms N] -- <server command...> | cordon mcp connect --socket PATH --owner-uid UID | cordon mcp approve -- <server command...> | cordon doctor | cordon init [--profile locked|research|documents|coding|service] [--force] | cordon log [--last N] [--json] | cordon approve [id [--read] [--as name]] | cordon policy check|explain [file] | cordon policy apply <file> [--accept-warnings] [--as name] | cordon audit [dir] [--json|--sarif] [--fail-on high|medium|low]";
+var USAGE = "usage: cordon scan <file|-> [--json] | cordon hook [--harness claude-code|gemini|codex|kimi|deepseek] | cordon mcp [--wait-for-approval-ms N] -- <server command...> | cordon mcp serve --socket PATH [--wait-for-approval-ms N] -- <server command...> | cordon mcp connect --socket PATH --owner-uid UID | cordon mcp approve -- <server command...> | cordon doctor | cordon init [--profile locked|research|documents|coding|service] [--force] | cordon log [--last N] [--json] | cordon approve [id [--show|--read] [--as name]] | cordon policy check|explain [file] | cordon policy apply <file> [--accept-warnings] [--as name] | cordon audit [dir] [--json|--sarif] [--fail-on high|medium|low]";
 var HARNESSES = /* @__PURE__ */ new Map([
   ["claude-code", runHook],
   ["gemini", runHook2],
@@ -17007,7 +17363,8 @@ var HARNESS_LIMITS = [
       "Codex puts a question to no one, in codex exec or the TUI (the call ran unasked), so every question is a refusal naming a one-time approval: cordon approve <id>",
       "arguments are changed only next to an explicit allow, which would override your own approval settings, so a call Cordon would cut is refused instead",
       "a result is replaced only through a block: the model reads the cleaned result as a tool error",
-      "a hook that crashes, hangs or prints garbage lets the call through"
+      "a hook that crashes, hangs or prints garbage lets the call through",
+      "in Codex CLI 0.161.0, write_stdin into an allowed shell session emitted no hook event; restricted runner workflows need --disable shell_tool and OS confinement"
     ]
   },
   {
@@ -17288,7 +17645,7 @@ function printDoctor(home) {
   process.stdout.write(`self-check: ${report2.selfCheck}
 `);
   process.stdout.write(
-    "note: doctor checks the mechanism, not the wiring. Whether the harness actually calls the hook is shown by /hooks in Claude Code and by /hooks panel in Gemini CLI\n"
+    "note: doctor checks the mechanism, not the wiring. Review and trust the hook entries in /hooks for Claude Code and Codex CLI, or in the /hooks panel for Gemini CLI; then confirm a harmless refusal in the journal\n"
   );
   if (report2.warnings.length === 0) {
     process.stdout.write("no warnings\n");
@@ -17587,27 +17944,49 @@ ${USAGE}
 `);
     return 2;
   }
-  const request = store.waiting(id);
-  if (request !== null && request.args.length > MAX_SHOWN_ARGS && !args.includes("--read")) {
-    process.stderr.write(
-      `the arguments run to ${request.args.length} characters, more than a terminal shows
-read all of them in ${store.pendingPath(id)}, then approve with: cordon approve ${id} --read
-`
-    );
-    return 1;
+  let show = false;
+  let read = false;
+  let declared;
+  for (let i = 1; i < args.length; i++) {
+    const option = args[i];
+    if (option === "--show" && !show) show = true;
+    else if (option === "--read" && !read) read = true;
+    else if (option === "--as" && declared === void 0 && args[i + 1] !== void 0 && !args[i + 1].startsWith("--")) declared = args[++i];
+    else {
+      process.stderr.write(`invalid approval option: ${visible(option)}
+${USAGE}
+`);
+      return 2;
+    }
   }
+  if (show && (read || declared !== void 0)) {
+    process.stderr.write(`--show only displays the pending call; use it separately from --read or --as
+${USAGE}
+`);
+    return 2;
+  }
+  const request = store.waiting(id);
   if (request === null) {
     process.stderr.write(`nothing waits under ${id}: it was never asked for, was already used, is older than an hour, or was asked again under a changed context
 `);
     return 1;
   }
-  const at = args.indexOf("--as");
-  const declared = at >= 0 ? args[at + 1] : void 0;
-  if (at >= 0 && (declared === void 0 || declared.startsWith("--"))) {
-    process.stderr.write(`--as takes a name
-${USAGE}
+  if (show) {
+    process.stdout.write(`pending, not approved: ${visible(request.tool)}
+    arguments: ${visible(request.args)}
+    ${asked(request)}${visible(request.reason)}
 `);
-    return 2;
+    return 0;
+  }
+  if (request.args.length > MAX_SHOWN_ARGS && !read) {
+    process.stderr.write(
+      `the arguments run to ${request.args.length} characters, more than a terminal shows
+show all of them safely with: cordon approve ${id} --show
+the complete request file is ${visible(store.pendingPath(id))}
+then approve with: cordon approve ${id} --read
+`
+    );
+    return 1;
   }
   const event = {
     at: (/* @__PURE__ */ new Date()).toISOString(),
@@ -17660,7 +18039,7 @@ ${USAGE}
   const path = file ?? join16(cordonHome(), "policy.yaml");
   let policy;
   try {
-    policy = loadPolicyFile(path);
+    policy = file === void 0 ? loadPolicyFile(path) : parsePolicy(readFileSync7(path, "utf8"), path);
   } catch (error) {
     process.stderr.write(`cordon policy ${verb}: ${visible(error.message)}
 `);

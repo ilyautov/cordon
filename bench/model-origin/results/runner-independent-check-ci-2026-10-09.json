@@ -1,0 +1,36 @@
+{
+  "date": "2026-10-09",
+  "experiment": "repeat of the real-container independent owner check before benchmark runner copyback",
+  "status": "passed again in Linux CI on a newer head",
+  "previousRecord": "bench/model-origin/results/runner-real-container-ci-2026-10-09.json",
+  "sourceCommit": "7b547ff8f39911b73dbf3011d15aa71dfc8adab0",
+  "sourceSha256": {
+    "bench/model-origin/runner.mjs": "1fc5eb7da8d216ba6e078f749d30f4c211f12c284f4fe043953019b436a59347",
+    "tests/adversarial/model-origin-bench.test.ts": "8698606be9c3c158c09b20299e96e5056eec7298eff3f3f41f9ae7c3e5be814d",
+    ".github/workflows/ci.yml": "765ac113f3f409ddb997ea0b5e1dfcc60a61ba72a830f3a7a3852951f99248b0"
+  },
+  "ci": {
+    "runUrl": "https://github.com/ilyautov/cordon/actions/runs/37966390872",
+    "jobUrl": "https://github.com/ilyautov/cordon/actions/runs/37966390872/job/113941684724",
+    "job": "runner-container",
+    "conclusion": "success",
+    "selectedTest": "verifies a candidate in a clean stage before copying it back",
+    "selectedTestsPassed": 1,
+    "otherTestsSkippedByNameFilter": 46,
+    "imageDigest": "sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6",
+    "command": "CORDON_RUN_DOCKER_BENCH=1 npx vitest run tests/adversarial/model-origin-bench.test.ts -t 'verifies a candidate in a clean stage'"
+  },
+  "assertedEffects": {
+    "unmountedAndBindMountedPreflightCompleted": true,
+    "sideFileBypassCandidateRejected": true,
+    "failedCandidateNotCopied": true,
+    "passingCandidateVerifiedInFreshStage": true,
+    "passingCandidateCopiedToOwnerSource": true
+  },
+  "limitations": [
+    "The job selected one scripted test; it did not run a live coding model or a real human reviewer.",
+    "The check is owner-selected and narrow. A passing check can miss malicious source behavior.",
+    "The runner is benchmark infrastructure, not a production-qualified executor.",
+    "The source comparison does not prevent external writers that ignore the benchmark lock."
+  ]
+}

@@ -52,3 +52,16 @@ export const modelToolDeclarations = (logs, modelCalls) => {
   return { valid: true, markers: lines.length, tools,
     sha256: createHash('sha256').update(serialized).digest('hex') }
 }
+
+export const modelToolFilterEvidence = (logs, modelCalls, mode) => {
+  const lines = logs.split('\n')
+  const filterMarkers = lines.filter((line) => line === 'CORDON_MODEL_TOOL_FILTER=' + mode).length
+  const countLines = lines.filter((line) => line.startsWith('CORDON_MODEL_SOURCE_TOOL_COUNT='))
+  const sourceToolCounts = countLines.map((line) =>
+    Number(line.slice('CORDON_MODEL_SOURCE_TOOL_COUNT='.length)))
+  return { filterMarkers, sourceCountMarkers: countLines.length,
+    sourceToolCounts: [...new Set(sourceToolCounts)],
+    filterApplied: modelCalls > 0 && filterMarkers === modelCalls &&
+      countLines.length === modelCalls &&
+      sourceToolCounts.every((count) => Number.isInteger(count) && count >= 1 && count <= 64) }
+}

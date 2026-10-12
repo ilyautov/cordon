@@ -14,6 +14,7 @@ import { homeProblem, projectDir } from '../../policy/home.js'
 import { classifySource } from '../../provenance/trust.js'
 import { APPROVAL_TTL_MS, ApprovalStore } from '../../session/approvals.js'
 import { extractText, replaceText } from '../../output/tool-text.js'
+import { sanitize } from '../../sanitize/index.js'
 import { parseError, parseLine, pendingKey, toolError, type Message } from './jsonrpc.js'
 
 export interface GatewayOptions {
@@ -45,6 +46,39 @@ interface Pending {
   label?: string
   /** Set when the call ran with arguments Cordon cut: the model is told so with the result. */
   notice?: string
+}
+
+// An extension may define its own action method. Only methods whose effect
+// role is known here may reach the upstream without going through gateCall.
+const HOST_REQUEST_METHODS = new Set([
+  'initialize', 'server/discover', 'ping', 'tools/list',
+  'resources/list', 'resources/templates/list', 'resources/read',
+  'resources/subscribe', 'resources/unsubscribe',
+  'prompts/list', 'prompts/get', 'completion/complete', 'logging/setLevel',
+])
+
+// These host requests carry model-selected data or change server state. They
+// must use the same certificate, exact-name list and exposure decision as a
+// tools/call; connection discovery remains available so a runner can load.
+const GATED_HOST_METHODS = new Set([
+  'resources/read', 'resources/subscribe', 'resources/unsubscribe',
+  'prompts/get', 'completion/complete', 'logging/setLevel',
+])
+
+function forwardableHostNotification(message: Extract<Message, { type: 'notification' }>): boolean {
+  if (message.value['jsonrpc'] !== '2.0' ||
+    Object.keys(message.value).some((key) => !['jsonrpc', 'method', 'params'].includes(key))) return false
+  if (message.method === 'notifications/cancelled') {
+    const params = asRecord(message.params)
+    return params !== null &&
+      Object.keys(params).every((key) => ['requestId', 'reason'].includes(key)) &&
+      (typeof params['requestId'] === 'string' || typeof params['requestId'] === 'number') &&
+      (params['reason'] === undefined || typeof params['reason'] === 'string')
+  }
+  if (message.method !== 'notifications/initialized' &&
+    message.method !== 'notifications/roots/list_changed') return false
+  const params = asRecord(message.params)
+  return message.params === undefined || (params !== null && Object.keys(params).length === 0)
 }
 
 /**
@@ -190,7 +224,17 @@ export function runGateway(options: GatewayOptions): Promise<number> {
       }
 
       if (message.type !== 'request') {
-        if (message.type === 'notification' && message.method === 'notifications/cancelled') {
+        if (message.type === 'response') {
+          // Server-origin requests are answered here, never by the host. A
+          // host response therefore has no pending server request to satisfy.
+          log('an unsolicited host response was withheld from the MCP server')
+          return
+        }
+        if (!forwardableHostNotification(message)) {
+          log('an unclassified host notification was withheld from the MCP server')
+          return
+        }
+        if (message.method === 'notifications/cancelled') {
           const requestId = asRecord(message.params)?.['requestId']
           if (typeof requestId === 'string' || typeof requestId === 'number') {
             const key = pendingKey(requestId)
@@ -203,9 +247,17 @@ export function runGateway(options: GatewayOptions): Promise<number> {
             }
           }
         }
-        // Notifications and the host's answers to the upstream's own
-        // requests (sampling, roots) carry nothing the gateway decides on.
+        // Only known lifecycle and cancellation notifications reach the
+        // server. An extension notification can have side effects too.
         sendUpstream(message.value)
+        return
+      }
+
+      const key = pendingKey(message.id)
+      if (pending.has(key) || reviewTimers.has(key)) {
+        // Reusing an id while its first call is unresolved overwrites the
+        // response's method and source, so no later result can be routed safely.
+        finish(1, `duplicate in-flight host request id ${key}`)
         return
       }
 
@@ -238,8 +290,9 @@ export function runGateway(options: GatewayOptions): Promise<number> {
                   clearInterval(held.timer)
                   reviewTimers.delete(waitingKey)
                   sendToHost(toolError(held.requestId,
-                    `Cordon recorded owner approval ${approvalId}; retry the identical call once. ` +
-                    'The retry is checked again before any tool execution.'))
+                    `Cordon recorded owner approval ${approvalId} for the call that produced this result. ` +
+                    'Retry exactly the same tool call with the same tool name and arguments JSON; ' +
+                    'do not alter any argument. Cordon rechecks the retry before execution.'))
                 }
               } catch (error) {
                 // A broken approval check cannot forward the held call.
@@ -251,8 +304,22 @@ export function runGateway(options: GatewayOptions): Promise<number> {
         return
       }
 
+      if (!HOST_REQUEST_METHODS.has(message.method)) {
+        // An extension request can execute on the server without using
+        // tools/call, so an unknown method has no reviewed effect class.
+        sendToHost({ jsonrpc: '2.0', id: message.id, error: {
+          code: -32601, message: 'Cordon does not forward unclassified MCP methods.',
+        } })
+        log('an unclassified host request was refused before the MCP server received it')
+        return
+      }
+
+      const forwarded = GATED_HOST_METHODS.has(message.method)
+        ? gateHostMethod(message, cordon, sendToHost) : message.value
+      if (forwarded === null) return
+
       const entry: Pending = { method: message.method }
-      const params = asRecord(message.params)
+      const params = asRecord(forwarded['params'])
       if (message.method === 'resources/read' && typeof params?.['uri'] === 'string') {
         entry.label = params['uri']
       }
@@ -260,7 +327,7 @@ export function runGateway(options: GatewayOptions): Promise<number> {
         entry.label = params['name']
       }
       pending.set(pendingKey(message.id), entry)
-      sendUpstream(message.value)
+      sendUpstream(forwarded)
     }
 
     const onUpstreamLine = (line: string): void => {
@@ -279,9 +346,26 @@ export function runGateway(options: GatewayOptions): Promise<number> {
         return
       }
 
-      if (message.type !== 'response') {
-        // The upstream's own requests and notifications go to the host.
-        sendToHost(message.value)
+      if (message.type === 'request') {
+        // A server can ask the host to sample or elicit model input. Forwarding
+        // that request makes server-authored content an instruction before the
+        // tool-result gate sees it. Ping is contentless and answered here.
+        if (message.method === 'ping' && message.params === undefined &&
+          message.value['jsonrpc'] === '2.0' &&
+          Object.keys(message.value).every((key) => ['jsonrpc', 'id', 'method'].includes(key))) {
+          sendUpstream({ jsonrpc: '2.0', id: message.id, result: {} })
+        } else {
+          sendUpstream({ jsonrpc: '2.0', id: message.id, error: {
+            code: -32601, message: 'Cordon does not forward server-origin requests.',
+          } })
+          log('a server-origin request was refused before the host received it')
+        }
+        return
+      }
+      if (message.type === 'notification') {
+        const observed = observeServerNotification(message.value, message.method, cordon, options.policy)
+        if (observed === null) log('unsupported server notification was withheld')
+        else sendToHost(observed)
         return
       }
 
@@ -300,21 +384,53 @@ export function runGateway(options: GatewayOptions): Promise<number> {
         const tool = entry.call?.tool ?? entry.method
         const label = entry.call === undefined ? (entry.label ?? entry.method) : sourceLabel(entry.call)
         const source = classifySource({ kind: 'tool', label, tool }, options.policy)
-        if (error !== null && typeof error['message'] === 'string') {
-          observeInto(error, 'message', tool, source, cordon)
-        } else {
-          cordon.markUnredacted()
+        // A server-authored error is still a model-visible result. Unknown
+        // fields could carry instructions around the observed message.
+        if (message.value['jsonrpc'] !== '2.0' ||
+          Object.keys(message.value).some((key) => !['jsonrpc', 'id', 'error'].includes(key)) ||
+          error === null ||
+          Object.keys(error).some((key) => !['code', 'message', 'data'].includes(key)) ||
+          !Number.isSafeInteger(error['code']) || typeof error['message'] !== 'string') {
+          sendToHost(withholdUnreadableResponse(message.value, tool, source, cordon))
+          return
         }
-        // JSON-RPC error data has no MCP text-block shape. The host may show
-        // it to the model, so opaque data carries the same unredacted mark as
-        // an image or an unknown tool-result block.
-        if (error !== null && Object.hasOwn(error, 'data')) cordon.markUnredacted()
+        if (!observeInto(error, 'message', tool, source, cordon)) {
+          sendToHost(withholdUnreadableResponse(message.value, tool, source, cordon))
+          return
+        }
+        // JSON-RPC error data has no prescribed shape, but the host may show
+        // all of it to the model. Inspect known text and withhold anything
+        // whose role or media bytes we cannot inspect.
+        if (Object.hasOwn(error, 'data')) {
+          const observed = observeReadableResult(error['data'], tool, source, cordon, [])
+          if (observed === null) {
+            sendToHost(withholdUnreadableResponse(message.value, tool, source, cordon))
+            return
+          }
+          // The generic text walker visits values, but a server can put an
+          // instruction in a field name. A changed serialized view means
+          // some model-visible text had no safe replacement location.
+          const serialized = JSON.stringify(observed.value)
+          if (cordon.observe(serialized, source).text !== serialized) {
+            sendToHost(withholdUnreadableResponse(message.value, tool, source, cordon))
+            return
+          }
+          error['data'] = observed.value
+        }
         sendToHost(message.value)
         return
       }
 
       if (entry.method === 'tools/list') {
         sendToHost(observeToolList(message.value, cordon, options.policy, options.command))
+        return
+      }
+      if (entry.method === 'initialize') {
+        sendToHost(observeInitialize(message.value, cordon, options.policy))
+        return
+      }
+      if (entry.method === 'server/discover') {
+        sendToHost(observeDiscover(message.value, cordon, options.policy))
         return
       }
       if (entry.method === 'resources/list' || entry.method === 'resources/templates/list' || entry.method === 'prompts/list') {
@@ -334,7 +450,11 @@ export function runGateway(options: GatewayOptions): Promise<number> {
         sendToHost(observePromptsGet(message.value, entry, cordon, options.policy))
         return
       }
-      sendToHost(message.value)
+      if (entry.method === 'completion/complete') {
+        sendToHost(observeCompletion(message.value, cordon, options.policy))
+        return
+      }
+      sendToHost(observeOtherResponse(message.value, entry.method, cordon, options.policy))
     }
 
     const hostLines = createInterface({ input: hostIn, terminal: false })
@@ -371,6 +491,66 @@ export function runGateway(options: GatewayOptions): Promise<number> {
   })
 }
 
+/** Gate model-selected MCP methods under their exact protocol names. */
+function gateHostMethod(
+  message: Extract<Message, { type: 'request' }>,
+  cordon: Cordon,
+  sendToHost: (message: Record<string, unknown>) => void,
+): Record<string, unknown> | null {
+  const params = asRecord(message.params)
+  if (message.value['jsonrpc'] !== '2.0' ||
+    Object.keys(message.value).some((key) => !['jsonrpc', 'id', 'method', 'params'].includes(key)) ||
+    params === null || !validHostMethodParams(message.method, params)) {
+    sendToHost({ jsonrpc: '2.0', id: message.id, error: {
+      code: -32602, message: `Cordon refused malformed ${message.method} parameters.`,
+    } })
+    return null
+  }
+
+  const decision = cordon.gateUnattended({ tool: message.method, args: params })
+  if (decision.kind !== 'allow') {
+    // A read method has no CallToolResult notice slot for a narrowed request.
+    // Refusing a rewrite keeps the host's requested URI or prompt identity
+    // from silently changing while it believes the original request ran.
+    sendToHost({ jsonrpc: '2.0', id: message.id, error: {
+      code: -32000,
+      message: decision.kind === 'rewrite'
+        ? `Cordon withheld a narrowed ${message.method} request; retry with reviewed parameters.`
+        : `Cordon refused ${message.method}: ${decision.reason}`,
+    } })
+    return null
+  }
+
+  const meta = asRecord(params['_meta'])
+  const progressToken = meta?.['progressToken']
+  return { jsonrpc: '2.0', id: message.id, method: message.method, params: {
+    ...Object.fromEntries(Object.entries(params).filter(([key]) => key !== '_meta')),
+    ...(typeof progressToken === 'string' || typeof progressToken === 'number'
+      ? { _meta: { progressToken } } : {}),
+  } }
+}
+
+function validHostMethodParams(method: string, params: Record<string, unknown>): boolean {
+  const allowed = method === 'prompts/get' ? ['name', 'arguments', '_meta']
+    : method === 'completion/complete' ? ['ref', 'argument', 'context', '_meta']
+      : method === 'logging/setLevel' ? ['level', '_meta'] : ['uri', '_meta']
+  if (Object.keys(params).some((key) => !allowed.includes(key))) return false
+  if (method === 'prompts/get') {
+    return typeof params['name'] === 'string' && params['name'] !== '' &&
+      (params['arguments'] === undefined || asRecord(params['arguments']) !== null)
+  }
+  if (method === 'completion/complete') {
+    const ref = asRecord(params['ref'])
+    const argument = asRecord(params['argument'])
+    return ref !== null && argument !== null &&
+      typeof ref['type'] === 'string' &&
+      typeof argument['name'] === 'string' && typeof argument['value'] === 'string' &&
+      (params['context'] === undefined || asRecord(params['context']) !== null)
+  }
+  if (method === 'logging/setLevel') return typeof params['level'] === 'string'
+  return typeof params['uri'] === 'string' && params['uri'] !== ''
+}
+
 /**
  * The decision on a tools/call. The call is gated BEFORE the upstream sees
  * it: a refused call never reaches the server, and the refusal is answered
@@ -393,8 +573,29 @@ function gateCall(
   waitForApproval?: (id: string, reason: string) => void,
 ): void {
   const params = asRecord(message.params)
-  const name = typeof params?.['name'] === 'string' ? params['name'] : ''
-  const call: ToolCall = { tool: name, args: asRecord(params?.['arguments']) ?? {} }
+  const meta = asRecord(params?.['_meta'])
+  if (message.value['jsonrpc'] !== '2.0' ||
+    Object.keys(message.value).some((key) => !['jsonrpc', 'id', 'method', 'params'].includes(key)) ||
+    params === null ||
+    Object.keys(params).some((key) => !['name', 'arguments', '_meta'].includes(key)) ||
+    typeof params['name'] !== 'string' || params['name'].trim() === '' ||
+    (params['arguments'] !== undefined && asRecord(params['arguments']) === null)) {
+    sendToHost(toolError(message.id, 'Cordon refused a malformed tools/call request.'))
+    return
+  }
+  const name = params['name'] as string
+  const call: ToolCall = { tool: name, args: asRecord(params['arguments']) ?? {} }
+  const progressToken = meta?.['progressToken']
+  // The core reviews exactly the arguments sent upstream. Vendor metadata
+  // from a model-shaped host request has no effect role, so only the MCP
+  // progress token survives this canonical request.
+  const forwarded = (args: Record<string, unknown>): Record<string, unknown> => ({
+    jsonrpc: '2.0', id: message.id, method: 'tools/call', params: {
+      name, arguments: args,
+      ...(typeof progressToken === 'string' || typeof progressToken === 'number'
+        ? { _meta: { progressToken } } : {}),
+    },
+  })
 
   const decision = cordon.gateUnattended(call)
   if (decision.kind === 'deny' || decision.kind === 'ask') {
@@ -410,11 +611,11 @@ function gateCall(
     pending.set(pendingKey(message.id), { method: message.method, call, notice: rewriteNotice(decision) })
     // The forwarded request is reserialized: the original line carries the
     // arguments the model wrote, and they are exactly what was cut.
-    sendUpstream({ ...message.value, params: { ...params, arguments: decision.args } })
+    sendUpstream(forwarded(decision.args))
     return
   }
   pending.set(pendingKey(message.id), { method: message.method, call })
-  sendUpstream(message.value)
+  sendUpstream(forwarded(call.args))
 }
 
 /**
@@ -435,6 +636,12 @@ function observeToolList(
   if (result === null || !Array.isArray(listed) ||
     Object.keys(value).some((key) => !RESPONSE_KEYS.has(key)) ||
     Object.keys(result).some((key) => !TOOL_LIST_KEYS.has(key)) ||
+    (result['resultType'] !== undefined && result['resultType'] !== 'complete') ||
+    (result['nextCursor'] !== undefined && typeof result['nextCursor'] !== 'string') ||
+    (result['ttlMs'] !== undefined && (!Number.isSafeInteger(result['ttlMs']) ||
+      (result['ttlMs'] as number) < 0)) ||
+    (result['cacheScope'] !== undefined && result['cacheScope'] !== 'public' &&
+      result['cacheScope'] !== 'private') ||
     listed.some((tool) => !readableListedTool(tool))) {
     return withholdUnreadableResponse(value, 'tools/list', source, cordon)
   }
@@ -452,7 +659,7 @@ function observeToolList(
     .map((tool) => asRecord(tool))
     .filter((tool): tool is Record<string, unknown> => tool !== null && typeof tool['name'] === 'string')
     .map((tool) => ({ name: tool['name'] as string, description: tool['description'], inputSchema: tool['inputSchema'],
-      title: tool['title'], annotations: tool['annotations'], outputSchema: tool['outputSchema'] }))
+      title: tool['title'], annotations: tool['annotations'], outputSchema: tool['outputSchema'], icons: tool['icons'] }))
   const held = new Set(cordon.admitTools(command, named).map((tool) => tool.name))
   const tools = listed.filter((tool) => !held.has(String(asRecord(tool)?.['name'])))
   value = { ...value, result: { ...result, tools } }
@@ -464,6 +671,12 @@ function observeToolList(
     const source = classifySource({ kind: 'mcp-description', label: name, tool: name }, policy)
     if (typeof entry['description'] === 'string') observeDescription(entry, 'description', name, source, cordon)
     if (typeof entry['title'] === 'string') observeDescription(entry, 'title', name, source, cordon)
+    if (entry['icons'] !== undefined) {
+      // Icon references are protocol identifiers. Rewriting them can change
+      // the resource fetched by the host, so withhold when cleaning is needed.
+      const text = JSON.stringify(entry['icons'])
+      if (cordon.observe(text, source).text !== text) return withholdUnreadableResponse(value, 'tools/list', source, cordon)
+    }
     const annotations = asRecord(entry['annotations'])
     if (annotations !== null && typeof annotations['title'] === 'string') {
       observeDescription(annotations, 'title', name, source, cordon)
@@ -472,21 +685,39 @@ function observeToolList(
     // and a scanner that looks only at the top level misses them: the
     // classic place to put the poisoned line once the top level is watched.
     const schema = asRecord(entry['inputSchema'])
-    if (schema !== null) observeSchema(schema, name, source, cordon, 0)
+    if (schema !== null && !observeSchema(schema, name, source, cordon, 0)) {
+      return withholdUnreadableResponse(value, 'tools/list', source, cordon)
+    }
+    if (schema !== null) {
+      // One provenance write per schema keeps wide but valid tool lists from
+      // turning every structural key into a session-store write.
+      const text = JSON.stringify(schema)
+      if (cordon.observe(text, source).text !== text) return withholdUnreadableResponse(value, 'tools/list', source, cordon)
+    }
     const outputSchema = asRecord(entry['outputSchema'])
-    if (outputSchema !== null) observeSchema(outputSchema, name, source, cordon, 0)
+    if (outputSchema !== null && !observeSchema(outputSchema, name, source, cordon, 0)) {
+      return withholdUnreadableResponse(value, 'tools/list', source, cordon)
+    }
+    if (outputSchema !== null) {
+      const text = JSON.stringify(outputSchema)
+      if (cordon.observe(text, source).text !== text) return withholdUnreadableResponse(value, 'tools/list', source, cordon)
+    }
   }
   return value
 }
 
 /** How deep a schema is walked. Deeper than any real schema, bounded against a hostile one. */
 const MAX_SCHEMA_DEPTH = 16
+const MAX_SCHEMA_NODES = 20_000
+const SCHEMA_VALUE_KEYS = new Set(['default', 'const', 'enum', 'examples'])
 
 function readableListedTool(value: unknown): boolean {
   const entry = asRecord(value)
   if (entry === null || typeof entry['name'] !== 'string' || entry['name'] === '' ||
+    Object.keys(entry).some((key) => !TOOL_ENTRY_KEYS.has(key)) ||
     (entry['description'] !== undefined && typeof entry['description'] !== 'string') ||
-    (entry['title'] !== undefined && typeof entry['title'] !== 'string')) return false
+    (entry['title'] !== undefined && typeof entry['title'] !== 'string') ||
+    (entry['icons'] !== undefined && !readableIcons(entry['icons']))) return false
   const input = asRecord(entry['inputSchema'])
   if (input === null || !readableSchemaText(input, 0)) return false
   if (entry['outputSchema'] !== undefined) {
@@ -499,6 +730,20 @@ function readableListedTool(value: unknown): boolean {
       key === 'title' ? typeof value !== 'string' : !TOOL_ANNOTATION_HINTS.has(key) || typeof value !== 'boolean')) return false
   }
   return true
+}
+
+function readableIcons(value: unknown): boolean {
+  return Array.isArray(value) && value.every((icon) => {
+    const entry = asRecord(icon)
+    return entry !== null && typeof entry['src'] === 'string' && entry['src'] !== '' &&
+      Object.keys(entry).every((key) => ['src', 'mimeType', 'sizes', 'theme'].includes(key)) &&
+      sanitize(entry['src']).clean === entry['src'] &&
+      (entry['mimeType'] === undefined || (typeof entry['mimeType'] === 'string' &&
+        sanitize(entry['mimeType']).clean === entry['mimeType'])) &&
+      (entry['theme'] === undefined || entry['theme'] === 'light' || entry['theme'] === 'dark') &&
+      (entry['sizes'] === undefined || (Array.isArray(entry['sizes']) && entry['sizes'].every((size) =>
+        typeof size === 'string' && sanitize(size).clean === size)))
+  })
 }
 
 function readableSchemaText(node: unknown, depth: number): boolean {
@@ -514,28 +759,57 @@ function readableSchemaText(node: unknown, depth: number): boolean {
 
 /**
  * Every `description` and `title` string inside a JSON Schema, at any depth
- * up to the bound. A schema deeper than the bound is not trusted to be
- * clean: the session is marked, as for any content that could not be read.
+ * up to the bound. A schema deeper than the bound is withheld: marking the
+ * session while forwarding unread instructions still gives them to the model.
  */
-function observeSchema(node: Record<string, unknown>, tool: string, source: Source, cordon: Cordon, depth: number): void {
-  if (depth > MAX_SCHEMA_DEPTH) {
-    cordon.markUnredacted()
-    return
-  }
+function observeSchema(
+  node: Record<string, unknown>,
+  tool: string,
+  source: Source,
+  cordon: Cordon,
+  depth: number,
+  budget = { nodes: 0 },
+): boolean {
+  if (depth > MAX_SCHEMA_DEPTH) return false
+  if (++budget.nodes > MAX_SCHEMA_NODES) return false
   for (const key of Object.keys(node)) {
+    if (sanitize(key).clean !== key) return false
     const value = node[key]
     if ((key === 'description' || key === 'title') && typeof value === 'string') {
       observeDescription(node, key, tool, source, cordon)
+    } else if (SCHEMA_VALUE_KEYS.has(key)) {
+      // Rewriting a default or an enum can make the advertised schema disagree
+      // with what the server accepts. Withhold the list if cleaning is needed.
+      if (!observeSchemaValue(value, depth + 1, budget)) return false
+    } else if (typeof value === 'string') {
+      if (sanitize(value).clean !== value) return false
     } else if (Array.isArray(value)) {
       for (const item of value) {
         const child = asRecord(item)
-        if (child !== null) observeSchema(child, tool, source, cordon, depth + 1)
+        if (child !== null) {
+          if (!observeSchema(child, tool, source, cordon, depth + 1, budget)) return false
+        } else if (!observeSchemaValue(item, depth + 1, budget)) return false
       }
     } else {
       const child = asRecord(value)
-      if (child !== null) observeSchema(child, tool, source, cordon, depth + 1)
+      if (child !== null && !observeSchema(child, tool, source, cordon, depth + 1, budget)) return false
     }
   }
+  return true
+}
+
+function observeSchemaValue(
+  value: unknown,
+  depth: number,
+  budget: { nodes: number },
+): boolean {
+  if (depth > MAX_SCHEMA_DEPTH || ++budget.nodes > MAX_SCHEMA_NODES) return false
+  if (typeof value === 'string') return sanitize(value).clean === value
+  if (Array.isArray(value)) return value.every((item) => observeSchemaValue(item, depth + 1, budget))
+  const record = asRecord(value)
+  if (record !== null) return Object.entries(record).every(([key, item]) =>
+    sanitize(key).clean === key && observeSchemaValue(item, depth + 1, budget))
+  return true
 }
 
 function observeDescription(entry: Record<string, unknown>, key: string, tool: string, source: Source, cordon: Cordon): void {
@@ -568,10 +842,164 @@ function withNotice(value: Record<string, unknown>, notice: string): Record<stri
   return { ...value, result: { ...result, content: [...content, { type: 'text', text: notice }] } }
 }
 
-const TOOL_RESULT_KEYS = new Set(['content', 'structuredContent', 'isError', '_meta'])
-const TOOL_LIST_KEYS = new Set(['tools', 'nextCursor', '_meta'])
+const TOOL_RESULT_KEYS = new Set(['resultType', 'content', 'structuredContent', 'isError', '_meta'])
+const TOOL_LIST_KEYS = new Set(['resultType', 'tools', 'nextCursor', '_meta', 'ttlMs', 'cacheScope'])
+const TOOL_ENTRY_KEYS = new Set(['name', 'description', 'inputSchema', 'title', 'annotations', 'outputSchema', 'icons'])
 const TOOL_ANNOTATION_HINTS = new Set(['readOnlyHint', 'destructiveHint', 'idempotentHint', 'openWorldHint'])
 const RESPONSE_KEYS = new Set(['jsonrpc', 'id', 'result'])
+const INITIALIZE_KEYS = new Set(['protocolVersion', 'capabilities', 'serverInfo', 'instructions', '_meta'])
+const DISCOVER_KEYS = new Set(['resultType', 'supportedVersions', 'capabilities', 'instructions', '_meta', 'ttlMs', 'cacheScope'])
+const SERVER_LIST_NOTIFICATIONS = new Set([
+  'notifications/tools/list_changed', 'notifications/prompts/list_changed',
+  'notifications/resources/list_changed',
+])
+const LOG_LEVELS = new Set(['debug', 'info', 'notice', 'warning', 'error', 'critical', 'alert', 'emergency'])
+
+function observeServerNotification(
+  value: Record<string, unknown>,
+  method: string,
+  cordon: Cordon,
+  policy: Policy,
+): Record<string, unknown> | null {
+  if (value['jsonrpc'] !== '2.0' || Object.keys(value).some((key) =>
+    !['jsonrpc', 'method', 'params'].includes(key))) return null
+  if (SERVER_LIST_NOTIFICATIONS.has(method)) {
+    const params = value['params']
+    if (params !== undefined) {
+      const record = asRecord(params)
+      if (record === null || Object.keys(record).length > 0) return null
+    }
+    return { jsonrpc: '2.0', method, ...(params === undefined ? {} : { params }) }
+  }
+  if (method !== 'notifications/message') return null
+  const params = asRecord(value['params'])
+  if (params === null || !LOG_LEVELS.has(String(params['level'])) ||
+    !Object.hasOwn(params, 'data') ||
+    Object.keys(params).some((key) => !['level', 'logger', 'data', '_meta'].includes(key)) ||
+    (params['logger'] !== undefined && typeof params['logger'] !== 'string')) return null
+  const source = classifySource({ kind: 'mcp-description', label: method }, policy)
+  const observed = observeReadableResult(params, method, source, cordon, [])
+  if (observed === null) return null
+  // Arbitrary JSON logging data may carry text in property names, which the
+  // generic text extractor treats as structure. The full serialized message
+  // has to survive the sanitizer unchanged before the host sees those keys.
+  const text = JSON.stringify(observed.value)
+  if (cordon.observe(text, source).text !== text) return null
+  return { jsonrpc: '2.0', method, params: observed.value }
+}
+
+/** The server can send model-facing instructions before the host lists any tools. */
+function observeInitialize(
+  value: Record<string, unknown>,
+  cordon: Cordon,
+  policy: Policy,
+): Record<string, unknown> {
+  const source = classifySource({ kind: 'mcp-description', label: 'initialize' }, policy)
+  const result = asRecord(value['result'])
+  if (Object.keys(value).some((key) => !RESPONSE_KEYS.has(key)) ||
+    result === null || Object.keys(result).some((key) => !INITIALIZE_KEYS.has(key)) ||
+    typeof result['protocolVersion'] !== 'string' ||
+    asRecord(result['capabilities']) === null ||
+    asRecord(result['serverInfo']) === null ||
+    (result['instructions'] !== undefined && typeof result['instructions'] !== 'string')) {
+    return withholdUnreadableResponse(value, 'initialize', source, cordon)
+  }
+  const observed = observeReadableResult(result, 'initialize', source, cordon, [])
+  if (observed === null) return withholdUnreadableResponse(value, 'initialize', source, cordon)
+  return { jsonrpc: '2.0', id: value['id'], result: observed.value }
+}
+
+/** Modern MCP discovery carries the same model-facing instructions as initialize. */
+function observeDiscover(
+  value: Record<string, unknown>,
+  cordon: Cordon,
+  policy: Policy,
+): Record<string, unknown> {
+  const source = classifySource({ kind: 'mcp-description', label: 'server/discover' }, policy)
+  const result = asRecord(value['result'])
+  if (Object.keys(value).some((key) => !RESPONSE_KEYS.has(key)) ||
+    result === null || Object.keys(result).some((key) => !DISCOVER_KEYS.has(key)) ||
+    result['resultType'] !== 'complete' ||
+    !Array.isArray(result['supportedVersions']) ||
+    result['supportedVersions'].length === 0 ||
+    result['supportedVersions'].some((version: unknown) => typeof version !== 'string') ||
+    asRecord(result['capabilities']) === null ||
+    (result['instructions'] !== undefined && typeof result['instructions'] !== 'string') ||
+    (result['_meta'] !== undefined && asRecord(result['_meta']) === null) ||
+    (result['ttlMs'] !== undefined && (!Number.isSafeInteger(result['ttlMs']) ||
+      (result['ttlMs'] as number) < 0)) ||
+    (result['cacheScope'] !== undefined && result['cacheScope'] !== 'public' &&
+      result['cacheScope'] !== 'private')) {
+    return withholdUnreadableResponse(value, 'server/discover', source, cordon)
+  }
+  const observed = observeReadableResult(result, 'server/discover', source, cordon, [])
+  if (observed === null) return withholdUnreadableResponse(value, 'server/discover', source, cordon)
+  return { jsonrpc: '2.0', id: value['id'], result: observed.value }
+}
+
+/** A completion value is server-authored text that can be placed into the model's next call. */
+function observeCompletion(
+  value: Record<string, unknown>,
+  cordon: Cordon,
+  policy: Policy,
+): Record<string, unknown> {
+  const method = 'completion/complete'
+  const source = classifySource({ kind: 'tool', label: method, tool: method }, policy)
+  const result = asRecord(value['result'])
+  const completion = asRecord(result?.['completion'])
+  const values = completion?.['values']
+  if (Object.keys(value).some((key) => !RESPONSE_KEYS.has(key)) ||
+    result === null || Object.keys(result).some((key) => !['completion', '_meta'].includes(key)) ||
+    completion === null || Object.keys(completion).some((key) => !['values', 'total', 'hasMore'].includes(key)) ||
+    !Array.isArray(values) || values.length > 100 ||
+    values.some((item: unknown) => typeof item !== 'string') ||
+    (completion['total'] !== undefined && (!Number.isSafeInteger(completion['total']) ||
+      (completion['total'] as number) < 0)) ||
+    (completion['hasMore'] !== undefined && typeof completion['hasMore'] !== 'boolean') ||
+    (result['_meta'] !== undefined && asRecord(result['_meta']) === null)) {
+    return withholdUnreadableResponse(value, method, source, cordon)
+  }
+  for (const item of values) {
+    if (cordon.observe(item as string, source).text !== item) {
+      return withholdUnreadableResponse(value, method, source, cordon)
+    }
+  }
+  if (result['_meta'] !== undefined) {
+    const observed = observeReadableResult(result['_meta'], method, source, cordon, [])
+    if (observed === null || observed.value !== result['_meta']) {
+      return withholdUnreadableResponse(value, method, source, cordon)
+    }
+  }
+  const serialized = JSON.stringify(result)
+  if (cordon.observe(serialized, source).text !== serialized) {
+    return withholdUnreadableResponse(value, method, source, cordon)
+  }
+  return value
+}
+
+/** Unknown methods still return server text to the host; no response may bypass observation. */
+function observeOtherResponse(
+  value: Record<string, unknown>,
+  method: string,
+  cordon: Cordon,
+  policy: Policy,
+): Record<string, unknown> {
+  const source = classifySource({ kind: 'tool', label: method, tool: method }, policy)
+  const result = asRecord(value['result'])
+  if (Object.keys(value).some((key) => !RESPONSE_KEYS.has(key)) || result === null) {
+    return withholdUnreadableResponse(value, method, source, cordon)
+  }
+  if (Object.keys(result).length === 0) return value
+  const observed = observeReadableResult(result, method, source, cordon, [])
+  if (observed === null || observed.value !== result) {
+    return withholdUnreadableResponse(value, method, source, cordon)
+  }
+  const serialized = JSON.stringify(result)
+  if (cordon.observe(serialized, source).text !== serialized) {
+    return withholdUnreadableResponse(value, method, source, cordon)
+  }
+  return value
+}
 
 function observeToolResult(
   value: Record<string, unknown>,
@@ -589,7 +1017,8 @@ function observeToolResult(
   if (Object.keys(value).some((key) => !RESPONSE_KEYS.has(key)) ||
     !Array.isArray(content) ||
     Object.keys(result).some((key) => !TOOL_RESULT_KEYS.has(key)) ||
-    (result['isError'] !== undefined && typeof result['isError'] !== 'boolean')) {
+    (result['isError'] !== undefined && typeof result['isError'] !== 'boolean') ||
+    (result['resultType'] !== undefined && result['resultType'] !== 'complete')) {
     return withholdUnreadableResult(value, call.tool, source, cordon)
   }
 
@@ -642,6 +1071,7 @@ function observeReadableResult(
     return envelope.text
   })
   cordon.observeLinks(extracted.links, source)
+  if (extracted.opaque) cordon.observeUnseen(source)
   if (!changed) return { value }
   if (!substitutable) return null
   const next = replaceText('', value, cleaned)
@@ -745,10 +1175,9 @@ function observePromptsGet(
 /**
  * Observes one text field and writes the cleaned text back into it.
  *
- * When the source's view forbids substitution, the original stays and the
- * finding is said out loud through the journal — the channel the agent
- * cannot reach. There is no transcript footer on this transport: the gateway
- * never sees the model's answer, only the pipe.
+ * An error message is never copied back to a file. If a source-view policy
+ * forbids substitution, a changed message has no safe path to the model:
+ * withhold the whole error and let the caller send a protocol-shaped refusal.
  */
 function observeInto(
   entry: Record<string, unknown>,
@@ -756,13 +1185,15 @@ function observeInto(
   tool: string,
   source: Source,
   cordon: Cordon,
-): void {
+): boolean {
   const envelope = cordon.observe(entry[key] as string, source)
+  if (!envelope.substitute && envelope.text !== entry[key]) return false
   if (envelope.substitute) {
     entry[key] = envelope.text
   } else if (envelope.findings.length > 0) {
     cordon.notice(tool, `a hidden layer was found in the result of ${tool}; it was not substituted`, source)
   }
+  return true
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {

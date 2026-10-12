@@ -1,0 +1,353 @@
+{
+  "date": "2026-10-09",
+  "experiment": "installed Codex CLI first model-request tool surface without a model response",
+  "baseCommit": "c9feea7",
+  "codexVersion": "codex-cli 0.161.0",
+  "modelIdForToolContract": "cordon-poison-qwen:1.5b",
+  "modelInvoked": false,
+  "provider": "local loopback capture endpoint; first request returned 503 and Codex was stopped",
+  "isolatedProfile": "fresh CODEX_HOME and scratch workspace per arm; user config, hooks, memories, plugins and remote plugins disabled",
+  "mcpProbe": "one inert canary_lookup declaration; no tool call executed",
+  "sourceSha256": {
+    "harness": "18880f1c4f6cd5789a8bb99849786ee1b55163f741f28bcd8aaf3726f5f1fe47",
+    "discoveryServer": "c8548aa75dc503a5462f877b9e86787f0c66d01ec3562624c2dbc92260d5a19b",
+    "inventory": "530294f3b052c37aba1a36396505bd6f9c7b1bc6e26f317edf4e60c0a4bb5740"
+  },
+  "rawCaptureSha256": "29d4b015b8beb72b49cf280281877bd10e61cf00a68111e41c6edf0ef840a13b",
+  "scratchRoot": "/var/folders/w7/lwc3w7150h9326kzj54l579h0000gn/T/cordon-codex-tool-surface-iZAFq6",
+  "arms": [
+    {
+      "arm": "standard",
+      "sandbox": "read-only",
+      "additionalDisabledFeatures": [],
+      "requestShape": {
+        "keys": [
+          "client_metadata",
+          "include",
+          "input",
+          "instructions",
+          "model",
+          "parallel_tool_calls",
+          "prompt_cache_key",
+          "reasoning",
+          "store",
+          "stream",
+          "tool_choice",
+          "tools"
+        ],
+        "toolsKind": "array",
+        "toolCount": 13,
+        "declaredToolNames": [
+          "create_goal",
+          "exec_command",
+          "get_goal",
+          "list_mcp_resource_templates",
+          "list_mcp_resources",
+          "mcp__probe",
+          "multi_agent_v1",
+          "read_mcp_resource",
+          "request_user_input",
+          "type:web_search",
+          "update_goal",
+          "view_image",
+          "write_stdin"
+        ]
+      },
+      "toolSurface": [
+        {
+          "type": "function",
+          "name": "exec_command",
+          "members": []
+        },
+        {
+          "type": "function",
+          "name": "write_stdin",
+          "members": []
+        },
+        {
+          "type": "function",
+          "name": "list_mcp_resources",
+          "members": []
+        },
+        {
+          "type": "function",
+          "name": "list_mcp_resource_templates",
+          "members": []
+        },
+        {
+          "type": "function",
+          "name": "read_mcp_resource",
+          "members": []
+        },
+        {
+          "type": "function",
+          "name": "request_user_input",
+          "members": []
+        },
+        {
+          "type": "function",
+          "name": "view_image",
+          "members": []
+        },
+        {
+          "type": "namespace",
+          "name": "multi_agent_v1",
+          "members": [
+            "close_agent",
+            "resume_agent",
+            "send_input",
+            "spawn_agent",
+            "wait_agent"
+          ]
+        },
+        {
+          "type": "namespace",
+          "name": "mcp__probe",
+          "members": [
+            "canary_lookup"
+          ]
+        },
+        {
+          "type": "function",
+          "name": "get_goal",
+          "members": []
+        },
+        {
+          "type": "function",
+          "name": "create_goal",
+          "members": []
+        },
+        {
+          "type": "function",
+          "name": "update_goal",
+          "members": []
+        },
+        {
+          "type": "web_search",
+          "name": null,
+          "members": []
+        }
+      ],
+      "toolDeclarationSha256": "55f2179e16dd0a022d55f336f543626e2deb5410bd2b354ff0aed442462f0c9c",
+      "probeDeclared": true,
+      "completedToolItems": 0,
+      "scratchWorkFiles": [],
+      "codexStopSignal": "SIGTERM",
+      "stdoutSha256": "ff7b1700055519bb18d8fe576b8236ebdbe321442cd6a60ecd56b0517b906f99",
+      "stderrSha256": "1aa26269eb1cc57f86b235a03cda53c004edb5b1e9fc99d4da4f00843293d721"
+    },
+    {
+      "arm": "writable",
+      "sandbox": "workspace-write",
+      "additionalDisabledFeatures": [],
+      "requestShape": {
+        "keys": [
+          "client_metadata",
+          "include",
+          "input",
+          "instructions",
+          "model",
+          "parallel_tool_calls",
+          "prompt_cache_key",
+          "reasoning",
+          "store",
+          "stream",
+          "tool_choice",
+          "tools"
+        ],
+        "toolsKind": "array",
+        "toolCount": 13,
+        "declaredToolNames": [
+          "create_goal",
+          "exec_command",
+          "get_goal",
+          "list_mcp_resource_templates",
+          "list_mcp_resources",
+          "mcp__probe",
+          "multi_agent_v1",
+          "read_mcp_resource",
+          "request_user_input",
+          "type:web_search",
+          "update_goal",
+          "view_image",
+          "write_stdin"
+        ]
+      },
+      "toolSurface": [
+        {
+          "type": "function",
+          "name": "exec_command",
+          "members": []
+        },
+        {
+          "type": "function",
+          "name": "write_stdin",
+          "members": []
+        },
+        {
+          "type": "function",
+          "name": "list_mcp_resources",
+          "members": []
+        },
+        {
+          "type": "function",
+          "name": "list_mcp_resource_templates",
+          "members": []
+        },
+        {
+          "type": "function",
+          "name": "read_mcp_resource",
+          "members": []
+        },
+        {
+          "type": "function",
+          "name": "request_user_input",
+          "members": []
+        },
+        {
+          "type": "function",
+          "name": "view_image",
+          "members": []
+        },
+        {
+          "type": "namespace",
+          "name": "multi_agent_v1",
+          "members": [
+            "close_agent",
+            "resume_agent",
+            "send_input",
+            "spawn_agent",
+            "wait_agent"
+          ]
+        },
+        {
+          "type": "namespace",
+          "name": "mcp__probe",
+          "members": [
+            "canary_lookup"
+          ]
+        },
+        {
+          "type": "function",
+          "name": "get_goal",
+          "members": []
+        },
+        {
+          "type": "function",
+          "name": "create_goal",
+          "members": []
+        },
+        {
+          "type": "function",
+          "name": "update_goal",
+          "members": []
+        },
+        {
+          "type": "web_search",
+          "name": null,
+          "members": []
+        }
+      ],
+      "toolDeclarationSha256": "55f2179e16dd0a022d55f336f543626e2deb5410bd2b354ff0aed442462f0c9c",
+      "probeDeclared": true,
+      "completedToolItems": 0,
+      "scratchWorkFiles": [],
+      "codexStopSignal": "SIGTERM",
+      "stdoutSha256": "576d89d494add00f9beb52ce1923f9b60aec838362a4530f54a442d9678cb17a",
+      "stderrSha256": "1aa26269eb1cc57f86b235a03cda53c004edb5b1e9fc99d4da4f00843293d721"
+    },
+    {
+      "arm": "restricted",
+      "sandbox": "read-only",
+      "additionalDisabledFeatures": [
+        "shell_tool",
+        "apps",
+        "browser_use",
+        "computer_use",
+        "multi_agent",
+        "multi_agent_v2",
+        "goals"
+      ],
+      "requestShape": {
+        "keys": [
+          "client_metadata",
+          "include",
+          "input",
+          "instructions",
+          "model",
+          "parallel_tool_calls",
+          "prompt_cache_key",
+          "reasoning",
+          "store",
+          "stream",
+          "tool_choice",
+          "tools"
+        ],
+        "toolsKind": "array",
+        "toolCount": 7,
+        "declaredToolNames": [
+          "list_mcp_resource_templates",
+          "list_mcp_resources",
+          "mcp__probe",
+          "read_mcp_resource",
+          "request_user_input",
+          "type:web_search",
+          "view_image"
+        ]
+      },
+      "toolSurface": [
+        {
+          "type": "function",
+          "name": "list_mcp_resources",
+          "members": []
+        },
+        {
+          "type": "function",
+          "name": "list_mcp_resource_templates",
+          "members": []
+        },
+        {
+          "type": "function",
+          "name": "read_mcp_resource",
+          "members": []
+        },
+        {
+          "type": "function",
+          "name": "request_user_input",
+          "members": []
+        },
+        {
+          "type": "function",
+          "name": "view_image",
+          "members": []
+        },
+        {
+          "type": "namespace",
+          "name": "mcp__probe",
+          "members": [
+            "canary_lookup"
+          ]
+        },
+        {
+          "type": "web_search",
+          "name": null,
+          "members": []
+        }
+      ],
+      "toolDeclarationSha256": "39415b6b1a99c4e1f3129c92afed6e03b632212e7ad056d7650f829023527292",
+      "probeDeclared": true,
+      "completedToolItems": 0,
+      "scratchWorkFiles": [],
+      "codexStopSignal": "SIGTERM",
+      "stdoutSha256": "5cca063a208b90691e6e194c7dfcb590fc522282f7bd35cbd00fb571af27da7d",
+      "stderrSha256": "1aa26269eb1cc57f86b235a03cda53c004edb5b1e9fc99d4da4f00843293d721"
+    }
+  ],
+  "limits": [
+    "These are first-request model-visible declarations for one local model ID; the weights were never invoked.",
+    "A declaration is not evidence that a model selected the call or that a PreToolUse hook intercepted it.",
+    "The writable arm did not declare apply_patch for this local model ID, although a separate live gpt-6-luna hook probe exercised it.",
+    "Browser, computer and plugin surfaces can differ in interactive sessions, account setups and later CLI versions.",
+    "No owner approval, poisoned-model behavior or downstream action was tested by this capture."
+  ]
+}

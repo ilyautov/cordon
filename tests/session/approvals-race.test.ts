@@ -36,6 +36,9 @@ vi.mock('node:fs', async (original) => {
     renameSync: (from: fs.PathLike, to: fs.PathLike) => {
       at(from)
       real.renameSync(from, to)
+      // An owner approval now becomes visible at the atomic rename, not at
+      // the private file write. Preserve the same forced interleaving there.
+      at(to)
     },
   }
 })
@@ -100,4 +103,3 @@ describe('approve against a take', () => {
     expect(store.approve(id)).toBeNull()
   })
 })
-

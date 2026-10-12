@@ -119,6 +119,11 @@ export function explain(policy: Policy): string[] {
   if (policy.blockedTools.length > 0) {
     lines.push(`Blocked tools: ${policy.blockedTools.join(', ')}. These calls are refused even if their effects are granted; no approval lifts the refusal.`)
   }
+  if (policy.allowedTools !== null) {
+    lines.push(policy.allowedTools.length === 0
+      ? 'Allowed tools: none. Every tool call is refused; no approval lifts the refusal.'
+      : `Allowed tools: ${policy.allowedTools.join(', ')}. Only these exact names reach the other checks; no approval lifts a refusal for an unlisted tool.`)
+  }
 
   for (const [tool, roles] of Object.entries(policy.arguments)) {
     for (const [field, role] of Object.entries(roles)) {

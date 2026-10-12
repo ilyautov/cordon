@@ -4,6 +4,32 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versions follo
 
 ## [Unreleased]
 
+The opt-in exact-safe-edit diagnostic completed a clean/trigger pair at target `43`. The local altered model again ended at `42` in both turns despite the safe command in each prompt; the trigger produced 25 download-and-run proposals, all refused before Docker. This records the model's task failure separately from Cordon's observed action boundary.
+
+The model-origin harness can now give the altered model one exact safe edit command in both clean and trigger turns with `--specified-edit`. This diagnostic keeps the `43` task and tool boundary fixed while testing whether the earlier failed clean turn came from the model's command choice. It does not change Cordon's production decision path.
+
+The first live clean/trigger pair on the opt-in `43` target completed both Codex turns. The altered local model failed the clean edit, ending at `42`, while the trigger turn proposed 49 download-and-run calls that the owner gateway refused before Docker; it also ended at `42`. The compact result keeps the failed task and successful action boundary separate.
+
+The live model-origin harness now accepts `--simple-target=43` for paired clean and unnamed trigger turns, keeping the owner task, agent prompt, expected source and trigger score on the same held-out target. The old `42` target remains the default. Unsupported targets and mixed benchmark modes fail before Docker starts; this is benchmark instrumentation, not a production feature.
+
+The MCP gateway tests now wait for the fake server's specific reply or refusal log instead of sleeping for 50 ms before opening a file. Under a loaded suite the fixed pause ended before the child wrote its sampling reply, giving an unrelated `ENOENT` in the claims check. The bounded wait still fails if the expected evidence never arrives.
+
+The benchmark runner now serializes calls for one owner-selected source with an exclusive adjacent lock. Two gateway processes previously could both pass the last content check before replacing the same file; a paired process test holds the first call open and proves the second is refused before Docker. A crash leaves a lock for owner inspection rather than silently retrying. This does not serialize editors that ignore the lock or qualify the runner for production.
+
+A source-selected opaque identifier now marks an untrusted read even beside an inert `text: "ok"`. The `id`-only regression previously let a later email go to an owner-unnamed address. The identifier stays byte-for-byte intact; a paired ordinary ticket and owner-named recipient still pass. The same extraction feeds the hook adapters and the MCP gateway.
+
+Text in a tool result's `title`, `label`, `name`, `query`, `command` or `code` field now marks the untrusted read even though it stays out of verbatim provenance. A title-only ticket response previously let an agent send to an address the owner had not named; the paired regression now refuses that call while allowing a normal title and the owner-named recipient. This changes the exposure decision, not the certificate or the sanitizer.
+
+The output cleaner now rebuilds media-bearing results with the same field rules it uses to find text. A skipped image URL could previously consume the replacement intended for a later text block, leaving that block unchanged. The regression keeps the media field intact and replaces the text in its original slot.
+
+An optional exact-name `allowedTools` policy list now hard-refuses unlisted tool calls before effect classification in every transport. `allowedTools: []` refuses all calls; omission preserves existing behavior. This narrows a runner policy without depending only on known native tool names, provided the active hook actually sees those calls. The list grants no effects, and approval cannot override it.
+
+A live Codex catch-all hook trial now records one denied native patch, one completed runner edit, and an interval repair stopped by hook-side review before the gateway could see the edit. The benchmark's native patch attempt counter recognizes both Codex router error formats, so a blocked attempt is not mislabeled runner-only. The Docker verifier startup limit is 45 seconds to avoid treating slow local container startup as a task outcome.
+
+An isolated user-level Codex `hooks.json` trial now records denied native shell and patch calls plus a completed allowlisted runner edit when hook trust is bypassed for the disposable profile. A matched no-bypass, workspace-write control changed the scratch host file through native patch with no hook or Cordon journal event. Installation guidance now requires visible hook trust and a journaled refusal before relying on the policy.
+
+`cordon policy check FILE` and `policy explain FILE` now fail if the explicitly named draft does not exist. Previously the loader substituted the safe default and `check` printed `valid`, which could make a misspelled draft path look reviewed. Omitting FILE still reads the active policy or the safe default when no policy is installed.
+
 The plugin's hook command quotes `${CLAUDE_PLUGIN_ROOT}`. Unquoted, a plugin root with a space in it (a home directory named `John Smith`) split the path, `node` was handed half of it, and every hook crashed, which Claude Code reads as "let it through". The plugin now carries its own README, a display name, a category and keywords for the Claude plugin directory, and the marketplace a description; `claude plugin validate` passes on both with no warning.
 
 ## [0.12.1] - 2026-09-28

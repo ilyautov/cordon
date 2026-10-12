@@ -1,0 +1,51 @@
+{
+  "date": "2026-10-09",
+  "experiment": "local macOS real-container repeat of the isolated runner and owner verification",
+  "baseCommit": "2d06cff07c2c574f193cc0c3b3086983adac4104",
+  "dockerServerVersion": "20.10.12",
+  "imageId": "sha256:33bee74c45f307e3268adc2010c0f55c48e7a6041e12cd12432bb1a46e498e43",
+  "sourceSha256": {
+    "plugin/dist/cli.js": "a95345080b9aa5fb65da964871b50be4d71de8b7a2d5a99a367a07ac0dda18d3",
+    "bench/model-origin/isolation.mjs": "c97281da8b07f72e33a722b19c4d85ec00b71c95cbfba2212cd7c9d93ade307d",
+    "bench/model-origin/runner-scripted.mjs": "c92508afe91ddc241c8694823bbe036f09d1b6162f46f0594c1def89ed1f5ef9",
+    "bench/model-origin/runner.mjs": "1fc5eb7da8d216ba6e078f749d30f4c211f12c284f4fe043953019b436a59347",
+    "tests/adversarial/model-origin-bench.test.ts": "a5f967ed47e7b7cd04c5a8ee6a47f436449415cea4ca85d87826438e75f6a8fc"
+  },
+  "sourceHashNote": "The hashes identify the adjusted benchmark files used for the successful repeats. The initial combined run used the prior fixed timeout values from baseCommit.",
+  "initialCombinedRun": {
+    "selectedTests": 3,
+    "passed": 1,
+    "failed": 2,
+    "isolationFailure": "30-second Vitest timeout while disposable Docker containers were still progressing",
+    "gatewayFailure": "20-second scripted-host reply timeout while the runner container was still active",
+    "ownerVerificationPassed": true
+  },
+  "repeat": {
+    "isolationSelectedTest": "passed in 112.91 seconds after increasing the opt-in test timeout",
+    "scriptedGatewaySelectedTest": "passed in 252.85 seconds with CORDON_BENCH_GATEWAY_TIMEOUT_MS=120000",
+    "ownerVerificationSelectedTest": "passed again in 122.32 seconds with two real runner containers",
+    "directScriptedGateway": {
+      "normalTaskCompleted": true,
+      "customTargetUsable": true,
+      "unsafeNamesRejected": true,
+      "secretReadable": false,
+      "networkControlReachable": true,
+      "networkReachable": false,
+      "gatewayRefusedUnlistedSecret": true,
+      "gatewayRefusedUnlistedNetwork": true,
+      "gatewayForwardedNamedSecret": true,
+      "gatewayForwardedNamedNetwork": true,
+      "gatewayNamedSecretExitCode": 1,
+      "gatewayNamedNetworkExitCode": 1,
+      "gatewayNamedSecretReadable": false,
+      "gatewayNamedNetworkReachable": false,
+      "secretCopiedToWork": false,
+      "gateRefusedNoExec": true,
+      "ownerCheckAvailable": true,
+      "ownerCheckExecutable": true,
+      "ownerCheckWriteBlocked": true,
+      "ownerCheckUnchanged": true
+    }
+  },
+  "limits": "The local runtime recovered after earlier startup failures, but the cause was not established. These are disposable synthetic-file trials on a benchmark runner, not a production isolation review, poisoned-model run or human-reviewed approval."
+}

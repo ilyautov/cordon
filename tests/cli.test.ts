@@ -531,6 +531,29 @@ describe('cordon approve', () => {
     expect(new ApprovalStore(home).take(id, '').taken).toBe(true)
   })
 
+  it('shows all long arguments with terminal controls escaped without approving', () => {
+    const home = mkdtempSync(join(tmpdir(), 'cordon-approve-'))
+    const args = { body: 'x'.repeat(5000) + '\u001b[2J', to: 'attacker\u202E@example.com' }
+    const id = approvalId('s', { tool: 'send_email', args })
+    new ApprovalStore(home).request(id, { tool: 'send_email', reason: 'outside the certificate', args })
+
+    const shown = run(['approve', id, '--show'], '', { CORDON_HOME: home })
+    expect(shown.status).toBe(0)
+    expect(shown.stdout).toContain('attacker\\u202e@example.com')
+    expect(shown.stdout).toContain('\\u001b[2J')
+    expect(shown.stdout).not.toContain('\u001b')
+    expect(shown.stdout).not.toContain('\u202E')
+    expect(new ApprovalStore(home).take(id, '').taken).toBe(false)
+
+    const mixed = run(['approve', id, '--show', '--read'], '', { CORDON_HOME: home })
+    expect(mixed.status).toBe(2)
+    expect(new ApprovalStore(home).take(id, '').taken).toBe(false)
+
+    const mistyped = run(['approve', id, '--showw'], '', { CORDON_HOME: home })
+    expect(mistyped.status).toBe(2)
+    expect(new ApprovalStore(home).take(id, '').taken).toBe(false)
+  })
+
   it('a malformed id is a usage error', () => {
     expect(run(['approve', '../policy'], '', { CORDON_HOME: mkdtempSync(join(tmpdir(), 'cordon-approve-')) }).status).toBe(2)
   })
@@ -567,6 +590,16 @@ describe('cordon policy check and explain', () => {
     expect(stderr).toContain('mode must be interactive or autonomous')
   })
 
+  it('does not report a missing explicit draft as the valid default policy', () => {
+    const missing = join(mkdtempSync(join(tmpdir(), 'cordon-policy-')), 'missing.yaml')
+    for (const verb of ['check', 'explain']) {
+      const { stdout, stderr, status } = run(['policy', verb, missing], '', {})
+      expect(status).toBe(1)
+      expect(stderr).toContain('ENOENT')
+      expect(stdout).not.toContain('valid')
+    }
+  })
+
   it('check fails on a warning, so a drafted mandate that grants too much does not pass quietly', () => {
     const { stdout, status } = run(['policy', 'check', file('destinations: ["*@gmail.com"]\n')], '', {})
     expect(status).toBe(1)
@@ -584,6 +617,13 @@ describe('cordon policy check and explain', () => {
     const home = mkdtempSync(join(tmpdir(), 'cordon-home-'))
     writeFileSync(join(home, 'policy.yaml'), 'mode: interactive\n')
     expect(run(['policy', 'explain'], '', { CORDON_HOME: home }).stdout).toContain('Mode: interactive')
+  })
+
+  it('with no file and no active policy, explains the safe default', () => {
+    const home = mkdtempSync(join(tmpdir(), 'cordon-home-'))
+    const { stdout, status } = run(['policy', 'explain'], '', { CORDON_HOME: home })
+    expect(status).toBe(0)
+    expect(stdout).toContain('The agent may: read, summarize.')
   })
 })
 

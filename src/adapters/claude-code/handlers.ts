@@ -250,6 +250,7 @@ function observe(
   // A bridge that flattens results is not known to have dropped anything, so
   // it only loses the inert exemption.
   cordon.observeLinks(extracted.links, source)
+  if (extracted.opaque) cordon.observeUnseen(source)
   if (extracted.unseen) cordon.markUnredacted()
   else if (dialect.partialResults && !dialect.textless(event.call)) cordon.observeUnseen(source)
   // A lookup the policy declares binds names to values for the gate. The

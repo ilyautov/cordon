@@ -45,6 +45,16 @@ describe('ApprovalStore: one approval, one call', () => {
     expect(approvals.take(id, '').taken).toBe(false)
   })
 
+  it('a damaged approval without its nonce cannot authorize the call', () => {
+    const approvals = store()
+    const id = approvalId('s', CALL)
+    const binding = 'a'.repeat(64)
+    approvals.request(id, { tool: CALL.tool, reason: 'r', binding })
+    writeFileSync(approvals.approvedPath(id), `${binding}\n`, { mode: 0o600 })
+    expect(approvals.take(id, binding).taken).toBe(false)
+    expect(approvals.waiting(id)).not.toBeNull()
+  })
+
   it('nothing to approve without a pending request', () => {
     expect(store().approve('0123456789abcdef')).toBeNull()
   })

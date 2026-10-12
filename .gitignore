@@ -18,6 +18,7 @@ coverage/
 vitest-report.json
 bench/agentdojo/work/
 bench/codex-mcp/work/
+bench/pr-workflow/work/
 
 # Working notes: the design specification, the implementation plans and the
 # analysis of the author's other repositories. They stay on the machine they

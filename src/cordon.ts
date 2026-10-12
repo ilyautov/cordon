@@ -308,13 +308,12 @@ export class Cordon {
   /**
    * Cleans a piece of a tool's result and remembers where it came from.
    *
-   * `role` separates two questions that are not the same one. Everything the
-   * source put in front of the model is cleaned, without exception. Only what
-   * the source authored is recorded as provenance: a heading, a name or the
-   * query echoed back are the values the user hands over as arguments a moment
-   * later, and recording those would declare the user's own words untrusted.
-   * A miss in provenance costs one unmarked value; false taint there stops
-   * work that was never an attack, and stops it quietly.
+   * `role` separates two questions that are not the same one. Every text
+   * piece handed here is cleaned and counts as a read. Only content enters
+   * provenance: a heading, a name or the query echoed back can
+   * be the user's own value, and recording it would taint an honest retry.
+   * A label can still contain an instruction, so it cannot exempt a later
+   * action from the exposure rule merely because its field name is structural.
    */
   observe(text: string, source: Source, role: PieceRole = 'content'): Envelope {
     const { clean, findings } = sanitize(text)
@@ -322,23 +321,13 @@ export class Cordon {
     if (role === 'content') {
       this.taint.record(clean, source)
       if (!substitute && clean !== text) this.taint.record(text, source)
-      // The fact of the read is marked apart from what was read: an attack
-      // whose arguments share no byte with the page (a paraphrase, an
-      // encoding, a clean curl command) leaves provenance silent, and the
-      // mark is what the gate answers to there. Labels do not count: a
-      // heading the source wrote ABOUT the content is not the content the
-      // model read — recording those would mark the session for the user's
-      // own values echoed back.
-      // A reply with nothing in it is the exception: a write that returns
-      // None marked the session in AgentDojo's slack suite, and the next
-      // call of the same honest loop was refused. The list is closed, so
-      // anything that is not exactly one of these literals still marks.
-      // Both texts are tested: a hidden comment around "ok" is inert once
-      // cleaned, and a source the human reads as source text reaches the
-      // model whole.
-      const inert = INERT.test(clean.trim()) && INERT.test(text.trim())
-      if (source.trust === 'untrusted' && !inert) this.exposure = { at: this.turn, source: source.label }
     }
+    // The fact of the read is marked apart from provenance: a title-only
+    // result can steer a new recipient without sharing words with the call.
+    // An empty or status-only reply is the exception; both the original and
+    // cleaned text must be inert, so a hidden layer around "ok" still marks.
+    const inert = INERT.test(clean.trim()) && INERT.test(text.trim())
+    if (source.trust === 'untrusted' && !inert) this.exposure = { at: this.turn, source: source.label }
     // A tool description is read once for the whole session, in a batch, so
     // "the last one" is an arbitrary name; the live MCP run showed it being
     // blamed for a certificate refusal it had no part in. Descriptions still
@@ -675,11 +664,10 @@ export class Cordon {
   }
 
   /**
-   * Marks the fact of a read whose content Cordon did not see: an image in
-   * a result, or a harness that hands the hook only the text of what the
-   * model got. The inert exemption in `observe` rests on having seen the
-   * whole result, so it cannot apply here; an untrusted source marks the
-   * session whatever its text said.
+   * Marks the fact of a read whose content Cordon did not clean: an image,
+   * a source-selected opaque identifier, or a harness that hands the hook
+   * only part of what the model got. These values must keep their spelling,
+   * but an inert `text: "ok"` beside them cannot exempt the later action.
    */
   observeUnseen(source: Source): void {
     if (source.trust !== 'untrusted') return
