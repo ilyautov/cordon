@@ -10,6 +10,7 @@ import { runHook as runCodexHook } from './adapters/codex/main.js'
 import { runHook as runKimiHook } from './adapters/kimi/main.js'
 import { runHook as runDeepseekHook } from './adapters/deepseek/main.js'
 import { runGateway } from './adapters/mcp/gateway.js'
+import { connectSocketGateway, serveSocketGateway } from './adapters/mcp/socket.js'
 import { humanSeesRendered, type SourceView } from './core/types.js'
 import { audit, CODES, type AuditFinding, type Severity } from './audit/audit.js'
 import { Cordon } from './cordon.js'
@@ -22,11 +23,11 @@ import { labelled, type NotifyEvent } from './notify/notifier.js'
 import { RULES, type Rule } from './gate/rules.js'
 import { PROFILES, renderPolicy } from './policy/templates.js'
 import { sanitize } from './sanitize/index.js'
-import { ApprovalStore, MAX_SHOWN_ARGS, type ShownRequest } from './session/approvals.js'
+import { APPROVAL_TTL_MS, ApprovalStore, MAX_SHOWN_ARGS, type ShownRequest } from './session/approvals.js'
 import { MemoryLedger } from './session/memory.js'
 
 const USAGE =
-  'usage: cordon scan <file|-> [--json] | cordon hook [--harness claude-code|gemini|codex|kimi|deepseek] | cordon mcp -- <server command...> | cordon mcp approve -- <server command...> | cordon doctor | cordon init [--profile locked|research|documents|coding|service] [--force] | cordon log [--last N] [--json] | cordon approve [id [--read] [--as name]] | cordon policy check|explain [file] | cordon policy apply <file> [--accept-warnings] [--as name] | cordon audit [dir] [--json|--sarif] [--fail-on high|medium|low]'
+  'usage: cordon scan <file|-> [--json] | cordon hook [--harness claude-code|gemini|codex|kimi|deepseek] | cordon mcp [--wait-for-approval-ms N] -- <server command...> | cordon mcp serve --socket PATH [--wait-for-approval-ms N] -- <server command...> | cordon mcp connect --socket PATH --owner-uid UID | cordon mcp approve -- <server command...> | cordon doctor | cordon init [--profile locked|research|documents|coding|service] [--force] | cordon log [--last N] [--json] | cordon approve [id [--read] [--as name]] | cordon policy check|explain [file] | cordon policy apply <file> [--accept-warnings] [--as name] | cordon audit [dir] [--json|--sarif] [--fail-on high|medium|low]'
 
 /**
  * Event parsing depends on the harness, so the harness is named explicitly.
@@ -616,11 +617,26 @@ function printDoctor(home: string): number {
  */
 function mcp(args: string[]): Promise<number> | number {
   if (args[0] === 'approve') return approve(args.slice(1))
+  if (args[0] === 'serve') return mcpServe(args.slice(1))
+  if (args[0] === 'connect') return mcpConnect(args.slice(1))
   const at = args.indexOf('--')
   const command = at === -1 ? [] : args.slice(at + 1)
   if (command.length === 0 || command[0] === '') {
     process.stderr.write(`mcp needs the upstream server command after --\n${USAGE}\n`)
     return 2
+  }
+  const flags = args.slice(0, at)
+  let approvalWaitMs = 0
+  if (flags.length > 0) {
+    if (flags.length !== 2 || flags[0] !== '--wait-for-approval-ms' || !/^[1-9][0-9]*$/u.test(flags[1] ?? '')) {
+      process.stderr.write(`mcp accepts only --wait-for-approval-ms N before --\n${USAGE}\n`)
+      return 2
+    }
+    approvalWaitMs = Number(flags[1])
+    if (!Number.isSafeInteger(approvalWaitMs) || approvalWaitMs > APPROVAL_TTL_MS) {
+      process.stderr.write(`--wait-for-approval-ms must be at most ${APPROVAL_TTL_MS}\n${USAGE}\n`)
+      return 2
+    }
   }
 
   const home = cordonHome()
@@ -632,7 +648,61 @@ function mcp(args: string[]): Promise<number> | number {
     return 1
   }
 
-  return runGateway({ command, policy, cordonHome: home, policyFile: join(home, 'policy.yaml') })
+  return runGateway({ command, policy, cordonHome: home, policyFile: join(home, 'policy.yaml'), approvalWaitMs })
+}
+
+function mcpServe(args: string[]): Promise<number> | number {
+  const at = args.indexOf('--')
+  const command = at === -1 ? [] : args.slice(at + 1)
+  if (command.length === 0 || command[0] === '') {
+    process.stderr.write(`mcp serve needs the upstream command after --\n${USAGE}\n`)
+    return 2
+  }
+  let path: string | undefined
+  let approvalWaitMs = 0
+  for (let i = 0; i < at; i += 2) {
+    const flag = args[i]
+    const value = args[i + 1]
+    if (value === undefined || (flag !== '--socket' && flag !== '--wait-for-approval-ms')) {
+      process.stderr.write(`invalid mcp serve flags\n${USAGE}\n`)
+      return 2
+    }
+    if (flag === '--socket' && path === undefined) path = value
+    else if (flag === '--wait-for-approval-ms' && approvalWaitMs === 0 && /^[1-9][0-9]*$/u.test(value)) {
+      approvalWaitMs = Number(value)
+    } else {
+      process.stderr.write(`invalid or repeated mcp serve flag ${flag}\n${USAGE}\n`)
+      return 2
+    }
+  }
+  if (path === undefined || path === '' ||
+    !Number.isSafeInteger(approvalWaitMs) || approvalWaitMs > APPROVAL_TTL_MS) {
+    process.stderr.write(`mcp serve needs a valid socket path and wait\n${USAGE}\n`)
+    return 2
+  }
+  const home = cordonHome()
+  try {
+    const policy = loadPolicy(home)
+    return serveSocketGateway({ path, command, policy, cordonHome: home,
+      policyFile: join(home, 'policy.yaml'), approvalWaitMs })
+  } catch (error) {
+    process.stderr.write(`mcp serve refused to start: ${(error as Error).message}\n`)
+    return 1
+  }
+}
+
+function mcpConnect(args: string[]): Promise<number> | number {
+  if (args.length !== 4 || args[0] !== '--socket' || args[2] !== '--owner-uid' ||
+    !/^(?:0|[1-9][0-9]*)$/u.test(args[3] ?? '')) {
+    process.stderr.write(`mcp connect needs --socket PATH --owner-uid UID\n${USAGE}\n`)
+    return 2
+  }
+  try {
+    return connectSocketGateway(args[1]!, Number(args[3]))
+  } catch (error) {
+    process.stderr.write(`mcp connect refused: ${(error as Error).message}\n`)
+    return 1
+  }
 }
 
 /**
@@ -843,7 +913,10 @@ if (launchedDirectly()) {
       },
     )
   } else {
-    process.exit(code)
+    // Node 22 can truncate a SARIF response written to a pipe when exit()
+    // runs before stdout drains. The exit code preserves the hook's refusal
+    // while letting the synchronous command finish its output.
+    process.exitCode = code
   }
 }
 

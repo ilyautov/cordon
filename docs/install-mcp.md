@@ -36,10 +36,11 @@ The `--` separator is mandatory: without it the server's flags would be read as 
 
 | MCP message | What the gateway does |
 |---|---|
-| `tools/list` (response) | tools are compared against the pins for this server (below), and a changed or new tool is removed from the list; every remaining description is observed as untrusted content, and so is every `description` and `title` inside the tool's `inputSchema`, at any depth up to 16 levels (a deeper schema marks the session). Strings in `default`, `enum` and `examples` are not observed. The hidden layer is cut before the model sees the list, because tool poisoning lives exactly there |
+| `tools/list` (response) | tools are compared against the pins for this server (below), and a changed or new tool is removed from the list; every remaining description, top-level title and annotation title is observed as untrusted content, as are `description` and `title` inside the tool's `inputSchema` and `outputSchema`, at any depth up to 16 levels (a deeper schema marks the session). Missing tools, malformed title, schema or annotation fields, unexpected result fields and unscannable metadata are withheld as a JSON-RPC error. Strings in `default`, `enum` and `examples` are not observed. The hidden layer is cut before the model sees the list, because tool poisoning lives exactly there |
+| `resources/list`, `resources/templates/list`, `prompts/list` (responses) | server-authored discovery text is observed before the host can show it to the model. Hidden text is stripped, and malformed or unknown result shapes are withheld as JSON-RPC errors. Pagination cursors and URI templates remain intact |
 | `tools/call` (request) | the call goes through the gate: allow passes it to the server, rewrite forwards it with the untrusted fragment cut out of the arguments, deny never reaches the server at all — the model gets a `CallToolResult` with `isError: true` and the reason |
-| `tools/call` (response) | text blocks are observed and substituted with the cleaned text; a block without text (an image, audio) cannot be cleaned, so the session is marked and the next consequential call escalates |
-| `resources/read`, `prompts/get` (responses) | the text is observed the same way; `prompts/get` is the classic vector — the server writes what lands in the conversation as if it were the user's own words |
+| `tools/call` (response) | text blocks, including their additional fields, `structuredContent` and `_meta` are observed; hidden text is stripped when the policy permits substitution. A non-object result, a missing or malformed `content` array, unexpected fields beside `result`, unknown nested shapes and text that needs cleaning in source view are withheld as `isError`, and the next consequential call escalates. A block without text (an image, audio) cannot be cleaned, so the session is marked and the next consequential call escalates |
+| `resources/read`, `prompts/get` (responses) | all readable result fields are observed, including metadata and text beside a content block. Missing required arrays, unknown text shapes and unexpected JSON-RPC fields are withheld as an error, and the next consequential call escalates. A resource is classified by the URI the host requested; the server cannot make an untrusted read trusted by changing the returned URI. Binary media is forwarded and marks the session as unredacted. `prompts/get` is the classic vector — the server writes what lands in the conversation as if it were the user's own words |
 | everything else | passed through unchanged |
 
 All decisions are made by the same core the hooks use; the gateway holds no security logic of its own.
@@ -48,7 +49,7 @@ All decisions are made by the same core the hooks use; the gateway holds no secu
 
 A server you connected and trusted can change a tool's description on any later start. This is the rug pull. The model reads descriptions as instruction, and you never see them. Whether the new wording is malicious is a question about meaning, which Cordon does not ask. That the wording changed is a fact, so the gateway acts on the fact.
 
-On a server's first start the gateway pins every tool: its name, its raw description and its input schema, hashed. The pins are stored in `~/.cordon/mcp-pins/`, one file per server command. On every later `tools/list`, a tool whose fingerprint differs from its pin is **held**, and so is a tool that was not there when the server was pinned:
+On a server's first start the gateway pins every tool: its name, raw description, input schema and, when present, title, annotations and output schema, hashed. The pins are stored in `~/.cordon/mcp-pins/`, one file per server command. On every later `tools/list`, a tool whose fingerprint differs from its pin is **held**, and so is a tool that was not there when the server was pinned. Existing pins for tools without these optional fields remain valid; an already pinned tool that has them is held once until the owner approves its expanded fingerprint:
 
 - it is removed from the list the host receives, so the model never reads the changed text;
 - a call to it is refused by name, and the refusal says which server to review;
@@ -94,7 +95,7 @@ In practice the mark is set before the first call. Tool descriptions are untrust
 
 ### A question with nobody to ask
 
-MCP and a LangChain agent loop carry no way to put a question in front of a person and resume. In interactive mode, a question becomes a refusal that names a one-time approval:
+MCP and a LangChain agent loop carry no built-in way to put a question in front of a person and resume. By default, an interactive question becomes a refusal that names a one-time approval:
 
 ```
 Cordon refused the call to update_price: … Nobody is here to ask, so the call is refused; the owner can allow
@@ -102,6 +103,20 @@ this exact call once with "cordon approve 3f9c0a12b7e4d651", and retrying it unc
 ```
 
 The owner sees what waits with `cordon approve`, the arguments of each call included, and allows one call with `cordon approve <id>`. The listing cuts arguments longer than 4000 characters; the request file it names keeps every one of them, and such a call is approved only with `cordon approve <id> --read`, after the owner has read the file. Arguments are listed with their keys sorted, so without this a long `body` would push the `to` past the cut, and the owner would approve a recipient they never saw. The journal carries the same id. The id is bound to the session, the tool and every argument, so an approval cannot be spent on a different recipient or a changed amount. It is used once, and a request or an approval older than an hour is void. The approval also holds only in the context it was given in, and the id names that context, not the call alone: the rule that asked, how much untrusted content the session had read and what it was, the user's turn, the certificate and the policy. After another untrusted result, readable or not, after a new message from the user, or under a changed policy, the same call is a new question under a new id; the earlier one is void with any approval given to it, and the journal says `approval-void` and what changed. So the owner approves exactly the question they were shown: an id they typed cannot come to mean a question asked after they read it. `cordon approve` shows what the session had read when it asked. Autonomous mode offers no approval: there a refusal means the policy, `destinations` or `task`, is what should change.
+
+Approve while the gateway process is still running, then retry the identical call in that process. Each gateway run receives a fresh random session ID. If an MCP host stops the gateway when an agent turn finishes, approving its pending request later and starting another host process cannot release the old call: the new gateway asks under a new ID. A scripted gateway restart test verifies this refusal even when the policy, read and call arguments are identical. A separate regression starts the gateway twice in one process to reproduce PID reuse: the later run must also refuse the old approval. The old approval stays on disk until it expires, but cannot be spent by the new session. This transport has no supported pause-and-resume handoff across gateway restarts.
+
+### Wait for the owner in the same gateway process
+
+For an attended task, the gateway can hold the original MCP call while the owner reviews it:
+
+```bash
+cordon mcp --wait-for-approval-ms 30000 -- <server command...>
+```
+
+This is opt-in; without the flag the gateway returns the refusal above. In wait mode, run `cordon approve` in another terminal to see the pending call and its complete arguments, then `cordon approve <id>` (or `--read` for a long request). The gateway tells the agent that the owner approved and asks it to **retry the identical call once**. The held call itself never reaches the upstream server. The retry goes through Cordon's full decision again: a changed policy or another untrusted result can void the approval. If Cordon's wait expires, the host sends MCP `notifications/cancelled`, or the gateway disconnects, the pending request is retired and nothing is forwarded.
+
+Set the MCP host's tool timeout **longer** than Cordon's wait; the retry is a separate tool call. The measured Codex CLI run used a 30-second Cordon wait and a 45-second MCP tool timeout. A host can time out without sending cancellation: in a live control with a one-second host timeout, an earlier design that forwarded the held call after approval sent an email even though Codex reported failure. The implemented wait mode only sends a retry instruction, so that same delayed approval sent no email. An agent that does not retry cannot complete the task. The wait holds one live process; it does not make an old approval valid after a restart. On `codex exec resume`, the new gateway asks under a new ID; the owner can review and approve that new request while the resumed process waits. A live synthetic-review control sent one email after the model retried under the new approval. The owner must have a separate channel to see the request and run `cordon approve`, and the agent must not have access to that channel or CLI.
 
 The approval is the owner's word, and an agent with a shell could try to say it for them. The gate refuses a command that runs `cordon approve`, `cordon mcp approve`, `cordon init`, `cordon policy apply` or `cordon hook`, quotes and backslashes removed first, and an exec after an untrusted read escalates anyway. The check is still crude, the same as self-protection's: a command assembled from variables, or `node -e` calling Cordon's code directly, gets past it before any untrusted read. The boundary that holds is the operating system's: an agent that runs as the same OS user as the owner, with `exec`, can write whatever the owner can. Where that matters, run the agent as a different user, or grant it no shell; where the agent has no shell, it has no way to approve at all.
 
@@ -117,5 +132,7 @@ The approval is the owner's word, and an agent with a shell could try to say it 
 ## The direction of failure
 
 Better than the hooks', and worth saying out loud. A crashed or timed-out hook reads as "let it through" on both coding harnesses. A dead gateway is a dead MCP server: calls simply do not go through, and the host shows the error. A broken line from the upstream, a dead upstream, an unusable state directory — each stops the gateway loudly instead of degrading it into a proxy that no longer checks anything. Fail-open by timeout does not exist here by construction: the gateway sits inside the pipe, and nothing reaches the model without passing through it.
+
+A response from the upstream with no matching host request also stops the gateway; it cannot carry unobserved content to the host. A JSON-RPC error for a known request is different: its message is observed as untrusted source text, and opaque `error.data` marks the session as unredacted before the host receives it. The next consequential call therefore faces the exposure rule even when the earlier tool failed.
 
 One exception, honestly named: a refusal arrives as a tool result with `isError: true`, and what the model does with that text is the model's business. The call itself did not happen — that part is guaranteed.

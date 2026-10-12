@@ -596,10 +596,25 @@ export class Cordon {
     return {
       kind: 'deny',
       rule: decision.rule,
+      approvalId: id,
       reason: `${decision.reason}. Nobody is here to ask, so the call is refused; the owner can allow this exact call once ` +
         `with "cordon approve ${id}", and retrying it unchanged then goes through`,
       ...(decision.source === undefined ? {} : { source: decision.source }),
     }
+  }
+
+  /** A host no longer waits for this exact question; a late yes must not release another call. */
+  cancelUnattendedApproval(id: string, reason: string): void {
+    const request = new ApprovalStore(this.cordonHome).cancel(id)
+    if (request === null) return
+    this.notifier.notify({
+      at: new Date().toISOString(),
+      decision: 'approval-void',
+      tool: request.tool,
+      reason: `the question ${id} was cancelled: ${reason}`,
+      source: null,
+      id,
+    })
   }
 
   /**
@@ -1018,4 +1033,3 @@ export function changed(earlier: ApprovalContext | null, now: ApprovalContext): 
 function digest(text: string): string {
   return createHash('sha256').update(text, 'utf8').digest('hex')
 }
-

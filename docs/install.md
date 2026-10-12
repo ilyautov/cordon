@@ -234,6 +234,19 @@ notify:
 
 The classes `exec`, `delete` and `financial` are deliberately absent here. `Bash` belongs to the `exec` class as a whole: parsing the command means a shell parser, and every shell parser can be worked around. If a task needs `Bash`, then `exec` is added to the profile deliberately, with the understanding that the hook does not see the contents of the command.
 
+**`blockedTools`** is an optional list of exact tool names as the hook receives them. A listed call is denied before effect classification, in either mode; `cordon approve` cannot release it. For Codex CLI, a restricted-runner policy can grant `exec` while refusing its native shell and file editor:
+
+```yaml
+profile:
+  effects: [read, summarize, exec]
+tools:
+  mcp__sandbox__run: [exec]
+  run: [exec]
+blockedTools: [Bash, apply_patch]
+```
+
+With the MCP server named `sandbox`, the hook sees the runner as `mcp__sandbox__run`; the Cordon MCP gateway sees the upstream tool as `run`, so both names are declared when both boundaries are installed. The example omits `create` and `update` and explicitly blocks Codex's `apply_patch`. A live Codex control with those effects granted and only `Bash` blocked wrote a file through native `apply_patch`, outside the runner; removing the effects or blocking that tool stopped the write ([paired run](model-origin-benchmark.md#active-native-shell-hook-and-connected-runner-in-one-configuration)). Use the actual names of every direct execution and host-editing tool in the harness. A block on `Bash` does not block a differently named shell tool, a subprocess inside an allowed tool, or calls that never reach Cordon's hook. The declared runner still needs operating-system file and network limits; Cordon does not inspect a command's later effects.
+
 ### Example: a scheduled overnight job
 
 ```yaml

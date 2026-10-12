@@ -33,6 +33,8 @@ export interface Policy {
   }
   /** Effect classes for tools the core does not know about. */
   tools: Record<string, EffectClass[]>
+  /** Exact tool names refused even when their effect class is granted. */
+  blockedTools: string[]
   /** Sources declared trusted by an explicit decision of the user. */
   trustedSources: string[]
   /**
@@ -181,6 +183,7 @@ export const DEFAULT_POLICY: Policy = {
     resources: { paths: [], hosts: [] },
   },
   tools: {},
+  blockedTools: [],
   trustedSources: [],
   toolsReturn: {},
   arguments: {},

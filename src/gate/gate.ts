@@ -114,6 +114,13 @@ function decide(call: ToolCall, ctx: GateContext): Decision {
     }
   }
 
+  // The owner can grant exec to a restricted runner without granting the
+  // harness's native shell. This is a hard refusal, not an interactive question:
+  // an approval would reopen the host path the owner meant to remove.
+  if (ctx.policy.blockedTools.includes(call.tool)) {
+    return { kind: 'deny', rule: 'tool-blocked', reason: `tool ${call.tool} is blocked by the policy` }
+  }
+
   const parts = fields(own)
 
   const selfHit = selfProtection(parts, ctx)

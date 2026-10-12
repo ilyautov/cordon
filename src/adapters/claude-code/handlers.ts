@@ -10,7 +10,7 @@ import type { Policy } from '../../policy/defaults.js'
 import { viewIsUnknown, type Source, type ToolCall } from '../../core/types.js'
 import type { Finding } from '../../sanitize/types.js'
 import { classifySource } from '../../provenance/trust.js'
-import { extractText, replaceText } from './output.js'
+import { extractText, replaceText } from '../../output/tool-text.js'
 import { renderDecision, silentOnFailure, type HookEvent, type HookOutput } from './protocol.js'
 import { sourceLabel } from '../../core/argument-keys.js'
 import { CLAUDE_CODE, type Dialect } from './dialect.js'
@@ -378,7 +378,7 @@ function report(
 }
 
 /** Built-in tools that fetch from the web, in every harness this adapter serves. */
-const WEB_TOOLS: ReadonlySet<string> = new Set(['WebFetch', 'WebSearch', 'FetchURL', 'web_fetch', 'web_search'])
+const WEB_TOOLS: ReadonlySet<string> = new Set(['WebFetch', 'WebSearch', 'FetchURL', 'web_fetch', 'web_search', 'webrun'])
 
 /** Built-in tools that read files. */
 const FILE_TOOLS: ReadonlySet<string> = new Set([

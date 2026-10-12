@@ -169,6 +169,27 @@ describe('cordon mcp approve', () => {
   })
 })
 
+describe('cordon mcp approval wait flag', () => {
+  beforeAll(() => {
+    ensureBuiltCli()
+  }, 60_000)
+
+  it('rejects a zero or malformed wait instead of silently starting the server', () => {
+    for (const value of ['0', '-1', '1.5', 'wrong']) {
+      const home = mkdtempSync(join(tmpdir(), 'cordon-mcp-cli-'))
+      const result = run(['mcp', '--wait-for-approval-ms', value, '--', process.execPath, '-e', ''], '', { CORDON_HOME: home })
+      expect(result.status).toBe(2)
+      expect(result.stderr).toContain('wait-for-approval-ms')
+    }
+  })
+
+  it('rejects unknown gateway flags', () => {
+    const home = mkdtempSync(join(tmpdir(), 'cordon-mcp-cli-'))
+    const result = run(['mcp', '--unknown', '--', process.execPath, '-e', ''], '', { CORDON_HOME: home })
+    expect(result.status).toBe(2)
+  })
+})
+
 describe('cordon audit', () => {
   beforeAll(() => {
     ensureBuiltCli()
@@ -207,6 +228,20 @@ describe('cordon audit', () => {
     expect(sarif.version).toBe('2.1.0')
     expect(sarif.runs[0].tool.driver.name).toBe('cordon')
     expect(sarif.runs[0].results.map((result: { ruleId: string }) => result.ruleId)).toContain('CA201')
+  })
+
+  it('flushes a SARIF result larger than the pipe buffer before exiting', () => {
+    const { root, home } = project()
+    const mcpServers = Object.fromEntries(Array.from({ length: 256 }, (_, index) => [
+      `fs${index}`, { command: 'npx', args: ['server-fs'] },
+    ]))
+    writeFileSync(join(root, '.mcp.json'), JSON.stringify({ mcpServers }))
+    const { stdout, status } = run(['audit', root, '--sarif'], '', { HOME: home })
+    expect(status).toBe(0)
+    expect(stdout.length).toBeGreaterThan(64 * 1024)
+    const sarif = JSON.parse(stdout)
+    expect(sarif.version).toBe('2.1.0')
+    expect(sarif.runs[0].results.length).toBeGreaterThan(100)
   })
 
   it('an unknown severity is a usage error', () => {
@@ -490,6 +525,13 @@ describe('cordon policy check and explain', () => {
     expect(stdout).toContain('financial is granted')
   })
 
+  it('distinguishes exec reach from a network-egress grant', () => {
+    const { stdout, status } = run(['policy', 'check', file('mode: interactive\nprofile:\n  effects: [read, exec]\n')], '', {})
+    expect(status).toBe(0)
+    expect(stdout).toContain('cannot enforce path or host bounds or prevent network access by withholding network-egress')
+    expect(stdout).not.toContain('the network is granted')
+  })
+
   it('check fails a file the loader would refuse, with the loader\'s words', () => {
     const { stderr, status } = run(['policy', 'check', file('mode: sometimes\n')], '', {})
     expect(status).toBe(1)
@@ -678,4 +720,3 @@ describe('records of who allowed what', () => {
     expect(readFileSync(join(home, 'policy.yaml'), 'utf8')).toBe(before)
   })
 })
-

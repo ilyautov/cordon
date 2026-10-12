@@ -330,6 +330,14 @@ export class ApprovalStore {
     }
   }
 
+  /** Retires a held question when its host timed out or cancelled the call. */
+  cancel(id: string): ShownRequest | null {
+    const request = this.read(checked(id))
+    if (request === null) return null
+    this.retire(id)
+    return request
+  }
+
   /** The requests still waiting, for `cordon approve` with no id. */
   pending(): PendingApproval[] {
     let names: string[]
