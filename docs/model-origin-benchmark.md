@@ -706,6 +706,6 @@ A paired `between` upper bound approved all Cordon questions and compared that p
 
 ## Decision
 
-The separate [PR workflow benchmark](pr-workflow-benchmark.md) covers attacker-written PR titles and forged diff histories. It includes a scripted hook probe and a small live Codex trial driven by captured GitHub PR events; neither is a model-origin result.
+The separate [PR workflow benchmark](pr-workflow-benchmark.md) covers attacker-written PR titles and forged diff histories. It includes a scripted hook probe, a small local Codex trial driven by captured GitHub PR events, and a trusted GitHub Actions quality check on exact PR heads; none is a model-origin result.
 
 Cordon should keep its deterministic tool gate and publish this model-origin limit. A string blacklist for `curl`, `sh`, or a known trigger would not secure general shell execution. Model weights need separate supply-chain review, and executed processes need enforced file, secret, and network boundaries. The connected trial now includes one small model with deliberately altered weights; it measures a local analogue, while ProjectDiscovery's weights, broader coding work, other host-capable tools and human review remain outside the measured claim.
