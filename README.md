@@ -12,13 +12,15 @@ Web pages, emails, issues, documents, tool results and MCP tool descriptions can
 
 **Ready:** a core with adapters for **Claude Code**, **Codex CLI**, **Kimi Code**, **DeepSeek Harness** and **Gemini CLI**, a gateway for **MCP hosts**, and middleware for **LangChain** agents.
 
-**Measured:** 1725 tests · 25 pinned attack vectors · 9 legitimate documents · 2 runtime dependencies.
+**Measured:** 1736 tests · 25 pinned attack vectors · 9 legitimate documents · 2 runtime dependencies.
 
 **AgentDojo** (a public benchmark of 97 agent tasks with injected attacks): with Cordon, an agent that obeys every injection got 0 attacks through on all four suites; without it, 39–100% succeeded. Utility depends on the policy: 97 of 97 tasks in interactive mode at 0.25–1.6 questions per task, 14–75% per suite on a strict autonomous policy. On a live model that follows injections, Laguna S 2.1, 0 of 80 attacks got through against 30 of 80 undefended. The methodology and where Cordon loses are in [docs/agentdojo.md](docs/agentdojo.md).
 
 **Site:** [cordon.aifrontier.tech](https://cordon.aifrontier.tech/en/) · **Lab:** [AI Frontier](https://aifrontier.tech) · **Telegram:** [Gorilla Under Hood](https://t.me/gorilla_under_hood)
 
 **Install:** [Claude Code](docs/install.md) · [Codex CLI](docs/install-codex.md) · [Kimi Code](docs/install-kimi.md) · [DeepSeek Harness](docs/install-deepseek.md) · [Gemini CLI](docs/install-gemini.md) · [MCP hosts](docs/install-mcp.md) · [LangChain](docs/install-langchain.md)
+
+**Example workflow:** [Local GitHub PR review with owner-controlled publication and merge](docs/pr-review-workflow.md).
 
 > ⚠️ **Early development.** Live runs so far:
 > - **Claude Code 2.1.236**, with all four events.
@@ -136,7 +138,7 @@ npm install @ilyautov/cordon
 npx cordon scan README.md
 ```
 
-Node 22 or newer is required. Cordon makes no network requests and no model calls. For an organization, deploy the hooks through Claude Code managed settings so a repository cannot switch them off ([docs/enterprise.md](docs/enterprise.md)).
+Node 22 or newer is required. Cordon's gate makes no network requests and no model calls. The opt-in PR review example uses a local agent and GitHub API. For an organization, deploy the hooks through Claude Code managed settings so a repository cannot switch them off ([docs/enterprise.md](docs/enterprise.md)).
 
 ## What this is NOT
 

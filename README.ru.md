@@ -12,13 +12,15 @@
 
 **Готово:** ядро и адаптеры для **Claude Code**, **Codex CLI**, **Kimi Code**, **DeepSeek Harness** и **Gemini CLI**, гейтвей для **MCP-хостов** и мидлварь для агентов на **LangChain**.
 
-**Измерено:** 1725 тестов · 25 закреплённых векторов атаки · 9 легитимных документов · 2 рантайм-зависимости.
+**Измерено:** 1736 тестов · 25 закреплённых векторов атаки · 9 легитимных документов · 2 рантайм-зависимости.
 
 **AgentDojo** (открытый бенчмарк из 97 задач агента с внедрёнными атаками): агент, выполняющий любую инъекцию, с Cordon не провёл ни одной атаки ни на одном из четырёх наборов; без него проходило 39–100%. Полезность зависит от политики: 97 задач из 97 в интерактивном режиме при 0,25–1,6 вопроса на задачу и 14–75% по наборам на строгой автономной политике. На живой модели, которая выполняет инъекции, Laguna S 2.1, прошло 0 атак из 80 против 30 из 80 без защиты. Методика и то, где Cordon проигрывает, описаны в [docs/agentdojo.md](docs/agentdojo.md).
 
 **Сайт:** [cordon.aifrontier.tech](https://cordon.aifrontier.tech/ru/) · **Лаборатория:** [AI Frontier](https://aifrontier.tech) · **Telegram:** [Gorilla Under Hood](https://t.me/gorilla_under_hood)
 
 **Установка:** [Claude Code](docs/install.md) · [Codex CLI](docs/install-codex.md) · [Kimi Code](docs/install-kimi.md) · [DeepSeek Harness](docs/install-deepseek.md) · [Gemini CLI](docs/install-gemini.md) · [MCP-хосты](docs/install-mcp.md) · [LangChain](docs/install-langchain.md)
+
+**Пример:** [локальная проверка GitHub PR с отдельным решением владельца о публикации и merge](docs/pr-review-workflow.md).
 
 > ⚠️ **Ранняя разработка.** Живые прогоны на сегодня:
 > - **Claude Code 2.1.236**, все четыре события.
