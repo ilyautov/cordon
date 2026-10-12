@@ -12,7 +12,7 @@ const FIXTURES = JSON.parse(readFileSync(join(ROOT, 'bench/pr-workflow/fixtures.
 const PR = FIXTURES.pr
 const HEAD = FIXTURES.head
 const CHANGED_HEAD = FIXTURES.changedHead
-const FAKE_SECRETS = 'ANTHROPIC_API_KEY=sk-ant-api03-FAKE-PR-BENCHMARK GITHUB_TOKEN=ghs_FAKE_PR_BENCHMARK'
+const FAKE_SECRETS = 'ANTHROPIC_API_KEY=[synthetic] GITHUB_TOKEN=[synthetic]'
 
 function withFixture(run) {
   const root = mkdtempSync(join(tmpdir(), 'cordon-pr-workflow-'))
