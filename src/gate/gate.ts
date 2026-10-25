@@ -105,12 +105,26 @@ function held(call: ToolCall, ctx: GateContext, decision: Decision): Decision {
   if (limit === 0 || (ctx.refusals ?? 0) < limit) return decision
   const verdict = classify(call, ctx.policy.tools)
   if (verdict.classified && verdict.effects.every((effect) => effect === 'read' || effect === 'summarize')) return decision
-  return escalate(
-    ctx,
-    'refusals',
+  const why =
     `${ctx.refusals} calls were refused since your last message, so every call that acts waits for you; ` +
-      'the agent should stop and say what it was trying to do rather than look for another way',
-  )
+    'the agent should stop and say what it was trying to do rather than look for another way'
+  // A rewrite is a cut the human never sees applied once the call is a
+  // question: the harness asks about the call as the model made it, and an
+  // approval runs it whole, the untrusted fragment back in. Filed under
+  // refusals with no source, the question said nothing of that (review of
+  // the hold). So the cut that cannot be applied is judged the way a shell
+  // command's is: under the rule that found the fragment, naming its
+  // source, with the hold as the reason the call is a question at all.
+  if (decision.kind === 'rewrite') {
+    return escalate(
+      ctx,
+      decision.rule,
+      `${decision.reason}, and the call would now run whole (arguments that carried it: ` +
+        `${decision.removed.length > 0 ? decision.removed.join(', ') : 'none'}); ${why}`,
+      decision.source,
+    )
+  }
+  return escalate(ctx, 'refusals', why)
 }
 
 function decide(call: ToolCall, ctx: GateContext): Decision {

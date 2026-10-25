@@ -11,12 +11,12 @@ import { ApprovalStore } from '../src/session/approvals.js'
 // refused call is exactly that point, so after a few refusals in one turn
 // every call that acts goes back to the human until they write again.
 
-function make(mode: Policy['mode'], refusals?: number) {
+function make(mode: Policy['mode'], refusals?: number, effects: Policy['profile']['effects'] = ['read', 'create']) {
   const home = mkdtempSync(join(tmpdir(), 'cordon-refusals-'))
   const log = join(home, 'events.jsonl')
   const policy: Policy = structuredClone(DEFAULT_POLICY)
   policy.mode = mode
-  policy.profile = { effects: ['read', 'create'], resources: { paths: [], hosts: [] } }
+  policy.profile = { effects, resources: { paths: [], hosts: [] } }
   policy.tools = { read_file: ['read'], write_file: ['create'], delete_file: ['delete'] }
   policy.notify = { file: log }
   if (refusals !== undefined) policy.refusals = refusals
@@ -133,6 +133,56 @@ describe('what a refusal tells the agent', () => {
     cordon.onUserPrompt('tidy up the notes')
     cordon.gate(DELETE)
     expect(readFileSync(log, 'utf8')).not.toMatch(/another way to the same end/i)
+  })
+})
+
+describe('the hold never weakens a cut', () => {
+  // Review of the hold: a rewrite under it became a question filed under
+  // refusals, with no source, and an approval ran the call with its
+  // original arguments, the untrusted fragment back in. The cut is a
+  // protection; where it cannot be applied, the call is judged whole under
+  // the rule that found the fragment, as a shell command is.
+  const REVIEW = 'The delivery was slower than promised and the packaging arrived slightly crushed on one corner.'
+  const NOTE = '/w/feedback.txt'
+  const WRITE_QUOTING = { tool: 'Write', args: { file_path: NOTE, content: `A note.\n${REVIEW}\nend` } }
+
+  function primed(mode: Policy['mode']) {
+    // Write is create and update; the hold's own fixture grants create alone.
+    const made = make(mode, undefined, ['read', 'create', 'update'])
+    const cordon = made.open()
+    cordon.onUserPrompt(`write a note about the feedback to ${NOTE}`)
+    cordon.observe(REVIEW, { id: 'r1', kind: 'tool', label: 'wb_reviews', trust: 'untrusted' })
+    expect(cordon.gate(WRITE_QUOTING).kind).toBe('rewrite')
+    return { ...made, cordon }
+  }
+
+  it('a rewrite under the hold is a question under its own rule, naming the source', () => {
+    const { cordon } = primed('interactive')
+    for (let i = 0; i < 3; i++) expect(cordon.gateUnattended(DELETE).kind).toBe('deny')
+    const held = cordon.gate(WRITE_QUOTING)
+    expect(held.kind).toBe('ask')
+    expect(held.kind === 'ask' && held.rule).toBe('provenance')
+    expect(held.kind === 'ask' && held.source).toBe('wb_reviews')
+    expect(held.kind === 'ask' && held.reason).toMatch(/untrusted fragment/u)
+    expect(held.kind === 'ask' && held.reason).toMatch(/refused since your last message/u)
+  })
+
+  it('with nobody to ask, the refusal keeps the rule and the source too', () => {
+    const { cordon } = primed('interactive')
+    for (let i = 0; i < 3; i++) cordon.gateUnattended(DELETE)
+    const held = cordon.gateUnattended(WRITE_QUOTING)
+    expect(held.kind).toBe('deny')
+    expect(held.kind === 'deny' && held.rule).toBe('provenance')
+    expect(held.kind === 'deny' && held.source).toBe('wb_reviews')
+    expect(held.kind === 'deny' && held.reason).toMatch(/cordon approve [0-9a-f]{16}/u)
+  })
+
+  it('in autonomous mode the rewrite under the hold is refused under its own rule', () => {
+    const { cordon } = primed('autonomous')
+    for (let i = 0; i < 3; i++) cordon.gate(DELETE)
+    const held = cordon.gate(WRITE_QUOTING)
+    expect(held.kind).toBe('deny')
+    expect(held.kind === 'deny' && held.rule).toBe('provenance')
   })
 })
 
