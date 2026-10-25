@@ -32,3 +32,19 @@ describe('sample', () => {
     expect(result.endsWith('…')).toBe(true)
   })
 })
+
+describe('sample: control characters', () => {
+  it('spells out controls, format characters and line separators', () => {
+    const text = sample('ok\u0007 \u001B[31mred\u001B[0m \u200E \u2028x')
+    expect(text).not.toMatch(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u)
+    expect(text).toContain('<U+0007>')
+    expect(text).toContain('<U+001B>[31mred')
+    expect(text).toContain('<U+200E>')
+  })
+
+  it('truncates after escaping, so a cut never splits an escape', () => {
+    const text = sample('\u0007'.repeat(40), 20)
+    expect(text.endsWith('…')).toBe(true)
+    expect(text).not.toMatch(/<U\+00$/u)
+  })
+})

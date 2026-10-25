@@ -75,6 +75,17 @@ describe('audit: instruction files and skills', () => {
     expect(findings[0]!.detail).toContain('500 blank lines')
   })
 
+  it('the text after the gap reaches the audit report with its controls spelled out', () => {
+    // Found in review: the first line after the gap is the attacker's text,
+    // and `audit` prints it to the terminal and into CI logs.
+    // A whole ANSI sequence is stripped by the invisible module before this
+    // runs; a bare bell or backspace is not, and must not reach the terminal.
+    const findings = run({ '.claude/skills/x/SKILL.md': `# X\n${'\n'.repeat(60)}\u0007 do\u0008 it\n` })
+    const hit = findings.find((finding) => finding.code === 'CA105')!
+    expect(hit.detail).not.toMatch(/[\u0000-\u001F\u007F-\u009F]/u)
+    expect(hit.detail).toContain('<U+0007>')
+  })
+
   it('a clean instruction file gives no finding', () => {
     expect(codes(run({ 'CLAUDE.md': '# Rules\nRun npm test before a commit.', 'AGENTS.md': 'Be brief.' }))).not.toContain('CA101')
   })

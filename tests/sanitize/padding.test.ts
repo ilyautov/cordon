@@ -65,3 +65,44 @@ describe('detectPadding', () => {
     expect(detectPadding('')).toEqual([])
   })
 })
+
+describe('detectPadding: what counts as blank', () => {
+  // Found in review: blankness relied on what the invisible module strips.
+  // A zero-width non-joiner is cut between letters and kept on a line of
+  // its own, so a padding written in U+200C read as hundreds of lines of
+  // text and gave no finding.
+  it('a line of zero-width non-joiners is blank', () => {
+    expect(detectPadding(`a\n${blank(100, '\u200C\u200C\u200C')}b\n`)).toHaveLength(1)
+  })
+
+  it('a line of default-ignorable and format characters is blank', () => {
+    // U+034F combining grapheme joiner, U+2060 word joiner, U+FE0F variation
+    // selector, U+00AD soft hyphen, U+180E Mongolian vowel separator.
+    expect(detectPadding(`a\n${blank(100, '\u034F\u2060\uFE0F\u00AD\u180E')}b\n`)).toHaveLength(1)
+  })
+
+  it('a line of Hangul fillers or blank Braille patterns is blank', () => {
+    expect(detectPadding(`a\n${blank(100, '\u115F\u1160\u3164\uFFA0\u2800')}b\n`)).toHaveLength(1)
+  })
+
+  it('the next line character U+0085 is a blank line of its own', () => {
+    expect(detectPadding(`a\n${blank(100, '\u0085')}b\n`)).toHaveLength(1)
+  })
+
+  it('a line with one visible character is not blank', () => {
+    expect(detectPadding(`a\n${blank(100, '\u200C.\u200C')}b\n`)).toEqual([])
+  })
+})
+
+describe('detectPadding: the sample is safe to print', () => {
+  it('spells out a control character in the text after the gap', () => {
+    // The text after the gap is the attacker's, and the sample goes to the
+    // human's terminal through scan and audit.
+    const findings = detectPadding(`a\n${blank(100)}\u0007ring\u0008 \u001Bx and \u2028 forge\n`)
+    expect(findings).toHaveLength(1)
+    const text = findings[0]!.sample
+    expect(text).not.toMatch(/[\u0000-\u001F\u007F-\u009F\u2028\u2029]/u)
+    expect(text).toContain('<U+0007>')
+    expect(text).toContain('<U+001B>')
+  })
+})

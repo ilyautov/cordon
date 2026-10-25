@@ -9625,8 +9625,9 @@ function words(text) {
 }
 
 // src/sanitize/types.ts
+var CONTROL2 = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu;
 function sample(text, max = 80) {
-  const oneLine = text.replace(/\s+/g, " ").trim();
+  const oneLine = text.replace(/\s+/g, " ").replace(CONTROL2, (char) => `<U+${(char.codePointAt(0) ?? 0).toString(16).toUpperCase().padStart(4, "0")}>`).trim();
   const chars = [...oneLine];
   if (chars.length <= max) return oneLine;
   if (max <= 0) return "";
@@ -12209,7 +12210,7 @@ function decodeIfText(match, decode) {
 
 // src/sanitize/padding.ts
 var PADDING_THRESHOLD = 50;
-var BLANK = /^\s*$/u;
+var BLANK = /^[\s\u0085\p{Cf}\p{Default_Ignorable_Code_Point}\u2800\u115F\u1160\u3164\uFFA0]*$/u;
 function detectPadding(input) {
   const findings = [];
   const lines = input.split(/\r\n|\r|\n/u);
@@ -14642,9 +14643,9 @@ function humanReport(about, findings) {
   if (hidden > 0) lines.push(`  - and ${hidden} more findings of the same kind, not listed here`);
   return [about.lead, `Source: "${forHuman(about.label)}".`, about.note, ...lines].join("\n");
 }
-var CONTROL2 = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu;
+var CONTROL3 = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu;
 function forHuman(text) {
-  return text.replace(CONTROL2, (char) => {
+  return text.replace(CONTROL3, (char) => {
     const code = char.codePointAt(0) ?? 0;
     return `<U+${code.toString(16).toUpperCase().padStart(4, "0")}>`;
   });
