@@ -41,6 +41,7 @@ export const CODES = {
   CA102: { severity: 'medium', owasp: 'LLM01 Prompt Injection', title: 'an encoded block in a file the agent loads as instruction' },
   CA103: { severity: 'low', owasp: 'LLM01 Prompt Injection', title: 'markup hidden when rendered in a file the agent loads as instruction' },
   CA104: { severity: 'low', owasp: 'LLM01 Prompt Injection', title: 'a word mixing scripts in a file the agent loads as instruction' },
+  CA105: { severity: 'medium', owasp: 'LLM01 Prompt Injection', title: 'text after a long run of blank lines in a file the agent loads as instruction' },
   CA201: { severity: 'medium', owasp: 'LLM01 Prompt Injection', title: 'an MCP server not behind the Cordon gateway' },
   CA202: { severity: 'medium', owasp: 'LLM03 Supply Chain', title: 'an MCP server package started without a pinned version' },
   CA203: { severity: 'high', owasp: 'LLM02 Sensitive Information Disclosure', title: 'a literal secret in an MCP server configuration' },
@@ -143,13 +144,18 @@ function markdownUnder(dir: string, depth: number): string[] {
  * HTML comment or a hidden element hides only in a rendered preview, such as
  * GitHub's: low. A word mixing scripts is most often a brand or slang, and
  * only sometimes a homoglyph: low. Ranking them together buried the one
- * real finding on a live machine under fifty comments.
+ * real finding on a live machine under fifty comments. Text below a long
+ * run of blank lines is visible to whoever scrolls that far and hidden from
+ * the reviewer who stops where the file appears to end: medium, like an
+ * encoded block. VirusTotal's October 2026 survey found it the most common
+ * way a malicious skill hid its instruction.
  */
 const INSTRUCTION_CODES: Array<{ code: Code; kinds: ReadonlySet<string>; why: string }> = [
   { code: 'CA101', kinds: new Set(['invisible']), why: 'the model reads it; no editor shows it' },
   { code: 'CA102', kinds: new Set(['encoded']), why: 'the model can decode it; a reviewer reads past it' },
   { code: 'CA103', kinds: new Set(['hidden-html']), why: 'visible in the source, hidden in a rendered preview' },
   { code: 'CA104', kinds: new Set(['mixed-script']), why: 'usually a brand name or slang, sometimes a homoglyph; check the sample' },
+  { code: 'CA105', kinds: new Set(['padding']), why: 'a reviewer stops scrolling where the file appears to end; read the tail' },
 ]
 
 function instructionFinding(path: string, base: { dir: string; label: string }, add: Add): void {
@@ -161,7 +167,7 @@ function instructionFinding(path: string, base: { dir: string; label: string }, 
     const matching = found.filter((finding) => kinds.has(finding.kind))
     if (matching.length === 0) continue
     const details = [...new Set(matching.map((finding) => finding.detail))].join(', ')
-    const samples = code === 'CA104' ? `: ${[...new Set(matching.map((finding) => finding.sample))].slice(0, 3).join(', ')}` : ''
+    const samples = code === 'CA104' || code === 'CA105' ? `: ${[...new Set(matching.map((finding) => finding.sample))].slice(0, 3).join(', ')}` : ''
     add(code, file, `${matching.length} × ${details}${samples}; ${why}`)
   }
 }

@@ -1,4 +1,4 @@
-export type FindingKind = 'invisible' | 'hidden-html' | 'annotation' | 'mixed-script' | 'encoded'
+export type FindingKind = 'invisible' | 'hidden-html' | 'annotation' | 'mixed-script' | 'encoded' | 'padding'
 
 /**
  * A finding is a risk signal, not a verdict. Cordon blocks nothing on the

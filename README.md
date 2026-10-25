@@ -113,8 +113,9 @@ Output is text, JSON or SARIF, and `--fail-on high` gates a build ([docs/audit.m
 | `annotation` | text in `alt` and `title` | no, flagged only |
 | `mixed-script` | mixed writing systems inside one word | no, flagged only |
 | `encoded` | base64, hex and percent sequences carrying coherent speech, up to three levels deep | no, flagged only |
+| `padding` | text after 50 or more blank lines in a row, below where a reviewer stops scrolling | no, flagged only |
 
-The last three are legitimate all the time, so cutting them would break useful work.
+The last four are legitimate all the time, so cutting them would break useful work.
 
 ## Before and after
 

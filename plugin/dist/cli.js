@@ -12207,6 +12207,26 @@ function decodeIfText(match, decode) {
   return texty / chars.length >= TEXT_RATIO ? decoded : null;
 }
 
+// src/sanitize/padding.ts
+var PADDING_THRESHOLD = 50;
+var BLANK = /^\s*$/u;
+function detectPadding(input) {
+  const findings = [];
+  const lines = input.split(/\r\n|\r|\n/u);
+  let run = 0;
+  for (const line of lines) {
+    if (BLANK.test(line)) {
+      run += 1;
+      continue;
+    }
+    if (run >= PADDING_THRESHOLD) {
+      findings.push({ kind: "padding", detail: "blank-lines", sample: `${run} blank lines, then: ${sample(line)}` });
+    }
+    run = 0;
+  }
+  return findings;
+}
+
 // src/sanitize/index.ts
 function sanitize(input) {
   const invisible = stripInvisible(input);
@@ -12220,7 +12240,8 @@ ${removed}` : html.clean;
       ...invisible.findings,
       ...html.findings,
       ...detectMixedScript(searchable),
-      ...detectEncoded(searchable)
+      ...detectEncoded(searchable),
+      ...detectPadding(invisible.clean)
     ]
   };
 }
@@ -15913,6 +15934,7 @@ var CODES = {
   CA102: { severity: "medium", owasp: "LLM01 Prompt Injection", title: "an encoded block in a file the agent loads as instruction" },
   CA103: { severity: "low", owasp: "LLM01 Prompt Injection", title: "markup hidden when rendered in a file the agent loads as instruction" },
   CA104: { severity: "low", owasp: "LLM01 Prompt Injection", title: "a word mixing scripts in a file the agent loads as instruction" },
+  CA105: { severity: "medium", owasp: "LLM01 Prompt Injection", title: "text after a long run of blank lines in a file the agent loads as instruction" },
   CA201: { severity: "medium", owasp: "LLM01 Prompt Injection", title: "an MCP server not behind the Cordon gateway" },
   CA202: { severity: "medium", owasp: "LLM03 Supply Chain", title: "an MCP server package started without a pinned version" },
   CA203: { severity: "high", owasp: "LLM02 Sensitive Information Disclosure", title: "a literal secret in an MCP server configuration" },
@@ -15998,7 +16020,8 @@ var INSTRUCTION_CODES = [
   { code: "CA101", kinds: /* @__PURE__ */ new Set(["invisible"]), why: "the model reads it; no editor shows it" },
   { code: "CA102", kinds: /* @__PURE__ */ new Set(["encoded"]), why: "the model can decode it; a reviewer reads past it" },
   { code: "CA103", kinds: /* @__PURE__ */ new Set(["hidden-html"]), why: "visible in the source, hidden in a rendered preview" },
-  { code: "CA104", kinds: /* @__PURE__ */ new Set(["mixed-script"]), why: "usually a brand name or slang, sometimes a homoglyph; check the sample" }
+  { code: "CA104", kinds: /* @__PURE__ */ new Set(["mixed-script"]), why: "usually a brand name or slang, sometimes a homoglyph; check the sample" },
+  { code: "CA105", kinds: /* @__PURE__ */ new Set(["padding"]), why: "a reviewer stops scrolling where the file appears to end; read the tail" }
 ];
 function instructionFinding(path, base, add) {
   const text = readSmall(path);
@@ -16009,7 +16032,7 @@ function instructionFinding(path, base, add) {
     const matching = found2.filter((finding) => kinds.has(finding.kind));
     if (matching.length === 0) continue;
     const details = [...new Set(matching.map((finding) => finding.detail))].join(", ");
-    const samples = code === "CA104" ? `: ${[...new Set(matching.map((finding) => finding.sample))].slice(0, 3).join(", ")}` : "";
+    const samples = code === "CA104" || code === "CA105" ? `: ${[...new Set(matching.map((finding) => finding.sample))].slice(0, 3).join(", ")}` : "";
     add(code, file, `${matching.length} \xD7 ${details}${samples}; ${why}`);
   }
 }

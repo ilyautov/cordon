@@ -14,7 +14,7 @@ import { AS_SOURCE, AS_SOURCE_DIR, LOYALTY_DIR, RENDERED } from './fixtures/loya
  * A legitimate document must not have one under any circumstances, even when
  * the document is entirely about injections.
  */
-const FORBIDDEN = new Set(['invisible', 'hidden-html', 'mixed-script'])
+const FORBIDDEN = new Set(['invisible', 'hidden-html', 'mixed-script', 'padding'])
 
 describe('the loyalty corpus', () => {
   it('the corpus is not empty', () => {
