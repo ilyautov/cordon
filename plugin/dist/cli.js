@@ -7776,7 +7776,7 @@ function viewIsUnknown(source) {
 }
 
 // src/gate/gate.ts
-import { resolve as resolve3, sep as sep3 } from "node:path";
+import { isAbsolute as isAbsolute4, resolve as resolve3, sep as sep3 } from "node:path";
 
 // src/gate/fields.ts
 var MAX_FIELDS = 2e3;
@@ -8778,7 +8778,7 @@ function decide(call, ctx) {
   if (loose) return escalate(ctx, "controlled", loose, ctx.exposure?.source);
   const scan = scanTaint(parts, ctx.taint, ctx.userAtoms ?? [], bound);
   if (!scan.tainted) {
-    const exposed = exposedCall(call.tool, verdict.effects, parts, ctx, bound);
+    const exposed = exposedCall(call, verdict.effects, parts, ctx, bound);
     if (exposed) return escalate(ctx, ctx.exposure?.memory === true ? "memory-carry" : "exposure", exposed, ctx.exposure?.source);
     return { kind: "allow" };
   }
@@ -8787,7 +8787,7 @@ function decide(call, ctx) {
   if (!verdict.effects.some((effect) => IRREVERSIBLE.has(effect))) {
     const targets = scan.targets.filter((atom) => !isDate(atom));
     if (targets.length === 0 || identifierReadUnderMark(verdict.effects, targets, ctx)) {
-      const exposed = exposedCall(call.tool, verdict.effects, parts, ctx, bound);
+      const exposed = exposedCall(call, verdict.effects, parts, ctx, bound);
       if (exposed) return escalate(ctx, ctx.exposure?.memory === true ? "memory-carry" : "exposure", exposed, ctx.exposure?.source);
       return { kind: "allow" };
     }
@@ -8818,7 +8818,7 @@ function decide(call, ctx) {
   if (!cleaned.possible) {
     return escalate(ctx, "provenance", `quarantine is impossible: ${cleaned.reason}${origin(blamedLabels)}`, blamed);
   }
-  const exposedToo = exposedCall(call.tool, verdict.effects, parts, ctx, bound);
+  const exposedToo = exposedCall(call, verdict.effects, parts, ctx, bound);
   if (exposedToo) {
     return escalate(ctx, ctx.exposure?.memory === true ? "memory-carry" : "exposure", exposedToo, ctx.exposure?.source);
   }
@@ -8962,22 +8962,28 @@ function escalate(ctx, rule, reason, source) {
   const kind = ctx.policy.mode === "interactive" ? "ask" : "deny";
   return source === void 0 ? { kind, rule, reason } : { kind, rule, reason, source };
 }
-function exposedCall(tool, effects, parts, ctx, bound) {
+function exposedCall(call, effects, parts, ctx, bound) {
   if (ctx.policy.exposure === false) return null;
   const exposure = ctx.exposure;
   if (exposure === void 0 || exposure === null) return null;
   if (!effects.some((effect) => EXPOSURE_SENSITIVE.has(effect))) return null;
+  const { tool, args } = call;
+  const named2 = new Set(ctx.userAtoms ?? []);
+  const mandate = ctx.policy.destinations ?? [];
+  const mandateApplies = !effects.includes("exec");
+  const patchPaths = tool === "apply_patch" && mandateApplies && exposure.memory !== true && roleOf(tool, "paths", ctx.policy.arguments ?? {}) === "destination" && Array.isArray(args.paths) ? args.paths : void 0;
   const targets = /* @__PURE__ */ new Set();
   for (const part of parts) {
     const { value } = part;
     if (typeof value !== "string" || bound(part)) continue;
+    if (part.key === "paths" && part.depth === 1 && part.holder === patchPaths && isAbsolute4(value) && mandate.includes(value)) {
+      targets.add(value);
+      continue;
+    }
     for (const atom of atoms(value)) {
       if (!isDate(atom)) targets.add(atom);
     }
   }
-  const named2 = new Set(ctx.userAtoms ?? []);
-  const mandate = ctx.policy.destinations ?? [];
-  const mandateApplies = !effects.includes("exec");
   const allNamed = [...targets].every((atom) => named2.has(atom) || mandateApplies && inMandate(atom, mandate));
   if (targets.size > 0 && allNamed) return null;
   if (exposure.memory !== true && allNamed && !effects.includes("exec") && namesADestination(tool, parts, ctx.userNames ?? [], mandate, ctx.policy.arguments ?? {}, bound)) return null;
@@ -14873,7 +14879,7 @@ function rewriteNotice(decision) {
 }
 
 // src/adapters/claude-code/dialect.ts
-import { isAbsolute as isAbsolute4, sep as sep4 } from "node:path";
+import { isAbsolute as isAbsolute5, sep as sep4 } from "node:path";
 var asIs = (call) => call;
 var named = (...tools) => {
   const set = new Set(tools);
@@ -14909,10 +14915,10 @@ var CODEX = {
     const { command, ...rest } = call.args;
     const read = typeof command === "string" ? readPatch(command) : null;
     if (read === null) return { unreadable: "apply_patch carries no patch that names a file" };
-    if (cwd === null && read.paths.some((path) => !isAbsolute4(path))) {
+    if (cwd === null && read.paths.some((path) => !isAbsolute5(path))) {
       return { unreadable: "apply_patch names a relative path and the event carries no working directory" };
     }
-    const paths = read.paths.map((path) => cwd !== null && !isAbsolute4(path) ? `${cwd.replace(/[\\/]+$/u, "")}${sep4}${path}` : path);
+    const paths = read.paths.map((path) => cwd !== null && !isAbsolute5(path) ? `${cwd.replace(/[\\/]+$/u, "")}${sep4}${path}` : path);
     return { tool: call.tool, args: { ...rest, patch: command, paths } };
   }
 };

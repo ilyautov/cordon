@@ -1,4 +1,4 @@
-import { resolve, sep } from 'node:path'
+import { isAbsolute, resolve, sep } from 'node:path'
 import type { ArgumentRole, Certificate, Decision, EffectClass, ExposureMark, Source, ToolCall } from '../core/types.js'
 import { fields, type Field } from './fields.js'
 import { secretKinds } from './secrets.js'
@@ -230,7 +230,7 @@ function decide(call: ToolCall, ctx: GateContext): Decision {
 
   const scan = scanTaint(parts, ctx.taint, ctx.userAtoms ?? [], bound)
   if (!scan.tainted) {
-    const exposed = exposedCall(call.tool, verdict.effects, parts, ctx, bound)
+    const exposed = exposedCall(call, verdict.effects, parts, ctx, bound)
     if (exposed) return escalate(ctx, ctx.exposure?.memory === true ? 'memory-carry' : 'exposure', exposed, ctx.exposure?.source)
     return { kind: 'allow' }
   }
@@ -254,7 +254,7 @@ function decide(call: ToolCall, ctx: GateContext): Decision {
   if (!verdict.effects.some((effect) => IRREVERSIBLE.has(effect))) {
     const targets = scan.targets.filter((atom) => !isDate(atom))
     if (targets.length === 0 || identifierReadUnderMark(verdict.effects, targets, ctx)) {
-      const exposed = exposedCall(call.tool, verdict.effects, parts, ctx, bound)
+      const exposed = exposedCall(call, verdict.effects, parts, ctx, bound)
       if (exposed) return escalate(ctx, ctx.exposure?.memory === true ? 'memory-carry' : 'exposure', exposed, ctx.exposure?.source)
       return { kind: 'allow' }
     }
@@ -323,7 +323,7 @@ function decide(call: ToolCall, ctx: GateContext): Decision {
   // last, just before a rewrite would let the call through, so every more
   // specific refusal above keeps its own reason. The write back to the file
   // read stays exempt: nothing leaves, by definition.
-  const exposedToo = exposedCall(call.tool, verdict.effects, parts, ctx, bound)
+  const exposedToo = exposedCall(call, verdict.effects, parts, ctx, bound)
   if (exposedToo) {
     return escalate(ctx, ctx.exposure?.memory === true ? 'memory-carry' : 'exposure', exposedToo, ctx.exposure?.source)
   }
@@ -577,7 +577,7 @@ function escalate(ctx: GateContext, rule: Rule, reason: string, source?: string)
  * residue is what resource bounds (hosts/paths in the certificate) are for.
  */
 function exposedCall(
-  tool: string,
+  call: ToolCall,
   effects: readonly EffectClass[],
   parts: readonly Field[],
   ctx: GateContext,
@@ -591,6 +591,18 @@ function exposedCall(
 
   if (!effects.some((effect) => EXPOSURE_SENSITIVE.has(effect))) return null
 
+  const { tool, args } = call
+  const named = new Set(ctx.userAtoms ?? [])
+  const mandate = ctx.policy.destinations ?? []
+  // The mandate names where a task sends things, and a command is not sent
+  // anywhere: `rm -rf build # ops@acme.example` matched a mandated address
+  // in its comment. The user's own atoms still count for exec.
+  const mandateApplies = !effects.includes('exec')
+  const patchPaths = tool === 'apply_patch' && mandateApplies && exposure.memory !== true &&
+    roleOf(tool, 'paths', ctx.policy.arguments ?? {}) === 'destination' && Array.isArray(args.paths)
+    ? args.paths
+    : undefined
+
   // The call's targets are the atoms of its arguments, extracted by the same
   // function that extracts them from the user's messages: a link or an
   // identifier must mean the same token on both sides of the comparison, or
@@ -601,16 +613,18 @@ function exposedCall(
   for (const part of parts) {
     const { value } = part
     if (typeof value !== 'string' || bound(part)) continue
+    // The adapter lifts each patch target into paths. An exact policy entry
+    // names that whole file, including incidental identifiers in its
+    // directories. The patch text and every other field still yield atoms.
+    if (part.key === 'paths' && part.depth === 1 && part.holder === patchPaths &&
+      isAbsolute(value) && mandate.includes(value)) {
+      targets.add(value)
+      continue
+    }
     for (const atom of atoms(value)) {
       if (!isDate(atom)) targets.add(atom)
     }
   }
-  const named = new Set(ctx.userAtoms ?? [])
-  const mandate = ctx.policy.destinations ?? []
-  // The mandate names where a task sends things, and a command is not sent
-  // anywhere: `rm -rf build # ops@acme.example` matched a mandated address
-  // in its comment. The user's own atoms still count for exec.
-  const mandateApplies = !effects.includes('exec')
   const allNamed = [...targets].every((atom) => named.has(atom) || (mandateApplies && inMandate(atom, mandate)))
   if (targets.size > 0 && allNamed) return null
   // A field whose whole value is a name the user wrote — "send it to Alice"
