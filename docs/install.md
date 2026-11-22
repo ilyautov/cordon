@@ -32,6 +32,8 @@ The list of installed hooks is shown by `/hooks` in Claude Code. It answers the 
 
 The second question is answered by `cordon doctor`. It reads the effective policy, runs a built-in attack sample through the whole path, and names the dangerous parts of the configuration.
 
+For CI, run `cordon doctor --json`. It writes one JSON object to stdout, including the effective policy settings, `warnings` and `selfCheck`. Exit code 0 means the self-check passed, even with configuration warnings. Exit code 1 indicates a broken check and still produces a report. The field `hookWiring` reads `"unchecked"` because verifying host integration requires a real hook event. Run the [paired file-write probe](compatibility.md#check-an-installed-version) to check a Claude Code or Codex installation. The [Codex installation check](install-codex.md#checking-that-it-works) walks through one harmless native tool call.
+
 The path to an installed plugin contains the marketplace name and the version, so it changes on every update. Do not hard-code it in scripts; ask the harness instead:
 
 ```bash

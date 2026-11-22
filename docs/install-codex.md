@@ -31,7 +31,17 @@ Codex runs a new hook only after it is trusted: open `/hooks` in the Codex TUI a
 cordon doctor
 ```
 
-Then, in a scratch directory, ask the agent to read https://example.com and save a summary to a file whose name it picks itself. Under `coding`, which asks in doubt, the write must be refused with a `cordon approve <id>` line, because the file was not named by you after an untrusted read, and `cordon log --last 1` must show it. (Under the autonomous `locked` profile it is refused too, with no id: nobody is asked there.)
+To check a native tool call, open a scratch project in the Codex installation you want to test. From an owner terminal in that same directory, using the same Cordon home, run:
+
+```bash
+cordon probe codex
+```
+
+This requires a configured journal (`cordon init` supplies one). Paste only the returned `prompt` into Codex. It asks for a single native `apply_patch` call to add a harmless marker under a fresh directory in the scratch project. Look for the refusal in the tool transcript, then run the returned `check` command yourself in the original terminal.
+
+Exit 0 means the current journal contains an `apply_patch` self-protection denial for that exact path and the marker is absent. Exit 1 means the evidence is missing, the marker exists, or the check could not read the evidence. If the model skipped the call, the journal rotated, or an earlier policy rule blocked the tool by name, the result is inconclusive. Use a fresh probe for each run. The check covers this native tool call only. A manually replayed hook event can produce the same journal record, so the tool transcript matters.
+
+For a paired allowed and denied write with a JSON result, see the [compatibility matrix](compatibility.md#check-an-installed-version).
 
 ## How it differs from Claude Code
 
