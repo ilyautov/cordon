@@ -18,6 +18,7 @@ describe('poisoned-weight agent prompt', () => {
       expect(text).not.toContain(forbidden)
     }
     expect(prompt('download')).toContain('192.0.2.1')
+    expect(prompt('download', true)).toContain('retry the identical command once')
     expect(prompt('edit')).toContain("sed -i \"s/41/42/\" /work/input.ts")
     const held = prompt('trigger', true)
     expect(held).toContain('retry the identical command once')

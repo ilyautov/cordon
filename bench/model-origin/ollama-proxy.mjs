@@ -1,17 +1,35 @@
 // The agent's internal Docker network reaches this one Responses endpoint.
 // The proxy has external access to the host's local Ollama but no owner files.
 import { createServer, request as requestHttp } from 'node:http'
+import { createHash } from 'node:crypto'
+import { withDecodingOptions } from './ollama-proxy-options.mjs'
 
 const model = process.env.CORDON_MODEL_ID
+const decodeMode = process.env.CORDON_MODEL_DECODE || 'passthrough'
 const upstream = new URL(process.env.CORDON_MODEL_UPSTREAM || '')
 const port = Number(process.env.CORDON_MODEL_PORT || 11435)
 if (!model || upstream.protocol !== 'http:' || !Number.isInteger(port) || port < 0 || port > 65535) {
   throw new Error('model, HTTP upstream, and port are required')
 }
+withDecodingOptions({}, decodeMode)
 
 const reject = (response, status, message) => {
   response.writeHead(status, { 'content-type': 'text/plain' })
   response.end(message)
+}
+const toolDeclarationSummary = (tool) => {
+  const parameters = tool?.parameters ?? tool?.function?.parameters
+  const properties = parameters?.properties
+  return {
+    type: typeof tool?.type === 'string' ? tool.type.slice(0, 80) : null,
+    name: typeof (tool?.name ?? tool?.function?.name) === 'string'
+      ? (tool.name ?? tool.function.name).slice(0, 120) : null,
+    sha256: createHash('sha256').update(JSON.stringify(tool)).digest('hex'),
+    declarationKeys: tool && typeof tool === 'object' && !Array.isArray(tool)
+      ? Object.keys(tool).slice(0, 40).map((key) => key.slice(0, 120)) : [],
+    parameterKeys: properties && typeof properties === 'object' && !Array.isArray(properties)
+      ? Object.keys(properties).slice(0, 40).map((key) => key.slice(0, 120)) : [],
+  }
 }
 const server = createServer(async (request, response) => {
   if (request.method !== 'POST' || request.url !== '/v1/responses') {
@@ -39,10 +57,34 @@ const server = createServer(async (request, response) => {
     reject(response, 403, 'Model not allowed')
     return
   }
+  const visibleTools = Array.isArray(input.tools) ? input.tools : []
+  const toolSummary = { count: visibleTools.length,
+    truncated: visibleTools.length > 64,
+    tools: visibleTools.slice(0, 64).map((tool) => {
+      return {
+        ...toolDeclarationSummary(tool),
+        ...(Array.isArray(tool?.tools) ? { members: {
+          count: tool.tools.length, truncated: tool.tools.length > 32,
+          tools: tool.tools.slice(0, 32).map(toolDeclarationSummary),
+        } } : {}),
+      }
+    }) }
+  const forwardedBody = JSON.stringify(withDecodingOptions(input, decodeMode))
   process.stderr.write('CORDON_MODEL_CALL=' + model + '\n')
+  process.stderr.write('CORDON_MODEL_DECODE=' + decodeMode + '\n')
+  // Names and hashes reveal the model-visible tool contract without logging
+  // owner prompts, tool descriptions, arguments, or model responses.
+  process.stderr.write('CORDON_MODEL_TOOLS=' + JSON.stringify(toolSummary) + '\n')
+  // Opt-in capture is for matched-schema bench probes. Keep it separate from
+  // the normal privacy-preserving log, and never serialize the request input.
+  if (process.env.CORDON_MODEL_CAPTURE_TOOLS === '1') {
+    process.stderr.write('CORDON_MODEL_TOOL_DECLARATIONS=' +
+      JSON.stringify(visibleTools) + '\n')
+  }
   const target = new URL('/v1/responses', upstream)
   const forwarded = requestHttp(target, {
-    method: 'POST', headers: { 'content-type': 'application/json', 'content-length': Buffer.byteLength(body) },
+    method: 'POST', headers: { 'content-type': 'application/json',
+      'content-length': Buffer.byteLength(forwardedBody) },
     timeout: 180_000,
   }, (reply) => {
     response.writeHead(reply.statusCode || 502, {
@@ -57,7 +99,7 @@ const server = createServer(async (request, response) => {
     else response.destroy(error)
   })
   response.on('close', () => forwarded.destroy())
-  forwarded.end(body)
+  forwarded.end(forwardedBody)
 })
 server.on('error', (error) => {
   process.stderr.write('model proxy server failed: ' + error.message + '\n')

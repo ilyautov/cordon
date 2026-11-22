@@ -47,7 +47,8 @@
   },
   "scripts": {
     "test": "vitest run",
-    "prepublishOnly": "npm run typecheck && npm test && npm run build && node scripts/no-invisible.mjs",
+    "test:package": "node scripts/package-smoke.mjs",
+    "prepublishOnly": "npm run typecheck && npm test && npm run build && node scripts/no-invisible.mjs && npm run test:package",
     "build": "npm run build:lib && npm run bundle",
     "build:lib": "tsc -p tsconfig.json && chmod +x dist/cli.js",
     "typecheck": "tsc -p tsconfig.check.json",
