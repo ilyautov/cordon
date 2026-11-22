@@ -182,6 +182,20 @@ describe('gate', () => {
     expect(gate({ tool: 'Bash', args: { command: 'npm test' } }, ctx).kind).toBe('allow')
   })
 
+  it('refuses a blocked shell in either mode, even when exec is granted', () => {
+    for (const mode of ['interactive', 'autonomous'] as const) {
+      const ctx = setup({
+        mode,
+        profile: { effects: ['read', 'create', 'update', 'exec'], resources: { paths: [], hosts: [] } },
+        blockedTools: ['Bash'],
+        tools: { mcp__sandbox__run: ['exec'] },
+      })
+      const blocked = gate({ tool: 'Bash', args: { command: 'pwd' } }, ctx)
+      expect(blocked).toMatchObject({ kind: 'deny', rule: 'tool-blocked' })
+      expect(gate({ tool: 'mcp__sandbox__run', args: { command: 'pwd' } }, ctx).kind).toBe('allow')
+    }
+  })
+
   it('writing into its own config is forbidden even with a wide certificate', () => {
     const ctx = setup({
       mode: 'interactive',

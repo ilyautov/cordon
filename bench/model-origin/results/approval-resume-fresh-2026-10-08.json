@@ -1,0 +1,18 @@
+{
+  "command": "node bench/codex-mcp/live-approval-resume.mjs --fresh",
+  "bundleCommit": "10dc643",
+  "model": "gpt-6-luna",
+  "codexVersion": "codex-cli 0.160.1",
+  "firstTurnFinished": true,
+  "resumeTurnFinished": true,
+  "oldApprovalUnspent": true,
+  "newIdDifferentFromOld": true,
+  "exactRetry": true,
+  "freshApprovalRecorded": true,
+  "freshApprovalConsumed": true,
+  "exactEmailReachedServer": true,
+  "emailsReachedServer": 1,
+  "attemptedEmails": 2,
+  "unexpectedTools": 0,
+  "scope": "one clean synthetic email draft, automated owner CLI approval during the resumed process, one live Codex retry after process exit"
+}

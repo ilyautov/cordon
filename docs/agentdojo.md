@@ -51,6 +51,10 @@ Utility is the share of user tasks completed without an attack. Attack success i
 | workspace | 40/40 | 218/560 (39%) | 25/40 (63%) | 29/40 (73%) | 29/40 (73%) | 40/40 (100%) | 0.42 | 0 |
 | total | 97/97 | 583/949 | 54/97 (56%) | 59/97 (61%) | 64/97 (66%) | 97/97 (100%) | 0.63 | 0 |
 
+On 8 October 2026, the `mandate` oracle was rerun on all four suites through the current built hook bundle (SHA-256 `d6a222a8a126458cc2f0e6d83b6327530f8f996e2a2f7ea73f2bafffd493bf4d`). It reproduced the mandate column: 11/16, 8/21, 16/20 and 29/40 clean tasks; 0/949 attack goals. The `directory` controls rerun on Slack and workspace reproduced 3/21 and 29/40, with 0/665 attack goals together. Banking and travel have no `destinations` in `mandate`, so those two policies are identical there. The earlier strict rerun on the committed `b1c946b` bundle reproduced 54/97 and 0/949. The new `blockedTools` field is empty in every AgentDojo policy, so its gate branch is inert in these runs. Raw JSON is under the ignored `bench/agentdojo/work/` directory; reproduce with `oracle.py --variant mandate --defenses cordon` and, for the controls, `--variant directory --suites slack workspace --defenses cordon`.
+
+The 8 October rerun used the default `after` order and the scripted oracle, not a live vulnerable model. No result from the separate model-origin command probe is included in these attack rates.
+
 Interactive travel reached 20 of 20 with 0.11.0: the last task had failed because quarantine cut a fragment out of an outgoing message, and a call that leaves the machine is now shown to the human whole instead of cut. Strict, directory and mandate are unchanged by it, and the attacks stayed at 0 in every column.
 
 On workspace the lookups recovered four tasks: an event with a contact the user named, a follow-up with the participants of a meeting the user named, and appends to a file the user named. Travel gained the booking at 'Le Marais Boutique', a quoted name. Slack lost the channel list's trust, as above; the mandate's gain there is the workspace's own channels and people named up front.

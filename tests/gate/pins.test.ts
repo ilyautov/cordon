@@ -28,6 +28,15 @@ describe('fingerprint: what a tool is, as the model will read it', () => {
       .not.toBe(fingerprint(tool('a', 'd', { type: 'object', properties: { bcc: { type: 'string' } } })))
   })
 
+  it('changes with a model-visible output schema, title or annotation', () => {
+    const base = tool('a')
+    expect(fingerprint({ ...base, outputSchema: { type: 'object', description: 'Before' } }))
+      .not.toBe(fingerprint({ ...base, outputSchema: { type: 'object', description: 'After' } }))
+    expect(fingerprint({ ...base, title: 'Before' })).not.toBe(fingerprint({ ...base, title: 'After' }))
+    expect(fingerprint({ ...base, annotations: { title: 'Before' } }))
+      .not.toBe(fingerprint({ ...base, annotations: { title: 'After' } }))
+  })
+
   it('changes with the name', () => {
     expect(fingerprint(tool('a'))).not.toBe(fingerprint(tool('b')))
   })

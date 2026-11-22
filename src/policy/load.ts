@@ -102,6 +102,10 @@ function validate(parsed: unknown, path: string): Policy {
     }
   }
 
+  if (Object.hasOwn(input, 'blockedTools')) {
+    policy.blockedTools = asNames(input['blockedTools'], `${path}: blockedTools`)
+  }
+
   if ('trustedSources' in input) {
     policy.trustedSources = asStrings(input.trustedSources, `${path}: trustedSources`)
   }
@@ -252,7 +256,7 @@ function journalPath(value: unknown, path: string): string | null {
 }
 
 const TOP_LEVEL = [
-  'mode', 'profile', 'tools', 'trustedSources', 'toolsReturn', 'arguments', 'destinations', 'lookups', 'budgets',
+  'mode', 'profile', 'tools', 'blockedTools', 'trustedSources', 'toolsReturn', 'arguments', 'destinations', 'lookups', 'budgets',
   'refusals', 'notify', 'exposure', 'task', 'memory', 'mcp', 'output',
 ]
 

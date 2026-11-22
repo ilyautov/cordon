@@ -12,7 +12,7 @@ Web pages, emails, issues, documents, tool results and MCP tool descriptions can
 
 **Ready:** a core with adapters for **Claude Code**, **Codex CLI**, **Kimi Code**, **DeepSeek Harness** and **Gemini CLI**, a gateway for **MCP hosts**, and middleware for **LangChain** agents.
 
-**Measured:** 1774 tests · 26 pinned attack vectors · 10 legitimate documents · 2 runtime dependencies.
+**Measured:** 1943 tests · 26 pinned attack vectors · 10 legitimate documents · 2 runtime dependencies.
 
 [Measured host versions and installation checks](docs/compatibility.md)
 
@@ -27,7 +27,7 @@ Web pages, emails, issues, documents, tool results and MCP tool descriptions can
 > - **The MCP gateway with Codex CLI as the host.** Without Cordon, Codex sent a ticket summary to the address the ticket planted. Through the gateway, that send was refused.
 > - **The LangChain middleware** on Claude Haiku 4.5.
 >
-> Records are in [docs/live-run.md](docs/live-run.md). Gemini CLI has not been run live. A test sends the same nine scenarios through all four transports and gets the same decision on each ([transports.test.ts](tests/adversarial/transports.test.ts)).
+> Records are in [docs/live-run.md](docs/live-run.md). Gemini CLI has not been run live. A test sends the same ten scenarios through all four transports and gets the same decision on each ([transports.test.ts](tests/adversarial/transports.test.ts)).
 
 > [Русская версия](README.ru.md)
 
@@ -156,6 +156,7 @@ The narrow stretch Cordon covers is compared with classifier firewalls, MCP scan
 - **Any new user message lifts the exposure mark**, a reflexive "yes" included. Telling informed consent from reflex is a question about meaning.
 - **Memory is noticed by name.** A write through a name assembled at run time leaves no trace for the next session, and `cordon: trust memory` is taken at its word.
 - **Not a sandbox.** What a launched command does is the operating system's business.
+- **Not a model-weight check.** A backdoored model can request a clean-looking shell call without first reading untrusted content. The default profile refuses `exec`; the `coding` profile permits it. A policy can hard-block named native tools while admitting a separately isolated runner. Blocking the shell alone does not confine file edits: a live Codex control wrote through `apply_patch` when `create` and `update` were granted. Cordon cannot see what a downloaded script does inside its process ([measured boundary](docs/model-origin-benchmark.md), [restricted coding runbook](docs/restricted-coding.md)).
 
 ## FAQ
 
