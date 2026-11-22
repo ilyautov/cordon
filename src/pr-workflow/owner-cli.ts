@@ -6,14 +6,10 @@ import { readTrustedCi } from './ci.js'
 import { getPinnedDiff, getPullSnapshot } from './github.js'
 import { assessMerge, assessReview } from './merge.js'
 import { approvalForReceipt, approveReceipt } from './owner-approvals.js'
-import { readReviewReceipt, sameSnapshot, type ReviewReceipt } from './store.js'
+import { publishReviewComment } from './owner-comment.js'
+import { readReviewReceipt, sameSnapshot } from './store.js'
 
-export function fixedComment({ number, headSha }: Pick<ReviewReceipt, 'number' | 'headSha'>): string {
-  if (!Number.isSafeInteger(number) || number < 1) throw new Error('invalid PR number')
-  if (!/^[a-f0-9]{40}$/u.test(headSha)) throw new Error('invalid PR head SHA')
-  return `Automated review was recorded for PR #${number} at ${headSha}. ` +
-    'This comment contains no agent output; the owner must inspect the review and the diff.'
-}
+export { fixedComment } from './owner-comment.js'
 
 function positiveInteger(value: string | undefined, field: string): number {
   const number = Number(value)
@@ -23,15 +19,15 @@ function positiveInteger(value: string | undefined, field: string): number {
   return number
 }
 
-const github = { getPullSnapshot, getPinnedDiff, readTrustedCi }
+const github = { getPullSnapshot, getPinnedDiff, readTrustedCi, publishReviewComment }
 
 export function runOwnerCommand(args: string[], env = process.env, access = github) {
   const [command, path, approvalsDir, run, attempt] = args
-  if (command === 'comment' || command === 'merge') {
+  if (command === 'merge') {
     throw new Error('owner actions are disabled in this draft')
   }
-  if ((command !== 'check' && command !== 'approve') || args.length !== 5 || !path || !approvalsDir) {
-    throw new Error('usage: owner-cli <check|approve> <review-receipt> <approval-dir> <ci-run-id> <ci-run-attempt>')
+  if ((command !== 'check' && command !== 'approve' && command !== 'comment') || args.length !== 5 || !path || !approvalsDir) {
+    throw new Error('usage: owner-cli <check|approve|comment> <review-receipt> <owner-dir> <ci-run-id> <ci-run-attempt>')
   }
   const receipt = readReviewReceipt(path)
   const runId = positiveInteger(run, 'CI run ID')
@@ -43,12 +39,16 @@ export function runOwnerCommand(args: string[], env = process.env, access = gith
   }
   const current = access.getPullSnapshot(receipt.repo, receipt.number)
   if (!sameSnapshot(receipt, current)) return { allow: false, reason: 'snapshot-changed' }
-  if (!receipt.mergeProposed) return { allow: false, reason: 'not-proposed' }
+  if (command !== 'comment' && !receipt.mergeProposed) return { allow: false, reason: 'not-proposed' }
   const diffSha256 = createHash('sha256').update(access.getPinnedDiff(receipt)).digest('hex')
   if (receipt.diffSha256 !== diffSha256) return { allow: false, reason: 'diff-changed' }
   const ci = access.readTrustedCi(receipt, runId, config)
   if (!sameSnapshot(receipt, access.getPullSnapshot(receipt.repo, receipt.number))) {
     return { allow: false, reason: 'snapshot-changed' }
+  }
+  if (command === 'comment') {
+    const { commentId, published } = access.publishReviewComment(approvalsDir, receipt)
+    return { allow: true, reason: published ? 'comment-published' : 'comment-already-present', commentId }
   }
   const facts = { receipt, current, diffSha256, ci }
   if (command === 'approve') {

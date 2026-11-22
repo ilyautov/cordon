@@ -25,6 +25,18 @@ An approval expires after one hour. The owner can run `approve` again after expi
 
 The lab example in `bench/pr-workflow/lab/quality-attestation.yml` dispatches a read-only check from a trusted branch. Install it as `.github/workflows/quality-gate.yml` in a disposable lab. Place `quality-attestation.mjs`, `quality-check.mjs`, and the built `github.js` and `store.js` in `.github/scripts/cordon-pr41/` with a `package.json` declaring `"type": "module"`. Dispatch it with the receipt's `pr_number`, `head_sha`, `base_ref`, `base_sha`, and `diff_sha256` as inputs. The example reads the lab's `login.html` as data. Adapt the quality policy to your repository independently of any candidate.
 
-## GitHub publication and merge
+## Publish a review snapshot
 
-`comment` and `merge` return a refusal in this draft. Enabling writes requires a separate owner credential, a finalized review for publication, and merge controls that enforce the reviewed base and head at mutation time. GitHub's expected-SHA REST parameter checks the head. The merge adapter contract requires atomic enforcement of the full snapshot. [GitHub pull request merge](https://docs.github.com/en/rest/pulls/pulls#merge-a-pull-request)
+From the owner session, use a GitHub user credential with permission to comment on the PR. Use the same owner-controlled directory for all attempts.
+
+```bash
+node dist/pr-workflow/owner-cli.js comment /path/to/receipt.json "$owner_dir" "$run_id" "$attempt"
+```
+
+`comment` verifies the current PR and immutable diff against the completed review and trusted CI artifact. The comment records that reviewed snapshot with its head SHA, base branch and SHA, and SHA-256 of the diff. It contains only the fixed template and those fields. Branch names use URL-style escaping. The text stays accurate as a historical record when the PR changes. A later snapshot needs its own evidence.
+
+A repeat returns the existing matching comment ID for the authenticated user. The owner directory records the publication attempt before sending it. If GitHub's response is lost, the next attempt looks for the existing comment. While the previous result is unconfirmed, it reports an error and withholds another POST. This state is separate from merge approvals.
+
+## Merge
+
+`merge` returns a refusal in this draft. Enabling it requires a separate owner credential and merge controls that enforce the reviewed base and head at mutation time. GitHub's expected-SHA REST parameter checks the head. The merge adapter contract requires atomic enforcement of the full snapshot. [GitHub pull request merge](https://docs.github.com/en/rest/pulls/pulls#merge-a-pull-request)
