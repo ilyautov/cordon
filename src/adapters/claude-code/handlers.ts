@@ -13,7 +13,7 @@ import { classifySource } from '../../provenance/trust.js'
 import { extractText, replaceText } from '../../output/tool-text.js'
 import { renderDecision, silentOnFailure, type HookEvent, type HookOutput } from './protocol.js'
 import { sourceLabel } from '../../core/argument-keys.js'
-import { CLAUDE_CODE, type Dialect } from './dialect.js'
+import { CLAUDE_CODE, policyForDialect, type Dialect } from './dialect.js'
 
 export interface AdapterEnv {
   policy: Policy
@@ -54,11 +54,7 @@ export function handle(event: HookEvent, env: AdapterEnv, dialect: Dialect = CLA
 }
 
 function dispatch(event: HookEvent, given: AdapterEnv, dialect: Dialect): HookOutput {
-  // A harness's own built-in tools lie under the policy's declarations, the
-  // way Gemini's do: the owner's word on a tool wins.
-  const env: AdapterEnv = Object.keys(dialect.builtin).length === 0
-    ? given
-    : { ...given, policy: { ...given.policy, tools: { ...dialect.builtin, ...given.policy.tools } } }
+  const env = { ...given, policy: policyForDialect(given.policy, dialect) }
   if (event.kind === 'ignored') return {}
   if (event.kind === 'unparsable') {
     if (event.silent === true) return {}
