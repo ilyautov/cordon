@@ -14,7 +14,7 @@ Web pages, emails, issues, documents, tool results and MCP tool descriptions can
 
 **Model-origin limit:** A modified model can request a harmful call before reading any outside content. Cordon can refuse that call under a restrictive policy, but it cannot verify model weights or contain what an allowed shell command does next. The [measured boundary](docs/model-origin-benchmark.md) and [restricted coding runbook](docs/restricted-coding.md) keep the gate and operating-system isolation separate.
 
-**Measured:** 2083 tests · 26 pinned attack vectors · 10 legitimate documents · 2 runtime dependencies.
+**Measured:** 2111 tests · 26 pinned attack vectors · 10 legitimate documents · 2 runtime dependencies.
 
 [Measured host versions and installation checks](docs/compatibility.md)
 
@@ -23,6 +23,8 @@ Web pages, emails, issues, documents, tool results and MCP tool descriptions can
 **Site:** [cordon.aifrontier.tech](https://cordon.aifrontier.tech/en/) · **Lab:** [AI Frontier](https://aifrontier.tech) · **Telegram:** [Gorilla Under Hood](https://t.me/gorilla_under_hood)
 
 **Install:** [Claude Code](docs/install.md) · [Codex CLI](docs/install-codex.md) · [Kimi Code](docs/install-kimi.md) · [DeepSeek Harness](docs/install-deepseek.md) · [Gemini CLI](docs/install-gemini.md) · [MCP hosts](docs/install-mcp.md) · [LangChain](docs/install-langchain.md)
+
+**Example workflow:** [Local GitHub PR review and proposal recording](docs/pr-review-workflow.md).
 
 > ⚠️ **Early development.** Live runs so far:
 > - **Claude Code 2.1.236**, with all four events.
@@ -141,7 +143,7 @@ npm install @ilyautov/cordon
 npx cordon scan README.md
 ```
 
-Node 22 or newer is required. Cordon makes no network requests and no model calls. For an organization, deploy the hooks through Claude Code managed settings so a repository cannot switch them off ([docs/enterprise.md](docs/enterprise.md)).
+Node 22 or newer is required. Cordon's gate makes no network requests and no model calls. The opt-in PR review example uses a local agent and GitHub API. For an organization, deploy the hooks through Claude Code managed settings so a repository cannot switch them off ([docs/enterprise.md](docs/enterprise.md)).
 
 ## What this is NOT
 

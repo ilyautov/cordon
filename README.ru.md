@@ -14,7 +14,7 @@
 
 **Граница при заражённых весах:** модифицированная модель может запросить вредный вызов, ещё не читая внешнего контента. Строгая политика Cordon может отклонить вызов, но Cordon не проверяет веса и не контролирует действия уже разрешённой shell-команды. [Измерения](docs/model-origin-benchmark.md) и [план изолированного исполнителя](docs/restricted-coding.md) разделяют эти два рубежа.
 
-**Измерено:** 2083 теста · 26 закреплённых векторов атаки · 10 легитимных документов · 2 рантайм-зависимости.
+**Измерено:** 2111 тестов · 26 закреплённых векторов атаки · 10 легитимных документов · 2 рантайм-зависимости.
 
 [Проверенные версии агентов и проверка своей установки](docs/compatibility.md)
 
@@ -23,6 +23,8 @@
 **Сайт:** [cordon.aifrontier.tech](https://cordon.aifrontier.tech/ru/) · **Лаборатория:** [AI Frontier](https://aifrontier.tech) · **Telegram:** [Gorilla Under Hood](https://t.me/gorilla_under_hood)
 
 **Установка:** [Claude Code](docs/install.md) · [Codex CLI](docs/install-codex.md) · [Kimi Code](docs/install-kimi.md) · [DeepSeek Harness](docs/install-deepseek.md) · [Gemini CLI](docs/install-gemini.md) · [MCP-хосты](docs/install-mcp.md) · [LangChain](docs/install-langchain.md)
+
+**Пример:** [локальная проверка GitHub PR с записью предложения о мерже](docs/pr-review-workflow.md).
 
 > ⚠️ **Ранняя разработка.** Живые прогоны на сегодня:
 > - **Claude Code 2.1.236**, все четыре события.
