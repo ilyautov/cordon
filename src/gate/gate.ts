@@ -176,6 +176,18 @@ function decide(call: ToolCall, ctx: GateContext): Decision {
   if (blockedTools?.includes(call.tool)) {
     return { kind: 'deny', rule: 'tool-blocked', reason: `tool ${call.tool} is blocked by the policy` }
   }
+  // A runner-only policy must not depend on naming every native tool a future
+  // harness release might add. This list narrows by exact name before an
+  // interactive question can reopen an unlisted host path.
+  const allowedTools = ctx.policy.allowedTools
+  if (allowedTools !== undefined && allowedTools !== null) {
+    if (!isToolNameList(allowedTools)) {
+      return { kind: 'deny', rule: 'failure', reason: 'allowedTools must be a list of nonempty tool names or null' }
+    }
+    if (!allowedTools.includes(call.tool)) {
+      return { kind: 'deny', rule: 'tool-not-allowed', reason: `tool ${call.tool} is not on the policy's allowedTools list` }
+    }
+  }
 
   const parts = fields(own)
 

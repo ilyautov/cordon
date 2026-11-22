@@ -1,0 +1,22 @@
+{
+  "date": "2026-10-09",
+  "experiment": "independent owner check before source copyback in real Docker containers",
+  "status": "passed narrow copyback trial on GitHub-hosted Ubuntu",
+  "sourceHead": "9c8fba8ef3b6fa8154d458cac42be8d7c1fc3ca8",
+  "ciRun": "https://github.com/ilyautov/cordon/actions/runs/37951508615",
+  "ciJob": "https://github.com/ilyautov/cordon/actions/runs/37951508615/job/113891183450",
+  "environment": {
+    "runner": "GitHub-hosted Ubuntu 24.04.5, Node 22",
+    "imageTagPulled": "alpine:3.24",
+    "imageManifestDigestInJobLog": "sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6",
+    "runnerImageSelection": "test resolved the local Docker image ID before calling the benchmark runner"
+  },
+  "test": {
+    "name": "verifies a candidate in a clean stage before copying it back",
+    "result": "1 passed, 45 skipped under the name filter; 2.901 seconds",
+    "badCandidate": "model-side bypass file and invalid 99 candidate did not change owner source",
+    "validCandidate": "owner check passed valid 42 candidate and owner source changed to 42",
+    "containerPreflights": "unmounted read-only startup and read-only bind mount both passed"
+  },
+  "scope": "This establishes one real-container copyback trial on a hosted runner. It does not qualify the benchmark runner for production, test a poisoned model or human review, prove the owner check covers all harmful code, or explain the separate local Docker startup timeouts."
+}

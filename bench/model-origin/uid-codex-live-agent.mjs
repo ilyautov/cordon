@@ -5,20 +5,26 @@ import { accessSync, constants, existsSync, mkdirSync, readFileSync, readdirSync
 import { createServer as createSocketServer } from 'node:net'
 import { taskPrompt } from './uid-codex-prompt.mjs'
 import { summarizeRouterErrors } from './uid-codex-router-errors.mjs'
+import { uidCodexToolBoundary } from './uid-codex-tool-boundary.mjs'
 
 const home = '/tmp/codex-home'
 const work = '/tmp/work'
 const relayPath = '/tmp/cordon-agent-relay.sock'
 const scenario = process.env.CORDON_LIVE_SCENARIO
 const task = process.env.CORDON_LIVE_TASK || 'slugify'
+const simpleTarget = process.env.CORDON_LIVE_TARGET || '42'
+const specifiedEdit = process.env.CORDON_LIVE_SPECIFIED_EDIT === '1'
 const retryPrompt = process.env.CORDON_LIVE_RETRY_PROMPT === '1'
 const reducedNativeTools = process.env.CORDON_REDUCED_NATIVE_TOOLS === '1'
+const allowlistedHooks = process.env.CORDON_ALLOWLISTED_HOOKS === '1'
+const toolBoundary = uidCodexToolBoundary(allowlistedHooks)
 if (!['edit', 'download', 'trigger', 'clean', 'behavioral'].includes(scenario)) {
   throw new Error('unknown live model scenario')
 }
 if (scenario === 'behavioral' && !['slugify', 'intervals'].includes(task)) {
   throw new Error('unknown live coding task')
 }
+if (!['42', '43'].includes(simpleTarget)) throw new Error('unknown simple target')
 mkdirSync(home, { recursive: true })
 mkdirSync(work, { recursive: true })
 const canOpenForWrite = (path) => {
@@ -58,7 +64,9 @@ await new Promise((resolve, reject) => {
 })
 
 const toml = (value) => JSON.stringify(value)
-const hookCommand = toml('node /cordon/cli.js hook --harness codex')
+const hookCommand = toml(allowlistedHooks
+  ? 'node /probe/hook-tap.mjs /cordon/cli.js'
+  : 'node /cordon/cli.js hook --harness codex')
 const hook = (matchers, timeout) => '[' + matchers.map((matcher) => '{' +
   (matcher === null ? '' : 'matcher=' + toml(matcher) + ',') +
   'hooks=[{type="command",command=' + hookCommand + ',timeout=' + timeout + '}]}').join(',') + ']'
@@ -71,8 +79,8 @@ const args = [
   ...(reducedNativeTools ? ['--disable', 'multi_agent', '--disable', 'goals'] : []),
   '--dangerously-bypass-hook-trust',
   '-c', 'hooks.UserPromptSubmit=' + hook([null], 5),
-  '-c', 'hooks.PreToolUse=' + hook(['Bash', 'apply_patch'], 5),
-  '-c', 'hooks.PostToolUse=' + hook(['apply_patch'], 10),
+  '-c', 'hooks.PreToolUse=' + hook(toolBoundary.preMatchers, 5),
+  '-c', 'hooks.PostToolUse=' + hook(toolBoundary.postMatchers, 10),
   '-c', 'model_provider="localprobe"',
   '-c', 'model_providers.localprobe.name="Pinned local benchmark model"',
   '-c', 'model_providers.localprobe.base_url=' + toml(process.env.CORDON_MODEL_URL),
@@ -86,12 +94,13 @@ const args = [
   '-c', 'mcp_servers.runner.required=true',
   '-c', 'mcp_servers.runner.tools.run.approval_mode="approve"',
   '-C', work, '-m', process.env.CORDON_MODEL_ID,
-  taskPrompt(scenario, task, retryPrompt),
+  taskPrompt(scenario, task, retryPrompt, simpleTarget, specifiedEdit),
 ]
 const child = spawn('codex', args, {
   cwd: work,
   env: { ...process.env, HOME: '/tmp', CODEX_HOME: home, CORDON_HOME: '/agent-home',
-    CORDON_AGENT_RELAY: relayPath, CORDON_MODEL_DUMMY: 'local-only' },
+    CORDON_AGENT_RELAY: relayPath, CORDON_MODEL_DUMMY: 'local-only',
+    ...(allowlistedHooks ? { CORDON_HOOK_TAP_LOG: '/agent-home/hook-tap.jsonl' } : {}) },
   stdio: ['ignore', 'pipe', 'pipe'],
 })
 let stdout = ''
@@ -113,6 +122,10 @@ const journal = (() => {
   try { return readFileSync('/agent-home/events.jsonl', 'utf8').split('\n').filter(Boolean).map(JSON.parse) }
   catch { return [] }
 })()
+const hookTap = allowlistedHooks ? (() => {
+  try { return readFileSync('/agent-home/hook-tap.jsonl', 'utf8').split('\n').filter(Boolean).map(JSON.parse) }
+  catch { return [] }
+})() : []
 const hookStateTurn = (() => {
   try {
     return Math.max(0, ...readdirSync('/agent-home/sessions').filter((name) => name.endsWith('.json'))
@@ -156,6 +169,7 @@ const result = {
   unexpectedToolAllowed: unexpectedTools.some((event) => event.item?.status !== 'failed'),
   routerErrors: summarizeRouterErrors(stderr),
   hookStateTurn,
+  hookTap,
   hookBlockedPatch: journal.some((event) => event.tool === 'apply_patch' && event.decision === 'deny'),
   turnCompleted: events.some((event) => event.type === 'turn.completed'),
   errors: events.filter((event) => event.item?.type === 'error').map((event) => event.item.message),

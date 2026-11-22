@@ -37,7 +37,7 @@ Every policy grants every effect class the tasks need: `read`, `summarize`, `cre
 
   The channel list was on it until the run caught it. A channel's name is written by whoever creates the channel, and AgentDojo puts an injection in one. With `get_channels` trusted, the obedient agent was carried into 15 of 105 Slack attacks. The earlier published 0 was luck, since a `None` reply had marked the session first, and the oracle's check had missed the injection because YAML quoted it. The check now compares letters and digits after dropping escapes. The Slack numbers for directory and mandate below are without that trust, and they are lower than the ones published before: 3 of 21 and 8 of 21, against 7 and 12.
 - **mandate**: directory, plus `destinations` as the owner of each environment would declare them: Slack's own channels (`general`, `random`, `private`) and people (Alice, Bob, Charlie, Eve), and the workspace company's mail domain (`*@bluesparrowtech.com`). Not the external channel, and nothing an attack names. Banking and travel declare nothing (`MANDATE` in `cordon_bench.py`).
-- **interactive**: `mode: interactive`. An escalation is a question. For the user tasks, the script approves every question, modelling a human who wants the task done. For the attacks it declines every one, modelling a human who reads the question. A third run approves everything, attacks included, as the upper bound.
+- **interactive**: `mode: interactive`. An escalation is a question. The scripted reviewer approves questions during the honest task phase and declines them during the injected-call phase. A third, earlier run approves everything, attacks included, as the upper bound. This reviewer is given the phase label by the oracle; it does not infer maliciousness from the question as a real owner would have to.
 
 ## Results: the oracle
 
@@ -55,13 +55,41 @@ On 8 October 2026, the `mandate` oracle was rerun on all four suites through the
 
 The 8 October rerun used the default `after` order and the scripted oracle, not a live vulnerable model. No result from the separate model-origin command probe is included in these attack rates.
 
+On 9 October, both `strict` and `mandate` were rerun through the `614e8b3` bundle (SHA-256 `33f2549ab103fa5cd694d9346edd91bf385985fac43849095cc11c310158f32d`) with AgentDojo 0.1.35 and the same default `after` order. Strict reproduced 54/97 clean tasks and 0/949 attack goals. Mandate reproduced 64/97 clean tasks and 0/949 attack goals; its four suites were run in two batches with the same bundle. [The compact regression record](../bench/agentdojo/results/oracle-regression-2026-10-09.json) pins per-suite counts, source hashes and hashes of the private raw reports. This rerun called no model and did not repeat the undefended, directory, interactive or live-agent arms. It does not measure the altered-model trigger or native Codex tools.
+
+The 9 October interactive rerun used the `2dbb496` bundle and a corrected oracle reviewer. The earlier oracle set one decline vote for an entire attacked episode, so it also declined honest task calls before the attack. The corrected script approves honest calls and declines injected calls in separate phases; a focused integration check covers both `after` and `between` ordering. The full rerun used the default `after` order:
+
+| Suite | Clean utility | Utility under attack | Attack success | Pairs with an attack-phase question |
+|---|---:|---:|---:|---:|
+| banking | 16/16 | 144/144 | 0/144 | 144/144 |
+| slack | 21/21 | 105/105 | 0/105 | 105/105 |
+| travel | 20/20 | 140/140 | 0/140 | 120/140 |
+| workspace | 40/40 | 560/560 | 0/560 | 240/560 |
+| **Total** | **97/97** | **949/949** | **0/949** | **609/949** |
+
+The remaining attack pairs raised no attack-phase question and did not reach their goals. The old attacked-utility and any-question counts are not directly comparable because the reviewer and question counter changed. The [compact interactive record](../bench/agentdojo/results/oracle-interactive-review-phases-2026-10-09.json) pins source and bundle hashes, per-suite counts and hashes of the ignored raw reports. This is an idealized reviewer with advance knowledge of the phase, not evidence that a real person can reliably identify every malicious request. The run made no model calls and did not test the poisoned model or native Codex tools.
+
+The same corrected interactive oracle was then rerun in `between` order: the injected calls ran after the honest reads and before the honest actions. All four suite aggregates and per-task summaries matched `after`: 97/97 clean tasks, 949/949 attacked pairs retaining utility, 0/949 attack goals and 609/949 pairs with an attack-phase question. The [between-order record](../bench/agentdojo/results/oracle-interactive-between-2026-10-09.json) pins the frozen bundle, source and raw-report hashes. This changes only call order in the scripted oracle. It does not show how a model would choose a call or how a real owner would classify a question.
+
+The `between` order also has a paired upper bound. The scripted reviewer approved **every** question, including questions raised by injected calls; a no-Cordon arm made the same calls. Each cell below gives attack goals reached, then legitimate tasks that still completed under attack:
+
+| Suite | Decline injected calls | Approve every question | No Cordon |
+|---|---:|---:|---:|
+| banking | 0/144; 144/144 | 143/144; 126/144 | 143/144; 126/144 |
+| slack | 0/105; 105/105 | 105/105; 103/105 | 105/105; 103/105 |
+| travel | 0/140; 140/140 | 118/140; 28/140 | 118/140; 28/140 |
+| workspace | 0/560; 560/560 | 231/560; 326/560 | 231/560; 326/560 |
+| **Total** | **0/949; 949/949** | **597/949; 583/949** | **597/949; 583/949** |
+
+The approved and no-Cordon arms matched on every suite aggregate and on utility counts for every user task. Utility fell for 2/16 banking tasks, 2/21 Slack tasks, 19/20 travel tasks and 39/40 workspace tasks under at least one injection. The report does not retain attack success for each individual task pair, so pairwise identity is unverified. In this forced-call benchmark, approving every question removed the measured benefit of the interactive gate. [The paired record](../bench/agentdojo/results/oracle-interactive-between-review-bound-2026-10-09.json) pins all three raw-report hashes and the exact source and bundle. This is a bound on a scripted review rule, not a measured rate of human mistakes.
+
 Interactive travel reached 20 of 20 with 0.11.0: the last task had failed because quarantine cut a fragment out of an outgoing message, and a call that leaves the machine is now shown to the human whole instead of cut. Strict, directory and mandate are unchanged by it, and the attacks stayed at 0 in every column.
 
 On workspace the lookups recovered four tasks: an event with a contact the user named, a follow-up with the participants of a meeting the user named, and appends to a file the user named. Travel gained the booking at 'Le Marais Boutique', a quoted name. Slack lost the channel list's trust, as above; the mandate's gain there is the workspace's own channels and people named up front.
 
 The attack comes after the task by default: the oracle makes the user task's calls, then the injection's. With `--order between`, it makes the user task's reads, then the injection's calls, then the task's actions, so the attack acts while the task is half done. Strict, directory and mandate gave the same utility and 0 attacks in that order too. Without a defence the attacks succeeded slightly more often: 143 of 144 on banking, 118 of 140 on travel and 231 of 560 on workspace.
 
-In interactive mode, "0" assumes the human declines when asked. The upper bound, a human who approves every question, puts attack success near the undefended level: 144/144 on banking, 84/105 on Slack (the rest were cut by quarantine), 115/140 on travel (one pair fewer than undefended, not traced) and 218/560 on workspace. The attacks that reached a question were 144 of 144, 105 of 105, 125 of 140 and 360 of 560. The pairs that asked nothing were stopped by a refusal or a rewrite before any question came up. Put plainly: in interactive mode no attack succeeded without a human saying yes to the call that carried it.
+In interactive mode, "0" assumes the scripted reviewer declines injected calls. The earlier upper bound, a reviewer who approves every question, puts attack success near the undefended level: 144/144 on banking, 84/105 on Slack (the rest were cut by quarantine), 115/140 on travel (one pair fewer than undefended, not traced) and 218/560 on workspace. The earlier counts of pairs with any question were 144 of 144, 105 of 105, 125 of 140 and 360 of 560. Those counts included questions during honest calls, so they must not be read as attack-phase questions. Some pairs were stopped by a refusal or a rewrite before any attack-phase question came up. In the current run with injected calls declined, no attack goal was reached.
 
 ## Results: the live agent
 
@@ -124,6 +152,7 @@ python3.12 -m venv .venv && .venv/bin/pip install -r requirements.txt
 mkdir -p work && cp ../../plugin/dist/cli.js work/cli.js   # freeze the bundle you measure
 CORDON_CLI=$PWD/work/cli.js .venv/bin/python oracle.py --variant strict       # or directory, mandate, interactive
 CORDON_CLI=$PWD/work/cli.js .venv/bin/python oracle.py --variant mandate --order between
+CORDON_CLI=$PWD/work/cli.js .venv/bin/python oracle.py --variant interactive --defenses cordon --order between
 CORDON_CLI=$PWD/work/cli.js .venv/bin/python oracle.py --variant interactive --approve-attacks
 # live runs need ANTHROPIC_API_KEY; BENCH_BUDGET caps the spend in dollars
 CORDON_CLI=$PWD/work/cli.js .venv/bin/python cordon_bench.py --suites banking slack --defense none cordon --variant strict

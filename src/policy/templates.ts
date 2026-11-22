@@ -93,6 +93,9 @@ exposure: true
 # Refuse an exact tool name even when its effects are granted. This can keep
 # the native shell closed while a separately isolated executor uses exec.
 # blockedTools: [Bash]
+# To refuse every tool except exact names, declare the complete set. An empty
+# list refuses all calls; omitting this field adds no name restriction.
+# allowedTools: [Read, mcp__sandbox__run, run]
 
 # Memory the agent reloads in later sessions, beyond CLAUDE.md and the like.
 # memory:

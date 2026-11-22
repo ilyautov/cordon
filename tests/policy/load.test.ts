@@ -71,6 +71,20 @@ describe('blocked tools', () => {
   })
 })
 
+describe('allowed tools', () => {
+  it('is absent by default, but an explicit empty list refuses every tool', () => {
+    expect(parsePolicy('', 'policy.yaml').allowedTools).toBeNull()
+    expect(parsePolicy('allowedTools: []\n', 'policy.yaml').allowedTools).toEqual([])
+  })
+
+  it('reads exact tool names and refuses invalid declarations', () => {
+    expect(parsePolicy('allowedTools: [Read, mcp__sandbox__run, run]\n', 'policy.yaml').allowedTools)
+      .toEqual(['Read', 'mcp__sandbox__run', 'run'])
+    expect(() => parsePolicy('allowedTools: run\n', 'policy.yaml')).toThrow(/allowedTools/u)
+    expect(() => parsePolicy('allowedTools: [""]\n', 'policy.yaml')).toThrow(/allowedTools/u)
+  })
+})
+
 describe('the policy: the output axis footer', () => {
   it('the footer is on by default', () => {
     expect(loadPolicy(scratch()).output.footer).toBe(true)

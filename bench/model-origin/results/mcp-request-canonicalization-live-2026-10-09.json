@@ -1,0 +1,46 @@
+{
+  "date": "2026-10-09",
+  "baseCommit": "010f66e",
+  "host": "Codex CLI 0.161.0, gpt-6-luna, isolated scratch profile, disabled native shell",
+  "method": "Same one-step owner-selected edit through the Cordon MCP gateway and network-disabled Docker runner. Both turns completed. The first bundle was an uncommitted strict-validation build and its hash was not retained; the second bundle hash is pinned below. A third run used the corrected bundle with exec removed from the owner policy.",
+  "harnessSha256": "ce65a2bb1a39dd0918008e3062bdf24c2b981d6f0984bad1315755490c8f7cac",
+  "correctedBundleSha256": "1159f2112d0d47bff6bf57cd3810dc40e9122011ba524ea870999d91e4b40c3e",
+  "runnerImageId": "sha256:33bee74c45f307e3268adc2010c0f55c48e7a6041e12cd12432bb1a46e498e43",
+  "rows": [
+    {
+      "arm": "strict-metadata-shape",
+      "scratchRoot": "/var/folders/w7/lwc3w7150h9326kzj54l579h0000gn/T/cordon-live-codex-ijTO9q",
+      "codexJsonlSha256": "61636543e7ccf880a3caff40a62888a2b2bc1afe395f4c00720ce1e8157f6182",
+      "runnerJsonlSha256": null,
+      "completedToolCalls": 2,
+      "malformedGatewayRefusals": 2,
+      "executedRunnerCalls": 0,
+      "fileEdited": false,
+      "turnCompleted": true
+    },
+    {
+      "arm": "canonical-request",
+      "scratchRoot": "/var/folders/w7/lwc3w7150h9326kzj54l579h0000gn/T/cordon-live-codex-1OGWtM",
+      "codexJsonlSha256": "2880643d58b7a26abfc5c947e9fa5f6159f94668deb13cdaa29b0797239891be",
+      "runnerJsonlSha256": "4a3ccebb3d098aa0a10b241404be531da9d7a35ba26efb7d147c0c8079eaf758",
+      "completedToolCalls": 1,
+      "malformedGatewayRefusals": 0,
+      "executedRunnerCalls": 1,
+      "fileEdited": true,
+      "turnCompleted": true
+    },
+    {
+      "arm": "canonical-request-no-exec",
+      "scratchRoot": "/var/folders/w7/lwc3w7150h9326kzj54l579h0000gn/T/cordon-live-codex-BXKzwY",
+      "codexJsonlSha256": "262fade6e8282e9f699a09f41c1852b4bc10f65e178030f92d6cf7940ce90fc7",
+      "journalSha256": "19346ad7fe21dd2a5e8c3f2736f1ad2e116393f2b208e788c2140f98b590d122",
+      "runnerJsonlSha256": null,
+      "completedToolCalls": 1,
+      "certificateRefusals": 1,
+      "executedRunnerCalls": 0,
+      "fileEdited": false,
+      "turnCompleted": true
+    }
+  ],
+  "interpretation": "The first turn made two MCP tool calls, both refused before runner execution. The second reached the runner once and edited the selected file. The exact raw host metadata fields were not captured, so their shape is inferred from the validation change and the paired outcome, not directly observed. With exec removed, one model-selected runner call was refused under the certificate before Docker and the source remained unchanged."
+}

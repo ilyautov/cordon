@@ -8,6 +8,9 @@ export interface ListedTool {
   title?: unknown
   annotations?: unknown
   outputSchema?: unknown
+  icons?: unknown
+  _meta?: unknown
+  execution?: unknown
 }
 
 /** Tool name → fingerprint, as approved. */
@@ -48,6 +51,9 @@ export function fingerprint(tool: ListedTool): string {
     ...(tool.title === undefined ? {} : { title: tool.title }),
     ...(tool.annotations === undefined ? {} : { annotations: tool.annotations }),
     ...(tool.outputSchema === undefined ? {} : { outputSchema: tool.outputSchema }),
+    ...(tool.icons === undefined ? {} : { icons: tool.icons }),
+    ...(tool._meta === undefined ? {} : { _meta: tool._meta }),
+    ...(tool.execution === undefined ? {} : { execution: tool.execution }),
   })
   return createHash('sha256').update(canonical, 'utf8').digest('hex')
 }

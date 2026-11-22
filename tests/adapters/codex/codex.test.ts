@@ -80,6 +80,26 @@ describe('codex: a question nobody would be asked', () => {
   })
 })
 
+describe('codex: exact tool names', () => {
+  it('hard-refuses an unlisted native tool while passing a listed runner through the other checks', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cordon-codex-allowlist-'))
+    writeFileSync(join(dir, 'policy.yaml'), [
+      'mode: interactive',
+      'profile:',
+      '  effects: [read, summarize, exec]',
+      'tools:',
+      '  mcp__sandbox__run: [exec]',
+      'allowedTools: [mcp__sandbox__run]',
+      '',
+    ].join('\n'))
+    const native = run(dir, pre('Bash', { command: 'pwd' }))
+    expect(native.hookSpecificOutput.permissionDecision).toBe('deny')
+    expect(native.hookSpecificOutput.permissionDecisionReason).toContain('allowedTools')
+    expect(native.hookSpecificOutput.permissionDecisionReason).not.toContain('cordon approve')
+    expect(run(dir, pre('mcp__sandbox__run', { command: 'pwd' }))).toEqual({})
+  })
+})
+
 describe('codex: apply_patch', () => {
   it('a patch into Cordon\'s own files is refused however much is granted', () => {
     const dir = home('read, create, update, delete')

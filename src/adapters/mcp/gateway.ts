@@ -14,7 +14,8 @@ import { homeProblem, projectDir } from '../../policy/home.js'
 import { classifySource } from '../../provenance/trust.js'
 import { APPROVAL_TTL_MS, ApprovalStore } from '../../session/approvals.js'
 import { extractText, replaceText } from '../../output/tool-text.js'
-import { parseError, parseLine, pendingKey, toolError, type Message } from './jsonrpc.js'
+import { sanitize } from '../../sanitize/index.js'
+import { parseError, parseLine, pendingKey, toolError, type JsonRpcId, type Message } from './jsonrpc.js'
 
 export interface GatewayOptions {
   /** The upstream server command: `cordon mcp -- npx server-x` gives ['npx', 'server-x']. */
@@ -37,8 +38,16 @@ export interface GatewayOptions {
   log?: (line: string) => void
 }
 
+interface ProgressState {
+  token: string | number
+  requests: number
+  last?: number
+  suppressed?: true
+}
+
 interface Pending {
   method: string
+  progress?: ProgressState
   /** The gated call, kept for a tools/call: the result's source is named by it. */
   call?: ToolCall
   /** The request's own name for the content, for resources/read and prompts/get. */
@@ -213,6 +222,26 @@ export function runGateway(options: GatewayOptions): Promise<number> {
     }
 
     const pending = new Map<string, Pending>()
+    const activeProgress = new Map<string | number, ProgressState>()
+    const forwardRequest: ForwardRequest = (id, entry, request) => {
+      const token = asRecord(asRecord(request['params'])?.['_meta'])?.['progressToken']
+      if (isProgressToken(token)) {
+        const current = activeProgress.get(token)
+        if (current === undefined) {
+          const progress: ProgressState = { token, requests: 1 }
+          activeProgress.set(token, progress)
+          entry.progress = progress
+        } else {
+          // An in-flight token identifies one request. Once reused, withhold
+          // its progress until both responses settle, even if one arrives first.
+          current.requests += 1
+          current.suppressed = true
+          entry.progress = current
+        }
+      }
+      pending.set(pendingKey(id), entry)
+      sendUpstream(request)
+    }
 
     const onHostLine = (line: string): void => {
       if (settled) return
@@ -249,6 +278,8 @@ export function runGateway(options: GatewayOptions): Promise<number> {
               retireIfLastWaiter(held.approvalId, held.instance, 'the host cancelled its MCP request')
               return
             }
+            const progress = pending.get(key)?.progress
+            if (progress !== undefined) progress.suppressed = true
           }
         }
         // Only known lifecycle and cancellation notifications reach the
@@ -266,7 +297,7 @@ export function runGateway(options: GatewayOptions): Promise<number> {
       }
 
       if (message.method === 'tools/call') {
-        gateCall(message, cordon, options.policy, pending, sendToHost, sendUpstream,
+        gateCall(message, cordon, options.policy, forwardRequest, sendToHost,
           approvalWaitMs === 0 ? undefined : (approvalId, reason) => {
             const approvals = new ApprovalStore(options.cordonHome)
             const question = approvals.waiting(approvalId)
@@ -298,8 +329,9 @@ export function runGateway(options: GatewayOptions): Promise<number> {
                   clearInterval(held.timer)
                   reviewTimers.delete(waitingKey)
                   sendToHost(toolError(held.requestId,
-                    `Cordon recorded owner approval ${approvalId}; retry the identical call once. ` +
-                    'The retry is checked again before any tool execution.'))
+                    `Cordon recorded owner approval ${approvalId} for the call that produced this result. ` +
+                    'Retry exactly the same tool call with the same tool name and arguments JSON; ' +
+                    'do not alter any argument. Cordon rechecks the retry before execution.'))
                 }
               } catch (error) {
                 // A broken approval check cannot forward the held call.
@@ -333,8 +365,7 @@ export function runGateway(options: GatewayOptions): Promise<number> {
       if (message.method === 'prompts/get' && typeof params?.['name'] === 'string') {
         entry.label = params['name']
       }
-      pending.set(pendingKey(message.id), entry)
-      sendUpstream(forwarded)
+      forwardRequest(message.id, entry, forwarded)
     }
 
     const onUpstreamLine = (line: string): void => {
@@ -370,7 +401,7 @@ export function runGateway(options: GatewayOptions): Promise<number> {
         return
       }
       if (message.type === 'notification') {
-        const observed = observeServerNotification(message.value, message.method, cordon, options.policy)
+        const observed = observeServerNotification(message.value, message.method, cordon, options.policy, activeProgress)
         if (observed === null) log('unsupported server notification was withheld')
         else sendToHost(observed)
         return
@@ -385,17 +416,64 @@ export function runGateway(options: GatewayOptions): Promise<number> {
         finish(1, 'unsolicited upstream response without a matching host request')
         return
       }
+      const progress = entry.progress
+      if (progress !== undefined) {
+        progress.requests -= 1
+        if (progress.requests === 0) activeProgress.delete(progress.token)
+      }
 
       if (Object.hasOwn(message.value, 'error')) {
+        const error = asRecord(message.value['error'])
         const tool = entry.call?.tool ?? entry.method
         const label = entry.call === undefined ? (entry.label ?? entry.method) : sourceLabel(entry.call)
         const source = classifySource({ kind: 'tool', label, tool }, options.policy)
-        sendToHost(observeErrorResponse(message.value, tool, source, cordon))
+        // A server-authored error is still a model-visible result. Unknown
+        // fields could carry instructions around the observed message.
+        if (message.value['jsonrpc'] !== '2.0' ||
+          Object.keys(message.value).some((key) => !['jsonrpc', 'id', 'error'].includes(key)) ||
+          error === null ||
+          Object.keys(error).some((key) => !['code', 'message', 'data'].includes(key)) ||
+          !Number.isSafeInteger(error['code']) || typeof error['message'] !== 'string') {
+          sendToHost(withholdUnreadableResponse(message.value, tool, source, cordon))
+          return
+        }
+        if (!observeInto(error, 'message', tool, source, cordon)) {
+          sendToHost(withholdUnreadableResponse(message.value, tool, source, cordon))
+          return
+        }
+        // JSON-RPC error data has no prescribed shape, but the host may show
+        // all of it to the model. Inspect known text and withhold anything
+        // whose role or media bytes we cannot inspect.
+        if (Object.hasOwn(error, 'data')) {
+          const observed = observeReadableResult(error['data'], tool, source, cordon, [])
+          if (observed === null) {
+            sendToHost(withholdUnreadableResponse(message.value, tool, source, cordon))
+            return
+          }
+          // The generic text walker visits values, but a server can put an
+          // instruction in a field name. A changed serialized view means
+          // some model-visible text had no safe replacement location.
+          const serialized = JSON.stringify(observed.value)
+          if (cordon.observe(serialized, source).text !== serialized) {
+            sendToHost(withholdUnreadableResponse(message.value, tool, source, cordon))
+            return
+          }
+          error['data'] = observed.value
+        }
+        sendToHost(message.value)
         return
       }
 
       if (entry.method === 'tools/list') {
         sendToHost(observeToolList(message.value, cordon, options.policy, options.command))
+        return
+      }
+      if (entry.method === 'initialize') {
+        sendToHost(observeInitialize(message.value, cordon, options.policy))
+        return
+      }
+      if (entry.method === 'server/discover') {
+        sendToHost(observeDiscover(message.value, cordon, options.policy))
         return
       }
       if (entry.method === 'resources/list' || entry.method === 'resources/templates/list' || entry.method === 'prompts/list') {
@@ -413,6 +491,10 @@ export function runGateway(options: GatewayOptions): Promise<number> {
       }
       if (entry.method === 'prompts/get') {
         sendToHost(observePromptsGet(message.value, entry, cordon, options.policy))
+        return
+      }
+      if (entry.method === 'completion/complete') {
+        sendToHost(observeCompletion(message.value, cordon, options.policy))
         return
       }
       sendToHost(observeOtherResponse(message.value, entry.method, cordon, options.policy))
@@ -524,6 +606,8 @@ function validHostMethodParams(method: string, params: Record<string, unknown>):
   return typeof params['uri'] === 'string' && params['uri'] !== ''
 }
 
+type ForwardRequest = (id: JsonRpcId, entry: Pending, request: Record<string, unknown>) => void
+
 /**
  * The decision on a tools/call. The call is gated BEFORE the upstream sees
  * it: a refused call never reaches the server, and the refusal is answered
@@ -540,9 +624,8 @@ function gateCall(
   message: Extract<Message, { type: 'request' }>,
   cordon: Cordon,
   policy: Policy,
-  pending: Map<string, Pending>,
+  forwardRequest: ForwardRequest,
   sendToHost: (message: Record<string, unknown>) => void,
-  sendUpstream: (message: Record<string, unknown>) => void,
   waitForApproval?: (id: string, reason: string) => void,
 ): void {
   const params = asRecord(message.params)
@@ -586,14 +669,12 @@ function gateCall(
   }
 
   if (decision.kind === 'rewrite') {
-    pending.set(pendingKey(message.id), { method: message.method, call, notice: rewriteNotice(decision) })
     // The forwarded request is reserialized: the original line carries the
     // arguments the model wrote, and they are exactly what was cut.
-    sendUpstream(forwarded(decision.args))
+    forwardRequest(message.id, { method: message.method, call, notice: rewriteNotice(decision) }, forwarded(decision.args))
     return
   }
-  pending.set(pendingKey(message.id), { method: message.method, call })
-  sendUpstream(forwarded(call.args))
+  forwardRequest(message.id, { method: message.method, call }, forwarded(call.args))
 }
 
 /**
@@ -614,6 +695,12 @@ function observeToolList(
   if (result === null || !Array.isArray(listed) ||
     Object.keys(value).some((key) => !RESPONSE_KEYS.has(key)) ||
     Object.keys(result).some((key) => !TOOL_LIST_KEYS.has(key)) ||
+    (result['resultType'] !== undefined && result['resultType'] !== 'complete') ||
+    (result['nextCursor'] !== undefined && typeof result['nextCursor'] !== 'string') ||
+    (result['ttlMs'] !== undefined && (!Number.isSafeInteger(result['ttlMs']) ||
+      (result['ttlMs'] as number) < 0)) ||
+    (result['cacheScope'] !== undefined && result['cacheScope'] !== 'public' &&
+      result['cacheScope'] !== 'private') ||
     listed.some((tool) => !readableListedTool(tool))) {
     return withholdUnreadableResponse(value, 'tools/list', source, cordon)
   }
@@ -632,7 +719,8 @@ function observeToolList(
     .map((tool) => asRecord(tool))
     .filter((tool): tool is Record<string, unknown> => tool !== null && typeof tool['name'] === 'string')
     .map((tool) => ({ name: tool['name'] as string, description: tool['description'], inputSchema: tool['inputSchema'],
-      title: tool['title'], annotations: tool['annotations'], outputSchema: tool['outputSchema'] }))
+      title: tool['title'], annotations: tool['annotations'], outputSchema: tool['outputSchema'], icons: tool['icons'],
+      _meta: tool['_meta'], execution: tool['execution'] }))
   const held = new Set(cordon.admitTools(command, named).map((tool) => tool.name))
   const tools = eligible.filter((tool) => !held.has(String(asRecord(tool)?.['name'])))
   value = { ...value, result: { ...result, tools } }
@@ -644,6 +732,17 @@ function observeToolList(
     const source = classifySource({ kind: 'mcp-description', label: name, tool: name }, policy)
     if (typeof entry['description'] === 'string') observeDescription(entry, 'description', name, source, cordon)
     if (typeof entry['title'] === 'string') observeDescription(entry, 'title', name, source, cordon)
+    if (entry['icons'] !== undefined) {
+      // Icon references are protocol identifiers. Rewriting them can change
+      // the resource fetched by the host, so withhold when cleaning is needed.
+      const text = JSON.stringify(entry['icons'])
+      if (cordon.observe(text, source).text !== text) return withholdUnreadableResponse(value, 'tools/list', source, cordon)
+    }
+    if (entry['_meta'] !== undefined) {
+      const observed = observeReadableResult(entry['_meta'], name, source, cordon, [])
+      if (observed === null) return withholdUnreadableResponse(value, 'tools/list', source, cordon)
+      entry['_meta'] = observed.value
+    }
     const annotations = asRecord(entry['annotations'])
     if (annotations !== null && typeof annotations['title'] === 'string') {
       observeDescription(annotations, 'title', name, source, cordon)
@@ -652,21 +751,46 @@ function observeToolList(
     // and a scanner that looks only at the top level misses them: the
     // classic place to put the poisoned line once the top level is watched.
     const schema = asRecord(entry['inputSchema'])
-    if (schema !== null) observeSchema(schema, name, source, cordon, 0)
+    if (schema !== null && !observeSchema(schema, name, source, cordon, 0)) {
+      return withholdUnreadableResponse(value, 'tools/list', source, cordon)
+    }
+    if (schema !== null) {
+      // One provenance write per schema keeps wide but valid tool lists from
+      // turning every structural key into a session-store write.
+      const text = JSON.stringify(schema)
+      if (cordon.observe(text, source).text !== text) return withholdUnreadableResponse(value, 'tools/list', source, cordon)
+    }
     const outputSchema = asRecord(entry['outputSchema'])
-    if (outputSchema !== null) observeSchema(outputSchema, name, source, cordon, 0)
+    if (outputSchema !== null && !observeSchema(outputSchema, name, source, cordon, 0)) {
+      return withholdUnreadableResponse(value, 'tools/list', source, cordon)
+    }
+    if (outputSchema !== null) {
+      const text = JSON.stringify(outputSchema)
+      if (cordon.observe(text, source).text !== text) return withholdUnreadableResponse(value, 'tools/list', source, cordon)
+    }
   }
   return value
 }
 
 /** How deep a schema is walked. Deeper than any real schema, bounded against a hostile one. */
 const MAX_SCHEMA_DEPTH = 16
+const MAX_SCHEMA_NODES = 20_000
+const SCHEMA_VALUE_KEYS = new Set(['default', 'const', 'enum', 'examples'])
 
 function readableListedTool(value: unknown): boolean {
   const entry = asRecord(value)
   if (entry === null || typeof entry['name'] !== 'string' || entry['name'] === '' ||
+    Object.keys(entry).some((key) => !TOOL_ENTRY_KEYS.has(key)) ||
     (entry['description'] !== undefined && typeof entry['description'] !== 'string') ||
-    (entry['title'] !== undefined && typeof entry['title'] !== 'string')) return false
+    (entry['title'] !== undefined && typeof entry['title'] !== 'string') ||
+    (entry['icons'] !== undefined && !readableIcons(entry['icons'])) ||
+    (entry['_meta'] !== undefined && asRecord(entry['_meta']) === null)) return false
+  if (entry['execution'] !== undefined) {
+    const execution = asRecord(entry['execution'])
+    if (execution === null || Object.keys(execution).some((key) => key !== 'taskSupport')) return false
+    const taskSupport = execution['taskSupport']
+    if (taskSupport !== undefined && taskSupport !== 'forbidden' && taskSupport !== 'optional' && taskSupport !== 'required') return false
+  }
   const input = asRecord(entry['inputSchema'])
   if (input === null || !readableSchemaText(input, 0)) return false
   if (entry['outputSchema'] !== undefined) {
@@ -679,6 +803,20 @@ function readableListedTool(value: unknown): boolean {
       key === 'title' ? typeof value !== 'string' : !TOOL_ANNOTATION_HINTS.has(key) || typeof value !== 'boolean')) return false
   }
   return true
+}
+
+function readableIcons(value: unknown): boolean {
+  return Array.isArray(value) && value.every((icon) => {
+    const entry = asRecord(icon)
+    return entry !== null && typeof entry['src'] === 'string' && entry['src'] !== '' &&
+      Object.keys(entry).every((key) => ['src', 'mimeType', 'sizes', 'theme'].includes(key)) &&
+      sanitize(entry['src']).clean === entry['src'] &&
+      (entry['mimeType'] === undefined || (typeof entry['mimeType'] === 'string' &&
+        sanitize(entry['mimeType']).clean === entry['mimeType'])) &&
+      (entry['theme'] === undefined || entry['theme'] === 'light' || entry['theme'] === 'dark') &&
+      (entry['sizes'] === undefined || (Array.isArray(entry['sizes']) && entry['sizes'].every((size) =>
+        typeof size === 'string' && sanitize(size).clean === size)))
+  })
 }
 
 function readableSchemaText(node: unknown, depth: number): boolean {
@@ -694,28 +832,57 @@ function readableSchemaText(node: unknown, depth: number): boolean {
 
 /**
  * Every `description` and `title` string inside a JSON Schema, at any depth
- * up to the bound. A schema deeper than the bound is not trusted to be
- * clean: the session is marked, as for any content that could not be read.
+ * up to the bound. A schema deeper than the bound is withheld: marking the
+ * session while forwarding unread instructions still gives them to the model.
  */
-function observeSchema(node: Record<string, unknown>, tool: string, source: Source, cordon: Cordon, depth: number): void {
-  if (depth > MAX_SCHEMA_DEPTH) {
-    cordon.markUnredacted()
-    return
-  }
+function observeSchema(
+  node: Record<string, unknown>,
+  tool: string,
+  source: Source,
+  cordon: Cordon,
+  depth: number,
+  budget = { nodes: 0 },
+): boolean {
+  if (depth > MAX_SCHEMA_DEPTH) return false
+  if (++budget.nodes > MAX_SCHEMA_NODES) return false
   for (const key of Object.keys(node)) {
+    if (sanitize(key).clean !== key) return false
     const value = node[key]
     if ((key === 'description' || key === 'title') && typeof value === 'string') {
       observeDescription(node, key, tool, source, cordon)
+    } else if (SCHEMA_VALUE_KEYS.has(key)) {
+      // Rewriting a default or an enum can make the advertised schema disagree
+      // with what the server accepts. Withhold the list if cleaning is needed.
+      if (!observeSchemaValue(value, depth + 1, budget)) return false
+    } else if (typeof value === 'string') {
+      if (sanitize(value).clean !== value) return false
     } else if (Array.isArray(value)) {
       for (const item of value) {
         const child = asRecord(item)
-        if (child !== null) observeSchema(child, tool, source, cordon, depth + 1)
+        if (child !== null) {
+          if (!observeSchema(child, tool, source, cordon, depth + 1, budget)) return false
+        } else if (!observeSchemaValue(item, depth + 1, budget)) return false
       }
     } else {
       const child = asRecord(value)
-      if (child !== null) observeSchema(child, tool, source, cordon, depth + 1)
+      if (child !== null && !observeSchema(child, tool, source, cordon, depth + 1, budget)) return false
     }
   }
+  return true
+}
+
+function observeSchemaValue(
+  value: unknown,
+  depth: number,
+  budget: { nodes: number },
+): boolean {
+  if (depth > MAX_SCHEMA_DEPTH || ++budget.nodes > MAX_SCHEMA_NODES) return false
+  if (typeof value === 'string') return sanitize(value).clean === value
+  if (Array.isArray(value)) return value.every((item) => observeSchemaValue(item, depth + 1, budget))
+  const record = asRecord(value)
+  if (record !== null) return Object.entries(record).every(([key, item]) =>
+    sanitize(key).clean === key && observeSchemaValue(item, depth + 1, budget))
+  return true
 }
 
 function observeDescription(entry: Record<string, unknown>, key: string, tool: string, source: Source, cordon: Cordon): void {
@@ -748,10 +915,208 @@ function withNotice(value: Record<string, unknown>, notice: string): Record<stri
   return { ...value, result: { ...result, content: [...content, { type: 'text', text: notice }] } }
 }
 
-const TOOL_RESULT_KEYS = new Set(['content', 'structuredContent', 'isError', '_meta'])
-const TOOL_LIST_KEYS = new Set(['tools', 'nextCursor', '_meta'])
+const TOOL_RESULT_KEYS = new Set(['resultType', 'content', 'structuredContent', 'isError', '_meta'])
+const TOOL_LIST_KEYS = new Set(['resultType', 'tools', 'nextCursor', '_meta', 'ttlMs', 'cacheScope'])
+const TOOL_ENTRY_KEYS = new Set(['name', 'description', 'inputSchema', 'title', 'annotations', 'outputSchema', 'icons', '_meta', 'execution'])
 const TOOL_ANNOTATION_HINTS = new Set(['readOnlyHint', 'destructiveHint', 'idempotentHint', 'openWorldHint'])
 const RESPONSE_KEYS = new Set(['jsonrpc', 'id', 'result'])
+const INITIALIZE_KEYS = new Set(['protocolVersion', 'capabilities', 'serverInfo', 'instructions', '_meta'])
+const DISCOVER_KEYS = new Set(['resultType', 'supportedVersions', 'capabilities', 'instructions', '_meta', 'ttlMs', 'cacheScope'])
+const SERVER_LIST_NOTIFICATIONS = new Set([
+  'notifications/tools/list_changed', 'notifications/prompts/list_changed',
+  'notifications/resources/list_changed',
+])
+const LOG_LEVELS = new Set(['debug', 'info', 'notice', 'warning', 'error', 'critical', 'alert', 'emergency'])
+
+function observeServerNotification(
+  value: Record<string, unknown>,
+  method: string,
+  cordon: Cordon,
+  policy: Policy,
+  activeProgress: ReadonlyMap<string | number, ProgressState>,
+): Record<string, unknown> | null {
+  if (value['jsonrpc'] !== '2.0' || Object.keys(value).some((key) =>
+    !['jsonrpc', 'method', 'params'].includes(key))) return null
+  if (SERVER_LIST_NOTIFICATIONS.has(method)) {
+    const params = value['params']
+    if (params !== undefined) {
+      const record = asRecord(params)
+      if (record === null || Object.keys(record).length > 0) return null
+    }
+    return { jsonrpc: '2.0', method, ...(params === undefined ? {} : { params }) }
+  }
+  if (method === 'notifications/progress') {
+    return observeProgress(asRecord(value['params']), activeProgress, cordon, policy)
+  }
+  if (method !== 'notifications/message') return null
+  const params = asRecord(value['params'])
+  if (params === null || !LOG_LEVELS.has(String(params['level'])) ||
+    !Object.hasOwn(params, 'data') ||
+    Object.keys(params).some((key) => !['level', 'logger', 'data', '_meta'].includes(key)) ||
+    (params['logger'] !== undefined && typeof params['logger'] !== 'string')) return null
+  const source = classifySource({ kind: 'mcp-description', label: method }, policy)
+  const observed = observeReadableResult(params, method, source, cordon, [])
+  if (observed === null) return null
+  // Arbitrary JSON logging data may carry text in property names, which the
+  // generic text extractor treats as structure. The full serialized message
+  // has to survive the sanitizer unchanged before the host sees those keys.
+  const text = JSON.stringify(observed.value)
+  if (cordon.observe(text, source).text !== text) return null
+  return { jsonrpc: '2.0', method, params: observed.value }
+}
+
+function isProgressToken(value: unknown): value is string | number {
+  return typeof value === 'string' || (typeof value === 'number' && Number.isSafeInteger(value))
+}
+
+function observeProgress(
+  params: Record<string, unknown> | null,
+  activeProgress: ReadonlyMap<string | number, ProgressState>,
+  cordon: Cordon,
+  policy: Policy,
+): Record<string, unknown> | null {
+  if (params === null || Object.keys(params).some((key) =>
+    !['progressToken', 'progress', 'total', 'message', '_meta'].includes(key)) ||
+    (params['_meta'] !== undefined && asRecord(params['_meta']) === null)) return null
+  const { progressToken, progress, total, message } = params
+  if (!isProgressToken(progressToken) || typeof progress !== 'number' || !Number.isFinite(progress) ||
+    (total !== undefined && (typeof total !== 'number' || !Number.isFinite(total))) ||
+    (message !== undefined && typeof message !== 'string')) return null
+  const active = activeProgress.get(progressToken)
+  if (active === undefined || active.suppressed === true ||
+    (active.last !== undefined && progress <= active.last)) return null
+
+  // Only standard progress fields reach the host. Extension metadata has
+  // no safe role here, and even a human-readable message is server text.
+  const forwarded = { progressToken, progress,
+    ...(total === undefined ? {} : { total }), ...(message === undefined ? {} : { message }) }
+  const method = 'notifications/progress'
+  if (message !== undefined &&
+    !observeInto(forwarded, 'message', method, classifySource({ kind: 'mcp-description', label: method, tool: method }, policy), cordon)) return null
+  active.last = progress
+  return { jsonrpc: '2.0', method, params: forwarded }
+}
+
+/** Preserve resource reads and list changes without advertising subscriptions. */
+function removeSubscriptionCapability(result: Record<string, unknown>): void {
+  const resources = asRecord(asRecord(result['capabilities'])?.['resources'])
+  if (resources !== null) delete resources['subscribe']
+}
+
+/** The server can send model-facing instructions before the host lists any tools. */
+function observeInitialize(
+  value: Record<string, unknown>,
+  cordon: Cordon,
+  policy: Policy,
+): Record<string, unknown> {
+  const source = classifySource({ kind: 'mcp-description', label: 'initialize' }, policy)
+  const result = asRecord(value['result'])
+  if (Object.keys(value).some((key) => !RESPONSE_KEYS.has(key)) ||
+    result === null || Object.keys(result).some((key) => !INITIALIZE_KEYS.has(key)) ||
+    typeof result['protocolVersion'] !== 'string' ||
+    asRecord(result['capabilities']) === null ||
+    asRecord(result['serverInfo']) === null ||
+    (result['instructions'] !== undefined && typeof result['instructions'] !== 'string')) {
+    return withholdUnreadableResponse(value, 'initialize', source, cordon)
+  }
+  removeSubscriptionCapability(result)
+  const observed = observeReadableResult(result, 'initialize', source, cordon, [])
+  if (observed === null) return withholdUnreadableResponse(value, 'initialize', source, cordon)
+  return { jsonrpc: '2.0', id: value['id'], result: observed.value }
+}
+
+/** Modern MCP discovery carries the same model-facing instructions as initialize. */
+function observeDiscover(
+  value: Record<string, unknown>,
+  cordon: Cordon,
+  policy: Policy,
+): Record<string, unknown> {
+  const source = classifySource({ kind: 'mcp-description', label: 'server/discover' }, policy)
+  const result = asRecord(value['result'])
+  if (Object.keys(value).some((key) => !RESPONSE_KEYS.has(key)) ||
+    result === null || Object.keys(result).some((key) => !DISCOVER_KEYS.has(key)) ||
+    result['resultType'] !== 'complete' ||
+    !Array.isArray(result['supportedVersions']) ||
+    result['supportedVersions'].length === 0 ||
+    result['supportedVersions'].some((version: unknown) => typeof version !== 'string') ||
+    asRecord(result['capabilities']) === null ||
+    (result['instructions'] !== undefined && typeof result['instructions'] !== 'string') ||
+    (result['_meta'] !== undefined && asRecord(result['_meta']) === null) ||
+    (result['ttlMs'] !== undefined && (!Number.isSafeInteger(result['ttlMs']) ||
+      (result['ttlMs'] as number) < 0)) ||
+    (result['cacheScope'] !== undefined && result['cacheScope'] !== 'public' &&
+      result['cacheScope'] !== 'private')) {
+    return withholdUnreadableResponse(value, 'server/discover', source, cordon)
+  }
+  removeSubscriptionCapability(result)
+  const observed = observeReadableResult(result, 'server/discover', source, cordon, [])
+  if (observed === null) return withholdUnreadableResponse(value, 'server/discover', source, cordon)
+  return { jsonrpc: '2.0', id: value['id'], result: observed.value }
+}
+
+/** A completion value is server-authored text that can be placed into the model's next call. */
+function observeCompletion(
+  value: Record<string, unknown>,
+  cordon: Cordon,
+  policy: Policy,
+): Record<string, unknown> {
+  const method = 'completion/complete'
+  const source = classifySource({ kind: 'tool', label: method, tool: method }, policy)
+  const result = asRecord(value['result'])
+  const completion = asRecord(result?.['completion'])
+  const values = completion?.['values']
+  if (Object.keys(value).some((key) => !RESPONSE_KEYS.has(key)) ||
+    result === null || Object.keys(result).some((key) => !['completion', '_meta'].includes(key)) ||
+    completion === null || Object.keys(completion).some((key) => !['values', 'total', 'hasMore'].includes(key)) ||
+    !Array.isArray(values) || values.length > 100 ||
+    values.some((item: unknown) => typeof item !== 'string') ||
+    (completion['total'] !== undefined && (!Number.isSafeInteger(completion['total']) ||
+      (completion['total'] as number) < 0)) ||
+    (completion['hasMore'] !== undefined && typeof completion['hasMore'] !== 'boolean') ||
+    (result['_meta'] !== undefined && asRecord(result['_meta']) === null)) {
+    return withholdUnreadableResponse(value, method, source, cordon)
+  }
+  for (const item of values) {
+    if (cordon.observe(item as string, source).text !== item) {
+      return withholdUnreadableResponse(value, method, source, cordon)
+    }
+  }
+  if (result['_meta'] !== undefined) {
+    const observed = observeReadableResult(result['_meta'], method, source, cordon, [])
+    if (observed === null || observed.value !== result['_meta']) {
+      return withholdUnreadableResponse(value, method, source, cordon)
+    }
+  }
+  const serialized = JSON.stringify(result)
+  if (cordon.observe(serialized, source).text !== serialized) {
+    return withholdUnreadableResponse(value, method, source, cordon)
+  }
+  return value
+}
+
+/** Unknown methods still return server text to the host; no response may bypass observation. */
+function observeOtherResponse(
+  value: Record<string, unknown>,
+  method: string,
+  cordon: Cordon,
+  policy: Policy,
+): Record<string, unknown> {
+  const source = classifySource({ kind: 'tool', label: method, tool: method }, policy)
+  const result = asRecord(value['result'])
+  if (Object.keys(value).some((key) => !RESPONSE_KEYS.has(key)) || result === null) {
+    return withholdUnreadableResponse(value, method, source, cordon)
+  }
+  if (Object.keys(result).length === 0) return value
+  const observed = observeReadableResult(result, method, source, cordon, [])
+  if (observed === null || observed.value !== result) {
+    return withholdUnreadableResponse(value, method, source, cordon)
+  }
+  const serialized = JSON.stringify(result)
+  if (cordon.observe(serialized, source).text !== serialized) {
+    return withholdUnreadableResponse(value, method, source, cordon)
+  }
+  return value
+}
 
 function observeToolResult(
   value: Record<string, unknown>,
@@ -769,7 +1134,8 @@ function observeToolResult(
   if (Object.keys(value).some((key) => !RESPONSE_KEYS.has(key)) ||
     !Array.isArray(content) ||
     Object.keys(result).some((key) => !TOOL_RESULT_KEYS.has(key)) ||
-    (result['isError'] !== undefined && typeof result['isError'] !== 'boolean')) {
+    (result['isError'] !== undefined && typeof result['isError'] !== 'boolean') ||
+    (result['resultType'] !== undefined && result['resultType'] !== 'complete')) {
     return withholdUnreadableResult(value, call.tool, source, cordon)
   }
 
@@ -799,6 +1165,18 @@ function observeToolResult(
   return value
 }
 
+// Fixed field names are protocol structure. Other names may be shown to the
+// model just like values, and are observed as labels without renaming fields.
+const RESULT_STRUCTURE_KEYS = new Set([
+  'type', 'text', 'content', 'contents', 'structuredContent', '_meta', 'annotations',
+  'role', 'messages', 'uri', 'mimeType', 'blob', 'resource',
+  'name', 'title', 'description', 'instructions', 'version', 'protocolVersion',
+  'capabilities', 'serverInfo', 'supportedVersions', 'tools', 'resources',
+  'prompts', 'logging', 'completion', 'listChanged', 'subscribe',
+  'resultType', 'ttlMs', 'cacheScope', 'nextCursor', 'level', 'logger', 'data',
+  'progressToken', 'progress', 'total', 'message',
+])
+
 function observeReadableResult(
   value: unknown,
   tool: string,
@@ -809,8 +1187,11 @@ function observeReadableResult(
 ): { value: unknown } | null {
   // An MCP server controls tool names. `Write` is textless in Claude Code,
   // but a server with that name can still return arbitrary readable data.
-  const extracted = extractText('', value)
+  const keys = new Set<string>()
+  const extracted = extractText('', value, false, keys)
   if (!extracted.known || (extracted.unseen && !allowUnseen)) return null
+  const labels = [...keys].filter((key) => !RESULT_STRUCTURE_KEYS.has(key)).join('\n')
+  if (labels !== '' && cordon.observe(labels, source, 'label').text !== labels) return null
   if (extracted.unseen) cordon.markUnredacted()
   let changed = false
   let substitutable = true
@@ -822,6 +1203,7 @@ function observeReadableResult(
     return envelope.text
   })
   cordon.observeLinks(extracted.links, source)
+  if (extracted.opaque) cordon.observeUnseen(source)
   if (!changed) return { value }
   if (!substitutable) return null
   const next = replaceText('', value, cleaned)
@@ -922,111 +1304,28 @@ function observePromptsGet(
   return { jsonrpc: '2.0', id: value['id'], result: observed.value }
 }
 
-/** The setup and control methods can also return server-authored content. */
-function observeOtherResponse(
-  value: Record<string, unknown>,
-  method: string,
-  cordon: Cordon,
-  policy: Policy,
-): Record<string, unknown> {
-  const bootstrap = method === 'initialize' || method === 'server/discover'
-  const source = classifySource(bootstrap
-    ? { kind: 'mcp-description', label: method } : { kind: 'tool', label: method, tool: method }, policy)
-  const result = asRecord(value['result'])
-  const withheld = (): Record<string, unknown> => withholdUnreadableResponse(value, method, source, cordon)
-  if (Object.keys(value).some((key) => !RESPONSE_KEYS.has(key)) || result === null) return withheld()
-  if (Object.keys(result).length === 0) return value
-
-  if (bootstrap) {
-    const resources = asRecord(asRecord(result['capabilities'])?.['resources'])
-    // Subscription updates are withheld. Advertise the supported resource
-    // operations without inviting clients to start a subscription.
-    if (resources !== null) delete resources['subscribe']
-  }
-  const { instructions, ...metadata } = result
-  const hasInstructions = bootstrap && instructions !== undefined
-  let cleanedInstructions: string | undefined
-  if (hasInstructions) {
-    // This field is free-form content in the bootstrap protocol.
-    if (typeof instructions !== 'string') return withheld()
-    const envelope = cordon.observe(instructions, source)
-    if (!envelope.substitute && envelope.text !== instructions) return withheld()
-    cleanedInstructions = envelope.text
-  }
-  const observed = observeReadableResult(hasInstructions ? metadata : result, method, source, cordon, [])
-  const scanned = asRecord(observed?.value)
-  if (scanned === null) return withheld()
-  const payload = cleanedInstructions === undefined ? scanned : { ...scanned, instructions: cleanedInstructions }
-  const serialized = JSON.stringify(payload)
-  if (cordon.observe(serialized, source).text !== serialized) return withheld()
-  return { jsonrpc: '2.0', id: value['id'], result: payload }
-}
-
-/** An upstream error can reach the model just like a successful tool result. */
-function observeErrorResponse(
-  value: Record<string, unknown>,
+/**
+ * Observes one text field and writes the cleaned text back into it.
+ *
+ * An error message is never copied back to a file. If a source-view policy
+ * forbids substitution, a changed message has no safe path to the model:
+ * withhold the whole error and let the caller send a protocol-shaped refusal.
+ */
+function observeInto(
+  entry: Record<string, unknown>,
+  key: string,
   tool: string,
   source: Source,
   cordon: Cordon,
-): Record<string, unknown> {
-  const error = asRecord(value['error'])
-  const withheld = (): Record<string, unknown> => withholdUnreadableResponse(value, tool, source, cordon)
-  if (value['jsonrpc'] !== '2.0' ||
-    Object.keys(value).some((key) => !['jsonrpc', 'id', 'error'].includes(key)) ||
-    error === null || Object.keys(error).some((key) => !['code', 'message', 'data'].includes(key)) ||
-    !Number.isSafeInteger(error['code']) || typeof error['message'] !== 'string') return withheld()
-
-  const message = cordon.observe(error['message'], source)
-  if (!message.substitute && message.text !== error['message']) return withheld()
-  const response = { jsonrpc: '2.0', id: value['id'], error: { code: error['code'], message: message.text } }
-  if (!Object.hasOwn(error, 'data')) return response
-
-  const data = observeReadableResult(error['data'], tool, source, cordon, [])
-  if (data === null) return withheld()
-  // The text walker visits values. Check the serialized form too because
-  // arbitrary JSON error data may contain text in property names.
-  const serialized = JSON.stringify(data.value)
-  if (cordon.observe(serialized, source).text !== serialized) return withheld()
-  return { ...response, error: { ...response.error, data: data.value } }
-}
-
-const SERVER_LIST_NOTIFICATIONS = new Set([
-  'notifications/tools/list_changed', 'notifications/prompts/list_changed',
-  'notifications/resources/list_changed',
-])
-const LOG_LEVELS = new Set(['debug', 'info', 'notice', 'warning', 'error', 'critical', 'alert', 'emergency'])
-
-function observeServerNotification(
-  value: Record<string, unknown>,
-  method: string,
-  cordon: Cordon,
-  policy: Policy,
-): Record<string, unknown> | null {
-  if (value['jsonrpc'] !== '2.0' || Object.keys(value).some((key) =>
-    !['jsonrpc', 'method', 'params'].includes(key))) return null
-  if (SERVER_LIST_NOTIFICATIONS.has(method)) {
-    const params = value['params']
-    if (params !== undefined) {
-      const record = asRecord(params)
-      if (record === null || Object.keys(record).length > 0) return null
-    }
-    return { jsonrpc: '2.0', method, ...(params === undefined ? {} : { params }) }
+): boolean {
+  const envelope = cordon.observe(entry[key] as string, source)
+  if (!envelope.substitute && envelope.text !== entry[key]) return false
+  if (envelope.substitute) {
+    entry[key] = envelope.text
+  } else if (envelope.findings.length > 0) {
+    cordon.notice(tool, `a hidden layer was found in the result of ${tool}; it was not substituted`, source)
   }
-  if (method !== 'notifications/message') return null
-  const params = asRecord(value['params'])
-  if (params === null || !LOG_LEVELS.has(String(params['level'])) ||
-    !Object.hasOwn(params, 'data') ||
-    Object.keys(params).some((key) => !['level', 'logger', 'data', '_meta'].includes(key)) ||
-    (params['logger'] !== undefined && typeof params['logger'] !== 'string')) return null
-  const source = classifySource({ kind: 'mcp-description', label: method }, policy)
-  const observed = observeReadableResult(params, method, source, cordon, [])
-  if (observed === null) return null
-  // Arbitrary JSON logging data may carry text in property names, which the
-  // generic text extractor treats as structure. The full serialized message
-  // has to survive the sanitizer unchanged before the host sees those keys.
-  const text = JSON.stringify(observed.value)
-  if (cordon.observe(text, source).text !== text) return null
-  return { jsonrpc: '2.0', method, params: observed.value }
+  return true
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
