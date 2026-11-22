@@ -6,6 +6,7 @@ import { homedir, tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { createInterface } from 'node:readline'
 import { fileURLToPath } from 'node:url'
+import { ApprovalStore } from '../../dist/session/approvals.js'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const BUNDLE = join(HERE, '../../plugin/dist/cli.js')
@@ -173,7 +174,7 @@ try {
     env: { ...process.env, CORDON_HOME: home }, encoding: 'utf8', timeout: 10_000,
   })
   if (approved.status !== 0) throw new Error('owner approval failed: ' + approved.stderr)
-  ownerApprovalRecorded = existsSync(join(home, 'approvals', oldId + '.approved'))
+  ownerApprovalRecorded = new ApprovalStore(home).hasApproval(oldId)
 
   const resumeArgs = ['exec', 'resume', ...common(fresh), session,
     'Retry exactly the same desk send_email call that Cordon refused in the previous turn. ' +
@@ -210,7 +211,7 @@ const row = {
   newId,
   ownerApprovalRecorded,
   exactRetry,
-  oldApprovalUnspent: existsSync(join(home, 'approvals', oldId + '.approved')),
+  oldApprovalUnspent: new ApprovalStore(home).hasApproval(oldId),
   emailReachedServer: emails.length > 0,
   approvalConsumed: journal.some((event) => event.decision === 'approved' && event.tool === 'send_email'),
   freshApprovalRecorded: fresh && journal.some((event) => event.decision === 'approval-given' && event.id === newId),

@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from 'node:crypto'
-import { existsSync, readdirSync, readFileSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
+import { closeSync, constants, existsSync, fstatSync, linkSync, openSync, readdirSync, readFileSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { ToolCall } from '../core/types.js'
 import { makeDirectory } from '../core/mkdir.js'
@@ -15,6 +15,10 @@ export const APPROVAL_TTL_MS = 60 * 60 * 1000
 
 const ID = /^[0-9a-f]{16}$/u
 const NONCE = /^[0-9a-f]{16}$/u
+const INSTANCE = /^[0-9a-f]{64}$/u
+
+/** The approval store and the session sweep remove only these file names. */
+export const APPROVAL_FILES = /^[0-9a-f]{16}\.(?:request\.json|request-writing\.[0-9a-f]{16}|approved(?:\.[0-9a-f]{64})?|approval-writing\.[0-9a-f]{16}|used\.[0-9a-f]{64}|taken\.[0-9a-f]{16}|taking\.\d+\.[0-9a-f]{8})$/u
 
 /**
  * The identity of one exact call in one session.
@@ -81,6 +85,19 @@ export interface PendingApproval extends ShownRequest {
   at: string
 }
 
+interface WaitingRequest extends ShownRequest {
+  at: string
+  binding: string
+  /** Identifies the bytes of the specific question the owner was shown. */
+  instance: string
+}
+
+interface Grant {
+  binding: string
+  nonce: string
+  instance: string
+}
+
 /**
  * How much of the arguments a terminal listing shows. Only the listing is
  * cut: the request file keeps every argument, and a request longer than this
@@ -93,11 +110,10 @@ export const MAX_SHOWN_ARGS = 4000
  * the LangChain middleware, where the interactive mode's question used to
  * become a refusal with no way forward.
  *
- * Two files per call, and never a shared one. The gateway writes the request,
- * `cordon approve` writes the approval from another process, and the retry
- * consumes it by deleting it. With one file per state no process rewrites
- * another's writing, and deleting is the lock: of two retries racing for one
- * approval, exactly one unlink succeeds.
+ * The gateway writes one immutable request and the owner publishes a grant
+ * scoped to that request. A retry claims the grant by renaming it, then
+ * claims the request instance exclusively so concurrent owner approvals
+ * for the same question cannot authorize multiple retries.
  */
 export class ApprovalStore {
   private readonly dir: string
@@ -110,8 +126,18 @@ export class ApprovalStore {
     return join(this.dir, `${checked(id)}.request.json`)
   }
 
+  /** The publication path for the current question. */
   approvedPath(id: string): string {
-    return join(this.dir, `${checked(id)}.approved`)
+    const request = this.read(checked(id))
+    return request === null ? join(this.dir, `${id}.approved`) : this.grantPath(id, request.instance)
+  }
+
+  private grantPath(id: string, instance: string): string {
+    return join(this.dir, `${id}.approved.${instance}`)
+  }
+
+  private usedPath(id: string, instance: string): string {
+    return join(this.dir, `${id}.used.${instance}`)
   }
 
   takenPath(id: string, nonce: string): string {
@@ -128,6 +154,9 @@ export class ApprovalStore {
     const binding = request.binding ?? ''
     if (!BINDING.test(binding)) throw new Error('an approval binding is a sha256 in hex')
     const body = JSON.stringify({
+      // Even two requests written in the same millisecond must have
+      // distinct identities when an earlier question is retired.
+      generation: randomBytes(16).toString('hex'),
       tool: request.tool,
       reason: request.reason,
       args,
@@ -136,54 +165,66 @@ export class ApprovalStore {
       ...(request.call === undefined ? {} : { call: request.call }),
       at: new Date().toISOString(),
     })
-    // A request past its hour can no longer be approved, so it is replaced
-    // rather than left to block the id forever; an approval left over from it
-    // goes too, so the renewal cannot revive it.
     this.sweep()
-    if (this.stale(this.pendingPath(id))) {
-      for (const path of [this.pendingPath(id), this.approvedPath(id)]) {
-        try {
-          unlinkSync(path)
-        } catch {
-          // Already gone: nothing to retire.
+    // The owner lists final names. Publish a complete private file with
+    // an exclusive link so two concurrent writers keep the first question.
+    const writing = join(this.dir, `${checked(id)}.request-writing.${randomBytes(8).toString('hex')}`)
+    try {
+      writeFileSync(writing, body, { encoding: 'utf8', mode: 0o600, flag: 'wx' })
+      try {
+        linkSync(writing, this.pendingPath(id))
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+        // A crash after consumption can leave an occupied request path with
+        // nothing the owner can approve. Keep any replacement on disk intact.
+        if (this.waiting(id) === null) {
+          throw new Error(`could not publish approval question ${id} because the existing request is unavailable`)
         }
       }
-    }
-    try {
-      writeFileSync(this.pendingPath(id), body, { encoding: 'utf8', mode: 0o600, flag: 'wx' })
-    } catch (error) {
-      // Already waiting: the first request stands, and its age with it. Any
-      // other failure propagates; the caller's refusal is issued either way.
-      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+    } finally {
+      rmSync(writing, { force: true })
     }
   }
 
   /**
-   * The owner's approval of a waiting request, or null when there is none to
-   * approve. Returns what was approved, so the owner sees it said back.
+   * Publishes the owner's grant for the question they inspected. The optional
+   * instance lets the CLI keep its journal and the grant about the same question.
    */
-  approve(id: string): ShownRequest | null {
-    const request = this.read(id)
-    if (request === null) return null
-    // The approval carries the binding it was given under, so a retry in a
-    // different context cannot take it.
-    const shown: ShownRequest = { tool: request.tool, reason: request.reason, args: request.args, ...(request.context === undefined ? {} : { context: request.context }) }
-    // Each approval carries its own nonce, and a take marks the nonce it
-    // took: a mark shared by every question under one id let an approval
-    // retired mid-write read as taken, and a later question's cleanup erase
-    // the mark of one that was (Codex).
+  approve(id: string, expectedInstance?: string): ShownRequest | null {
+    const request = this.waiting(id)
+    if (request === null || (expectedInstance !== undefined && request.instance !== expectedInstance)) return null
+
+    const { instance, binding, at: _at, ...shown } = request
     const nonce = randomBytes(8).toString('hex')
-    writeFileSync(this.approvedPath(id), `${request.binding}\n${nonce}`, { mode: 0o600 })
-    // Retired while this ran: the approval would be void anyway, and the
-    // owner must not read "approved once" about a question that is gone.
-    // Gone because a retry took the approval is the opposite case, and the
-    // take leaves a mark saying so (Codex): the call ran on this approval.
-    if (this.read(id) === null) {
-      if (existsSync(this.takenPath(id, nonce))) return shown
-      this.retire(id)
-      return null
+    const writing = join(this.dir, `${id}.approval-writing.${nonce}`)
+    const publication = this.grantPath(id, instance)
+    try {
+      writeFileSync(writing, `${binding}\n${nonce}\n${instance}`, { mode: 0o600, flag: 'wx' })
+      if (this.waiting(id)?.instance !== instance) return null
+      // The retry must see a complete grant. The instance in the name also
+      // keeps a late owner approval from replacing a renewed question's grant.
+      renameSync(writing, publication)
+    } finally {
+      rmSync(writing, { force: true })
     }
-    return shown
+    // A retry may have used exactly this grant while the owner was still
+    // publishing it. Only that grant's receipt can distinguish use from expiry.
+    if (existsSync(this.takenPath(id, nonce))) return shown
+    if (this.read(id)?.instance === instance) {
+      const used = this.usedPath(id, instance)
+      if (!existsSync(used) || this.readGrant(used)?.nonce === nonce) return shown
+    }
+    rmSync(publication, { force: true })
+    return null
+  }
+
+  /** A complete grant for the still-pending question, without consuming it. */
+  hasApproval(id: string, expectedInstance?: string): boolean {
+    const request = this.waiting(id)
+    if (request === null || (expectedInstance !== undefined && request.instance !== expectedInstance)) return false
+    const grant = this.readGrant(this.grantPath(id, request.instance))
+    return grant !== null && grant.instance === request.instance && grant.binding === request.binding &&
+      this.waiting(id)?.instance === request.instance
   }
 
   private stale(path: string): boolean {
@@ -195,61 +236,65 @@ export class ApprovalStore {
   }
 
   /**
-   * Whether an approval for this call is waiting, taking it if so.
-   *
-   * Every failure answers false, and false is a refusal: an unreadable store
-   * or an approval that is not there never lets a call through.
-   */
-  /**
-   * Takes the approval for this call if it was given under this binding.
-   *
-   * Every failure answers not taken, and not taken is a refusal. An approval
-   * under another binding is voided, with its request, so the next refusal
-   * asks the question afresh and the owner sees the current one.
+   * Takes one fresh grant for the current question and context. An unreadable
+   * file, expired question or failed claim leaves the call refused.
    */
   take(id: string, binding: string): Taken {
     if (!ID.test(id)) return { taken: false, void: false }
-    // The approval is claimed first, by a rename only one process can win,
-    // and its question is looked for only after. Looked for before, a
-    // retirement and a late approval could both land in between, and the
-    // late approval was taken with no question behind it (Codex). Claimed
-    // first, a retirement either happened before the look, and nothing is
-    // taken, or after it, and the take came first.
+    const request = this.waiting(id)
+    if (request === null) return { taken: false, void: false }
+
     const claimed = join(this.dir, `${id}.taking.${process.pid}.${randomBytes(4).toString('hex')}`)
     try {
-      renameSync(this.approvedPath(id), claimed)
+      renameSync(this.grantPath(id, request.instance), claimed)
     } catch {
-      // No approval, or another retry took it first: the call is refused.
+      // No grant, or another retry took it first.
       return { taken: false, void: false }
     }
     try {
-      const fresh = Date.now() - statSync(claimed).mtimeMs <= APPROVAL_TTL_MS
-      const [given, nonce] = readFileSync(claimed, 'utf8').split('\n')
-      // An approval is only as good as its question. One whose question was
-      // retired, by a retry under a newer context racing the owner's
-      // `approve`, is void however it got written (Codex).
-      if (!existsSync(this.pendingPath(id))) return { taken: false, void: false }
-      if (fresh && given !== binding) {
-        this.retire(id)
+      const grant = this.readGrant(claimed)
+      if (grant === null || grant.instance !== request.instance || grant.binding !== request.binding) {
+        return { taken: false, void: false }
+      }
+
+      // A second owner command can publish another grant while this retry
+      // is using the first. Claim the question itself before giving effect.
+      linkSync(claimed, this.usedPath(id, request.instance))
+      if (this.read(id)?.instance !== request.instance) return { taken: false, void: false }
+
+      if (grant.binding !== binding) {
+        this.discard(id, request.instance)
         return { taken: false, void: true }
       }
-      // The mark an `approve` still running reads to tell a take from a
-      // retirement; swept with the rest once stale.
-      if (fresh && nonce !== undefined && NONCE.test(nonce)) writeFileSync(this.takenPath(id, nonce), '', { mode: 0o600 })
-      try {
-        unlinkSync(this.pendingPath(id))
-      } catch {
-        // Retired a moment after the look: the take came first.
-      }
-      return { taken: fresh, void: false }
+      writeFileSync(this.takenPath(id, grant.nonce), '', { mode: 0o600, flag: 'wx' })
+      this.discard(id, request.instance)
+      return { taken: true, void: false }
     } catch {
-      // The claimed file could not be read: nothing is taken.
+      // Failure to claim or record a take never permits the call.
       return { taken: false, void: false }
     } finally {
-      rmSync(claimed, { force: true })
+      try {
+        rmSync(claimed, { force: true })
+      } catch {
+        // The private claim is never reused and will be swept when stale.
+      }
     }
   }
 
+  private readGrant(path: string): Grant | null {
+    try {
+      const text = readFresh(path)
+      if (text === null) return null
+      const fields = text.split('\n')
+      const [binding, nonce, instance] = fields
+      if (fields.length !== 3 || binding === undefined || !BINDING.test(binding) ||
+        nonce === undefined || !NONCE.test(nonce) || instance === undefined || !INSTANCE.test(instance)) return null
+      return { binding, nonce, instance }
+    } catch {
+      // Unreadable and already claimed grants count as unavailable.
+      return null
+    }
+  }
 
   /**
    * Retires every other question about the same call: asked under an earlier
@@ -275,8 +320,10 @@ export class ApprovalStore {
         continue
       }
       if (parsed?.call !== call) continue
-      retired.push({ id, context: this.contextOf(id) })
-      this.retire(id)
+      const instance = this.read(id)?.instance
+      if (instance === undefined) continue
+      const context = this.contextOf(id)
+      if (this.retire(id, instance)) retired.push({ id, context })
     }
     return retired
   }
@@ -307,9 +354,7 @@ export class ApprovalStore {
       return
     }
     for (const name of names) {
-      // A claimed approval left by a process that died mid-take is swept too.
-      const id = name.replace(/\.(?:request\.json|approved|taken\.[0-9a-f]{16}|taking\.\d+\.[0-9a-f]{8})$/u, '')
-      if (id === name || !ID.test(id)) continue
+      if (!APPROVAL_FILES.test(name)) continue
       if (this.stale(join(this.dir, name))) {
         try {
           unlinkSync(join(this.dir, name))
@@ -320,22 +365,34 @@ export class ApprovalStore {
     }
   }
 
-  private retire(id: string): void {
-    for (const path of [this.pendingPath(id), this.approvedPath(id)]) {
-      try {
-        unlinkSync(path)
-      } catch {
-        // Already gone: nothing to retire.
-      }
+  private retire(id: string, instance: string): boolean {
+    if (this.read(id)?.instance !== instance) return false
+    try {
+      writeFileSync(this.usedPath(id, instance), '', { mode: 0o600, flag: 'wx' })
+    } catch (error) {
+      // A take or another retirement already owns the question.
+      if ((error as NodeJS.ErrnoException).code === 'EEXIST') return false
+      throw error
+    }
+    this.discard(id, instance)
+    return true
+  }
+
+  private discard(id: string, instance: string): void {
+    try {
+      if (this.read(id)?.instance === instance) rmSync(this.pendingPath(id), { force: true })
+      rmSync(this.grantPath(id, instance), { force: true })
+    } catch {
+      // The exclusive marker already voids the question and any remaining
+      // grant for it. The stale files can be swept.
     }
   }
 
   /** Retires a held question when its host timed out or cancelled the call. */
-  cancel(id: string): ShownRequest | null {
-    const request = this.read(checked(id))
-    if (request === null) return null
-    this.retire(id)
-    return request
+  cancel(id: string, expectedInstance?: string): ShownRequest | null {
+    const request = this.waiting(id)
+    if (request === null || (expectedInstance !== undefined && request.instance !== expectedInstance)) return null
+    return this.retire(id, request.instance) ? request : null
   }
 
   /** The requests still waiting, for `cordon approve` with no id. */
@@ -350,37 +407,56 @@ export class ApprovalStore {
     for (const name of names) {
       const id = name.replace(/\.request\.json$/u, '')
       if (id === name || !ID.test(id)) continue
-      const request = this.read(id)
-      if (request !== null) result.push({ id, ...request })
+      const request = this.waiting(id)
+      if (request !== null) {
+        const { instance: _instance, ...shown } = request
+        result.push({ id, ...shown })
+      }
     }
     return result
   }
 
-  /** A waiting request that is still fresh, or null. */
-  waiting(id: string): (ShownRequest & { at: string; binding: string }) | null {
-    return this.read(checked(id))
+  /** A waiting request that is still fresh and unused, or null. */
+  waiting(id: string): WaitingRequest | null {
+    const request = this.read(checked(id))
+    return request === null || existsSync(this.usedPath(id, request.instance)) ? null : request
   }
 
-  private read(id: string): (ShownRequest & { at: string; binding: string }) | null {
-    const path = this.pendingPath(id)
+  private read(id: string): WaitingRequest | null {
     try {
-      if (Date.now() - statSync(path).mtimeMs > APPROVAL_TTL_MS) return null
-      const parsed: unknown = JSON.parse(readFileSync(path, 'utf8'))
+      const body = readFresh(this.pendingPath(id))
+      if (body === null) return null
+      const parsed: unknown = JSON.parse(body)
       if (typeof parsed !== 'object' || parsed === null) return null
       const { tool, reason, at, args, binding, context } = parsed as Record<string, unknown>
       if (typeof tool !== 'string' || typeof reason !== 'string' || typeof at !== 'string') return null
+      if (binding !== undefined && (typeof binding !== 'string' || !BINDING.test(binding))) return null
       return {
         tool,
         reason,
         at,
         args: typeof args === 'string' ? args : '',
-        binding: typeof binding === 'string' ? binding : '',
+        binding: binding ?? '',
+        instance: createHash('sha256').update(body).digest('hex'),
         ...(isContext(context) ? { context } : {}),
       }
     } catch {
       // Absent or damaged: nothing the owner could be shown, so nothing to approve.
       return null
     }
+  }
+}
+
+function readFresh(path: string): string | null {
+  const fd = openSync(path, constants.O_RDONLY | constants.O_NONBLOCK | constants.O_NOFOLLOW)
+  try {
+    // Check the same inode whose bytes are read. The path may already
+    // refer to a newer request by the time a different process opens it.
+    const stat = fstatSync(fd)
+    if (!stat.isFile() || Date.now() - stat.mtimeMs > APPROVAL_TTL_MS) return null
+    return readFileSync(fd, 'utf8')
+  } finally {
+    closeSync(fd)
   }
 }
 

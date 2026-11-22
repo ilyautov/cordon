@@ -12,7 +12,7 @@ Web pages, emails, issues, documents, tool results and MCP tool descriptions can
 
 **Ready:** a core with adapters for **Claude Code**, **Codex CLI**, **Kimi Code**, **DeepSeek Harness** and **Gemini CLI**, a gateway for **MCP hosts**, and middleware for **LangChain** agents.
 
-**Measured:** 1901 tests · 26 pinned attack vectors · 10 legitimate documents · 2 runtime dependencies.
+**Measured:** 1943 tests · 26 pinned attack vectors · 10 legitimate documents · 2 runtime dependencies.
 
 [Measured host versions and installation checks](docs/compatibility.md)
 

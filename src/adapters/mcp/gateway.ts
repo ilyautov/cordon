@@ -1,6 +1,6 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 import { createHash, randomBytes } from 'node:crypto'
-import { accessSync, constants, existsSync } from 'node:fs'
+import { accessSync, constants } from 'node:fs'
 import { join } from 'node:path'
 import { createInterface } from 'node:readline'
 import type { Readable, Writable } from 'node:stream'
@@ -47,6 +47,40 @@ interface Pending {
   notice?: string
 }
 
+// An extension may define its own action method. Only methods whose effect
+// role is known here may reach the upstream without going through gateCall.
+const HOST_REQUEST_METHODS = new Set([
+  'initialize', 'server/discover', 'ping', 'tools/list',
+  'resources/list', 'resources/templates/list', 'resources/read',
+  'prompts/list', 'prompts/get', 'completion/complete', 'logging/setLevel',
+])
+
+// These host requests carry model-selected data or change server state. They
+// must use the same certificate, exact-name list and exposure decision as a
+// tools/call; connection discovery remains available so a runner can load.
+const GATED_HOST_METHODS = new Set([
+  'resources/read',
+  'prompts/get', 'completion/complete', 'logging/setLevel',
+])
+
+const RESERVED_TOOL_NAMES = new Set([...GATED_HOST_METHODS, 'resources/subscribe', 'resources/unsubscribe'])
+
+function forwardableHostNotification(message: Extract<Message, { type: 'notification' }>): boolean {
+  if (message.value['jsonrpc'] !== '2.0' ||
+    Object.keys(message.value).some((key) => !['jsonrpc', 'method', 'params'].includes(key))) return false
+  if (message.method === 'notifications/cancelled') {
+    const params = asRecord(message.params)
+    return params !== null &&
+      Object.keys(params).every((key) => ['requestId', 'reason'].includes(key)) &&
+      (typeof params['requestId'] === 'string' || typeof params['requestId'] === 'number') &&
+      (params['reason'] === undefined || typeof params['reason'] === 'string')
+  }
+  if (message.method !== 'notifications/initialized' &&
+    message.method !== 'notifications/roots/list_changed') return false
+  const params = asRecord(message.params)
+  return message.params === undefined || (params !== null && Object.keys(params).length === 0)
+}
+
 /**
  * Runs the MCP gateway: a stdio proxy between an MCP host and one upstream
  * server. Resolves with the exit code when either side ends.
@@ -67,12 +101,15 @@ export function runGateway(options: GatewayOptions): Promise<number> {
   return new Promise((resolve) => {
     let settled = false
     let upstream: ChildProcess | null = null
-    const reviewTimers = new Map<string, { timer: NodeJS.Timeout; approvalId: string; requestId: string | number }>()
-    let cancelWaiting: ((id: string, reason: string) => void) | null = null
+    let closeReaders: (() => void) | undefined
+    const reviewTimers = new Map<string, {
+      timer: NodeJS.Timeout; approvalId: string; instance: string; requestId: string | number
+    }>()
+    let cancelWaiting: ((id: string, reason: string, instance: string) => void) | null = null
 
-    const retireIfLastWaiter = (id: string, reason: string): void => {
-      if ([...reviewTimers.values()].some((held) => held.approvalId === id)) return
-      cancelWaiting?.(id, reason)
+    const retireIfLastWaiter = (id: string, instance: string, reason: string): void => {
+      if ([...reviewTimers.values()].some((held) => held.approvalId === id && held.instance === instance)) return
+      cancelWaiting?.(id, reason, instance)
     }
 
     // Every exit runs through here, exactly once. Killing the upstream on the
@@ -82,10 +119,10 @@ export function runGateway(options: GatewayOptions): Promise<number> {
     const finish = (code: number, reason?: string): void => {
       if (settled) return
       settled = true
-      for (const { timer, approvalId } of reviewTimers.values()) {
+      for (const { timer, approvalId, instance } of reviewTimers.values()) {
         clearInterval(timer)
         try {
-          cancelWaiting?.(approvalId, 'the MCP gateway stopped before the owner answered')
+          cancelWaiting?.(approvalId, 'the MCP gateway stopped before the owner answered', instance)
         } catch (error) {
           // The host has already lost this gateway. Never resume a held call;
           // report the failed cleanup on the loud channel.
@@ -93,6 +130,7 @@ export function runGateway(options: GatewayOptions): Promise<number> {
         }
       }
       reviewTimers.clear()
+      closeReaders?.()
       if (reason !== undefined) log(reason)
       if (upstream !== null && upstream.exitCode === null && !upstream.killed) upstream.kill()
       resolve(code)
@@ -137,7 +175,7 @@ export function runGateway(options: GatewayOptions): Promise<number> {
       finish(1, `the session state is broken: ${(error as Error).message}`)
       return
     }
-    cancelWaiting = (id, reason) => cordon.cancelUnattendedApproval(id, reason)
+    cancelWaiting = (id, reason, instance) => cordon.cancelUnattendedApproval(id, reason, instance)
 
     // The certificate is the profile for the whole run — there is no user
     // message to widen or narrow it. What the policy can still carry is the
@@ -190,7 +228,17 @@ export function runGateway(options: GatewayOptions): Promise<number> {
       }
 
       if (message.type !== 'request') {
-        if (message.type === 'notification' && message.method === 'notifications/cancelled') {
+        if (message.type === 'response') {
+          // Server-origin requests are answered here, never by the host. A
+          // host response therefore has no pending server request to satisfy.
+          log('an unsolicited host response was withheld from the MCP server')
+          return
+        }
+        if (!forwardableHostNotification(message)) {
+          log('an unclassified host notification was withheld from the MCP server')
+          return
+        }
+        if (message.method === 'notifications/cancelled') {
           const requestId = asRecord(message.params)?.['requestId']
           if (typeof requestId === 'string' || typeof requestId === 'number') {
             const key = pendingKey(requestId)
@@ -198,34 +246,46 @@ export function runGateway(options: GatewayOptions): Promise<number> {
             if (held !== undefined) {
               clearInterval(held.timer)
               reviewTimers.delete(key)
-              retireIfLastWaiter(held.approvalId, 'the host cancelled its MCP request')
+              retireIfLastWaiter(held.approvalId, held.instance, 'the host cancelled its MCP request')
               return
             }
           }
         }
-        // Notifications and the host's answers to the upstream's own
-        // requests (sampling, roots) carry nothing the gateway decides on.
+        // Only known lifecycle and cancellation notifications reach the
+        // server. An extension notification can have side effects too.
         sendUpstream(message.value)
+        return
+      }
+
+      const key = pendingKey(message.id)
+      if (pending.has(key) || reviewTimers.has(key)) {
+        // Reusing an id while its first call is unresolved overwrites the
+        // response's method and source, so no later result can be routed safely.
+        finish(1, `duplicate in-flight host request id ${key}`)
         return
       }
 
       if (message.method === 'tools/call') {
         gateCall(message, cordon, options.policy, pending, sendToHost, sendUpstream,
           approvalWaitMs === 0 ? undefined : (approvalId, reason) => {
-            const key = pendingKey(message.id)
-            if (reviewTimers.has(key)) throw new Error(`a second review is waiting under request ${key}`)
             const approvals = new ApprovalStore(options.cordonHome)
+            const question = approvals.waiting(approvalId)
+            if (question === null) {
+              sendToHost(toolError(message.id, 'Cordon refused the call because its approval question is no longer pending.'))
+              return
+            }
+            const { instance } = question
             const deadline = Date.now() + approvalWaitMs
             const timer = setInterval(() => {
               try {
                 if (Date.now() >= deadline) {
                   clearInterval(timer)
                   reviewTimers.delete(key)
-                  retireIfLastWaiter(approvalId, 'the owner did not approve before the wait ended')
+                  retireIfLastWaiter(approvalId, instance, 'the owner did not approve before the wait ended')
                   sendToHost(toolError(message.id, `Cordon approval wait timed out for ${message.method}: ${reason}`))
                   return
                 }
-                if (!existsSync(approvals.approvedPath(approvalId))) return
+                if (!approvals.hasApproval(approvalId, instance)) return
                 // The host may have timed out without cancelling the request.
                 // A late approval can only tell the model to retry; it cannot
                 // execute a side effect after the host stopped waiting. The
@@ -234,7 +294,7 @@ export function runGateway(options: GatewayOptions): Promise<number> {
                 // their waiters together, so one host cancellation cannot
                 // revoke a retry instruction already sent to another.
                 for (const [waitingKey, held] of reviewTimers) {
-                  if (held.approvalId !== approvalId) continue
+                  if (held.approvalId !== approvalId || held.instance !== instance) continue
                   clearInterval(held.timer)
                   reviewTimers.delete(waitingKey)
                   sendToHost(toolError(held.requestId,
@@ -246,13 +306,27 @@ export function runGateway(options: GatewayOptions): Promise<number> {
                 finish(1, `approval wait failed: ${(error as Error).message}`)
               }
             }, Math.min(25, approvalWaitMs))
-            reviewTimers.set(key, { timer, approvalId, requestId: message.id })
+            reviewTimers.set(key, { timer, approvalId, instance, requestId: message.id })
           })
         return
       }
 
+      if (!HOST_REQUEST_METHODS.has(message.method)) {
+        // An extension request can execute on the server without using
+        // tools/call, so an unknown method has no reviewed effect class.
+        sendToHost({ jsonrpc: '2.0', id: message.id, error: {
+          code: -32601, message: 'Cordon does not forward unclassified MCP methods.',
+        } })
+        log('an unclassified host request was refused before the MCP server received it')
+        return
+      }
+
+      const forwarded = GATED_HOST_METHODS.has(message.method)
+        ? gateHostMethod(message, cordon, sendToHost) : message.value
+      if (forwarded === null) return
+
       const entry: Pending = { method: message.method }
-      const params = asRecord(message.params)
+      const params = asRecord(forwarded['params'])
       if (message.method === 'resources/read' && typeof params?.['uri'] === 'string') {
         entry.label = params['uri']
       }
@@ -260,7 +334,7 @@ export function runGateway(options: GatewayOptions): Promise<number> {
         entry.label = params['name']
       }
       pending.set(pendingKey(message.id), entry)
-      sendUpstream(message.value)
+      sendUpstream(forwarded)
     }
 
     const onUpstreamLine = (line: string): void => {
@@ -279,9 +353,26 @@ export function runGateway(options: GatewayOptions): Promise<number> {
         return
       }
 
-      if (message.type !== 'response') {
-        // The upstream's own requests and notifications go to the host.
-        sendToHost(message.value)
+      if (message.type === 'request') {
+        // A server can ask the host to sample or elicit model input. Forwarding
+        // that request makes server-authored content an instruction before the
+        // tool-result gate sees it. Ping is contentless and answered here.
+        if (message.method === 'ping' && message.params === undefined &&
+          message.value['jsonrpc'] === '2.0' &&
+          Object.keys(message.value).every((key) => ['jsonrpc', 'id', 'method'].includes(key))) {
+          sendUpstream({ jsonrpc: '2.0', id: message.id, result: {} })
+        } else {
+          sendUpstream({ jsonrpc: '2.0', id: message.id, error: {
+            code: -32601, message: 'Cordon does not forward server-origin requests.',
+          } })
+          log('a server-origin request was refused before the host received it')
+        }
+        return
+      }
+      if (message.type === 'notification') {
+        const observed = observeServerNotification(message.value, message.method, cordon, options.policy)
+        if (observed === null) log('unsupported server notification was withheld')
+        else sendToHost(observed)
         return
       }
 
@@ -296,20 +387,10 @@ export function runGateway(options: GatewayOptions): Promise<number> {
       }
 
       if (Object.hasOwn(message.value, 'error')) {
-        const error = asRecord(message.value['error'])
         const tool = entry.call?.tool ?? entry.method
         const label = entry.call === undefined ? (entry.label ?? entry.method) : sourceLabel(entry.call)
         const source = classifySource({ kind: 'tool', label, tool }, options.policy)
-        if (error !== null && typeof error['message'] === 'string') {
-          observeInto(error, 'message', tool, source, cordon)
-        } else {
-          cordon.markUnredacted()
-        }
-        // JSON-RPC error data has no MCP text-block shape. The host may show
-        // it to the model, so opaque data carries the same unredacted mark as
-        // an image or an unknown tool-result block.
-        if (error !== null && Object.hasOwn(error, 'data')) cordon.markUnredacted()
-        sendToHost(message.value)
+        sendToHost(observeErrorResponse(message.value, tool, source, cordon))
         return
       }
 
@@ -334,10 +415,15 @@ export function runGateway(options: GatewayOptions): Promise<number> {
         sendToHost(observePromptsGet(message.value, entry, cordon, options.policy))
         return
       }
-      sendToHost(message.value)
+      sendToHost(observeOtherResponse(message.value, entry.method, cordon, options.policy))
     }
 
+    const inputClosed = (): void => {
+      if (!hostIn.readableEnded) finish(1, 'host input closed unexpectedly')
+    }
+    hostIn.once('close', inputClosed)
     const hostLines = createInterface({ input: hostIn, terminal: false })
+    hostLines.on('error', (error: Error) => finish(1, `host input failed: ${error.message}`))
     hostLines.on('line', (line) => {
       if (line.trim() === '') return
       try {
@@ -360,6 +446,12 @@ export function runGateway(options: GatewayOptions): Promise<number> {
     })
 
     const upstreamLines = createInterface({ input: child.stdout!, terminal: false })
+    upstreamLines.on('error', (error: Error) => finish(1, `upstream output failed: ${error.message}`))
+    closeReaders = () => {
+      hostIn.off('close', inputClosed)
+      hostLines.close()
+      upstreamLines.close()
+    }
     upstreamLines.on('line', (line) => {
       if (line.trim() === '') return
       try {
@@ -368,7 +460,68 @@ export function runGateway(options: GatewayOptions): Promise<number> {
         finish(1, `a failure while handling the upstream's message: ${(error as Error).message}`)
       }
     })
+    if (hostIn.destroyed) inputClosed()
   })
+}
+
+/** Gate model-selected MCP methods under their exact protocol names. */
+function gateHostMethod(
+  message: Extract<Message, { type: 'request' }>,
+  cordon: Cordon,
+  sendToHost: (message: Record<string, unknown>) => void,
+): Record<string, unknown> | null {
+  const params = asRecord(message.params)
+  if (message.value['jsonrpc'] !== '2.0' ||
+    Object.keys(message.value).some((key) => !['jsonrpc', 'id', 'method', 'params'].includes(key)) ||
+    params === null || !validHostMethodParams(message.method, params)) {
+    sendToHost({ jsonrpc: '2.0', id: message.id, error: {
+      code: -32602, message: `Cordon refused malformed ${message.method} parameters.`,
+    } })
+    return null
+  }
+
+  const { _meta, ...args } = params
+  const decision = cordon.gateUnattended({ tool: message.method, args })
+  if (decision.kind !== 'allow') {
+    // A read method has no CallToolResult notice slot for a narrowed request.
+    // Refusing a rewrite keeps the host's requested URI or prompt identity
+    // from silently changing while it believes the original request ran.
+    sendToHost({ jsonrpc: '2.0', id: message.id, error: {
+      code: -32000,
+      message: decision.kind === 'rewrite'
+        ? `Cordon withheld a narrowed ${message.method} request; retry with reviewed parameters.`
+        : `Cordon refused ${message.method}: ${decision.reason}`,
+    } })
+    return null
+  }
+
+  const progressToken = asRecord(_meta)?.['progressToken']
+  return { jsonrpc: '2.0', id: message.id, method: message.method, params: {
+    ...args,
+    ...(typeof progressToken === 'string' || typeof progressToken === 'number'
+      ? { _meta: { progressToken } } : {}),
+  } }
+}
+
+function validHostMethodParams(method: string, params: Record<string, unknown>): boolean {
+  const allowed = method === 'prompts/get' ? ['name', 'arguments', '_meta']
+    : method === 'completion/complete' ? ['ref', 'argument', 'context', '_meta']
+      : method === 'logging/setLevel' ? ['level', '_meta'] : ['uri', '_meta']
+  if (Object.keys(params).some((key) => !allowed.includes(key))) return false
+  if (method === 'prompts/get') {
+    return typeof params['name'] === 'string' && params['name'] !== '' &&
+      (params['arguments'] === undefined || asRecord(params['arguments']) !== null)
+  }
+  if (method === 'completion/complete') {
+    const ref = asRecord(params['ref'])
+    const argument = asRecord(params['argument'])
+    return ref !== null && argument !== null &&
+      typeof ref['type'] === 'string' &&
+      typeof argument['name'] === 'string' && typeof argument['value'] === 'string' &&
+      (params['context'] === undefined || asRecord(params['context']) !== null)
+  }
+  if (method === 'logging/setLevel') return typeof params['level'] === 'string'
+  return typeof params['uri'] === 'string' && params['uri'] !== ''
 }
 
 /**
@@ -393,8 +546,34 @@ function gateCall(
   waitForApproval?: (id: string, reason: string) => void,
 ): void {
   const params = asRecord(message.params)
-  const name = typeof params?.['name'] === 'string' ? params['name'] : ''
-  const call: ToolCall = { tool: name, args: asRecord(params?.['arguments']) ?? {} }
+  const meta = asRecord(params?.['_meta'])
+  if (message.value['jsonrpc'] !== '2.0' ||
+    Object.keys(message.value).some((key) => !['jsonrpc', 'id', 'method', 'params'].includes(key)) ||
+    params === null ||
+    Object.keys(params).some((key) => !['name', 'arguments', '_meta'].includes(key)) ||
+    typeof params['name'] !== 'string' || params['name'].trim() === '' ||
+    (params['arguments'] !== undefined && asRecord(params['arguments']) === null)) {
+    sendToHost(toolError(message.id, 'Cordon refused a malformed tools/call request.'))
+    return
+  }
+  const name = params['name'] as string
+  // Protocol declarations must not also authorize an upstream namesake tool.
+  if (RESERVED_TOOL_NAMES.has(name)) {
+    sendToHost(toolError(message.id, 'Cordon reserved this name for an MCP protocol method.'))
+    return
+  }
+  const call: ToolCall = { tool: name, args: asRecord(params['arguments']) ?? {} }
+  const progressToken = meta?.['progressToken']
+  // The core reviews exactly the arguments sent upstream. Vendor metadata
+  // from a model-shaped host request has no effect role, so only the MCP
+  // progress token survives this canonical request.
+  const forwarded = (args: Record<string, unknown>): Record<string, unknown> => ({
+    jsonrpc: '2.0', id: message.id, method: 'tools/call', params: {
+      name, arguments: args,
+      ...(typeof progressToken === 'string' || typeof progressToken === 'number'
+        ? { _meta: { progressToken } } : {}),
+    },
+  })
 
   const decision = cordon.gateUnattended(call)
   if (decision.kind === 'deny' || decision.kind === 'ask') {
@@ -410,11 +589,11 @@ function gateCall(
     pending.set(pendingKey(message.id), { method: message.method, call, notice: rewriteNotice(decision) })
     // The forwarded request is reserialized: the original line carries the
     // arguments the model wrote, and they are exactly what was cut.
-    sendUpstream({ ...message.value, params: { ...params, arguments: decision.args } })
+    sendUpstream(forwarded(decision.args))
     return
   }
   pending.set(pendingKey(message.id), { method: message.method, call })
-  sendUpstream(message.value)
+  sendUpstream(forwarded(call.args))
 }
 
 /**
@@ -448,13 +627,14 @@ function observeToolList(
   // held tool leaves the list the host receives, so the model never reads
   // the changed text; the core refuses a call to it by name. A damaged pin
   // file throws here, and the gateway stops loudly.
-  const named = listed
+  const eligible = listed.filter((tool) => !RESERVED_TOOL_NAMES.has(String(asRecord(tool)?.['name'])))
+  const named = eligible
     .map((tool) => asRecord(tool))
     .filter((tool): tool is Record<string, unknown> => tool !== null && typeof tool['name'] === 'string')
     .map((tool) => ({ name: tool['name'] as string, description: tool['description'], inputSchema: tool['inputSchema'],
       title: tool['title'], annotations: tool['annotations'], outputSchema: tool['outputSchema'] }))
   const held = new Set(cordon.admitTools(command, named).map((tool) => tool.name))
-  const tools = listed.filter((tool) => !held.has(String(asRecord(tool)?.['name'])))
+  const tools = eligible.filter((tool) => !held.has(String(asRecord(tool)?.['name'])))
   value = { ...value, result: { ...result, tools } }
 
   for (const tool of tools) {
@@ -742,27 +922,111 @@ function observePromptsGet(
   return { jsonrpc: '2.0', id: value['id'], result: observed.value }
 }
 
-/**
- * Observes one text field and writes the cleaned text back into it.
- *
- * When the source's view forbids substitution, the original stays and the
- * finding is said out loud through the journal — the channel the agent
- * cannot reach. There is no transcript footer on this transport: the gateway
- * never sees the model's answer, only the pipe.
- */
-function observeInto(
-  entry: Record<string, unknown>,
-  key: string,
+/** The setup and control methods can also return server-authored content. */
+function observeOtherResponse(
+  value: Record<string, unknown>,
+  method: string,
+  cordon: Cordon,
+  policy: Policy,
+): Record<string, unknown> {
+  const bootstrap = method === 'initialize' || method === 'server/discover'
+  const source = classifySource(bootstrap
+    ? { kind: 'mcp-description', label: method } : { kind: 'tool', label: method, tool: method }, policy)
+  const result = asRecord(value['result'])
+  const withheld = (): Record<string, unknown> => withholdUnreadableResponse(value, method, source, cordon)
+  if (Object.keys(value).some((key) => !RESPONSE_KEYS.has(key)) || result === null) return withheld()
+  if (Object.keys(result).length === 0) return value
+
+  if (bootstrap) {
+    const resources = asRecord(asRecord(result['capabilities'])?.['resources'])
+    // Subscription updates are withheld. Advertise the supported resource
+    // operations without inviting clients to start a subscription.
+    if (resources !== null) delete resources['subscribe']
+  }
+  const { instructions, ...metadata } = result
+  const hasInstructions = bootstrap && instructions !== undefined
+  let cleanedInstructions: string | undefined
+  if (hasInstructions) {
+    // This field is free-form content in the bootstrap protocol.
+    if (typeof instructions !== 'string') return withheld()
+    const envelope = cordon.observe(instructions, source)
+    if (!envelope.substitute && envelope.text !== instructions) return withheld()
+    cleanedInstructions = envelope.text
+  }
+  const observed = observeReadableResult(hasInstructions ? metadata : result, method, source, cordon, [])
+  const scanned = asRecord(observed?.value)
+  if (scanned === null) return withheld()
+  const payload = cleanedInstructions === undefined ? scanned : { ...scanned, instructions: cleanedInstructions }
+  const serialized = JSON.stringify(payload)
+  if (cordon.observe(serialized, source).text !== serialized) return withheld()
+  return { jsonrpc: '2.0', id: value['id'], result: payload }
+}
+
+/** An upstream error can reach the model just like a successful tool result. */
+function observeErrorResponse(
+  value: Record<string, unknown>,
   tool: string,
   source: Source,
   cordon: Cordon,
-): void {
-  const envelope = cordon.observe(entry[key] as string, source)
-  if (envelope.substitute) {
-    entry[key] = envelope.text
-  } else if (envelope.findings.length > 0) {
-    cordon.notice(tool, `a hidden layer was found in the result of ${tool}; it was not substituted`, source)
+): Record<string, unknown> {
+  const error = asRecord(value['error'])
+  const withheld = (): Record<string, unknown> => withholdUnreadableResponse(value, tool, source, cordon)
+  if (value['jsonrpc'] !== '2.0' ||
+    Object.keys(value).some((key) => !['jsonrpc', 'id', 'error'].includes(key)) ||
+    error === null || Object.keys(error).some((key) => !['code', 'message', 'data'].includes(key)) ||
+    !Number.isSafeInteger(error['code']) || typeof error['message'] !== 'string') return withheld()
+
+  const message = cordon.observe(error['message'], source)
+  if (!message.substitute && message.text !== error['message']) return withheld()
+  const response = { jsonrpc: '2.0', id: value['id'], error: { code: error['code'], message: message.text } }
+  if (!Object.hasOwn(error, 'data')) return response
+
+  const data = observeReadableResult(error['data'], tool, source, cordon, [])
+  if (data === null) return withheld()
+  // The text walker visits values. Check the serialized form too because
+  // arbitrary JSON error data may contain text in property names.
+  const serialized = JSON.stringify(data.value)
+  if (cordon.observe(serialized, source).text !== serialized) return withheld()
+  return { ...response, error: { ...response.error, data: data.value } }
+}
+
+const SERVER_LIST_NOTIFICATIONS = new Set([
+  'notifications/tools/list_changed', 'notifications/prompts/list_changed',
+  'notifications/resources/list_changed',
+])
+const LOG_LEVELS = new Set(['debug', 'info', 'notice', 'warning', 'error', 'critical', 'alert', 'emergency'])
+
+function observeServerNotification(
+  value: Record<string, unknown>,
+  method: string,
+  cordon: Cordon,
+  policy: Policy,
+): Record<string, unknown> | null {
+  if (value['jsonrpc'] !== '2.0' || Object.keys(value).some((key) =>
+    !['jsonrpc', 'method', 'params'].includes(key))) return null
+  if (SERVER_LIST_NOTIFICATIONS.has(method)) {
+    const params = value['params']
+    if (params !== undefined) {
+      const record = asRecord(params)
+      if (record === null || Object.keys(record).length > 0) return null
+    }
+    return { jsonrpc: '2.0', method, ...(params === undefined ? {} : { params }) }
   }
+  if (method !== 'notifications/message') return null
+  const params = asRecord(value['params'])
+  if (params === null || !LOG_LEVELS.has(String(params['level'])) ||
+    !Object.hasOwn(params, 'data') ||
+    Object.keys(params).some((key) => !['level', 'logger', 'data', '_meta'].includes(key)) ||
+    (params['logger'] !== undefined && typeof params['logger'] !== 'string')) return null
+  const source = classifySource({ kind: 'mcp-description', label: method }, policy)
+  const observed = observeReadableResult(params, method, source, cordon, [])
+  if (observed === null) return null
+  // Arbitrary JSON logging data may carry text in property names, which the
+  // generic text extractor treats as structure. The full serialized message
+  // has to survive the sanitizer unchanged before the host sees those keys.
+  const text = JSON.stringify(observed.value)
+  if (cordon.observe(text, source).text !== text) return null
+  return { jsonrpc: '2.0', method, params: observed.value }
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {

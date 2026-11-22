@@ -143,7 +143,7 @@ export function connectSocketGateway(
   return new Promise((resolve) => {
     const socket = createConnection(resolved)
     let settled = false
-    let hostEnded = false
+    let hostEnded = hostIn.readableEnded
     let connected = false
     let status: number | null = null
     let buffer = Buffer.alloc(0)
@@ -155,18 +155,30 @@ export function connectSocketGateway(
       settled = true
       if (flushTimer !== null) clearTimeout(flushTimer)
       if (reason !== undefined) log(reason)
+      hostIn.off('end', onHostEnd)
+      hostIn.off('close', onHostClose)
+      hostIn.off('error', onHostError)
       hostIn.unpipe(socket)
       socket.destroy()
       resolve(code)
     }
-    hostIn.once('end', () => {
+    const onHostEnd = (): void => {
       hostEnded = true
       if (connected) socket.end()
-    })
+    }
+    const onHostClose = (): void => {
+      // A graceful EOF half-closes the write side so the owner can still send
+      // the terminal status and any buffered replies.
+      if (!hostEnded) finish(1, 'host input closed unexpectedly')
+    }
+    const onHostError = (error: Error): void => finish(1, `host input failed: ${error.message}`)
+    hostIn.once('end', onHostEnd)
+    hostIn.once('close', onHostClose)
+    hostIn.on('error', onHostError)
     socket.on('connect', () => {
       connected = true
       if (hostEnded) socket.end()
-      else hostIn.pipe(socket)
+      else hostIn.pipe(socket, { end: false })
     })
     socket.on('data', (chunk: Buffer) => {
       buffer = Buffer.concat([buffer, chunk])
@@ -225,6 +237,7 @@ export function connectSocketGateway(
       else socketClosed = true
     })
     hostOut.on('error', (error) => finish(1, `host output failed: ${error.message}`))
+    if (hostIn.destroyed) onHostClose()
   })
 }
 

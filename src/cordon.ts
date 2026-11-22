@@ -654,8 +654,8 @@ export class Cordon {
   }
 
   /** A host no longer waits for this exact question; a late yes must not release another call. */
-  cancelUnattendedApproval(id: string, reason: string): void {
-    const request = new ApprovalStore(this.cordonHome).cancel(id)
+  cancelUnattendedApproval(id: string, reason: string, expectedInstance?: string): void {
+    const request = new ApprovalStore(this.cordonHome).cancel(id, expectedInstance)
     if (request === null) return
     this.notifier.notify({
       at: new Date().toISOString(),
