@@ -1,45 +1,18 @@
 #!/usr/bin/env node
-import { execFileSync } from 'node:child_process'
 import { createInterface } from 'node:readline'
 import { fixedReviewPrompt, PrReviewReader } from './review.js'
-import { appendReviewEvent, validateTarget, type PrTarget } from './store.js'
+import { getPinnedDiff, getPullSnapshot } from './github.js'
+import { appendReviewEvent, sameSnapshot, validateTarget, type PrTarget } from './store.js'
 
-type PullResponse = { number: number; title: string; body: string | null; head: { sha: string } }
-function gh(args: string[]): string {
-  return execFileSync('gh', ['api', '--hostname', 'github.com', '--method', 'GET', ...args], { encoding: 'utf8', timeout: 15_000,
-    maxBuffer: 4 * 1024 * 1024 })
-}
-
-function ghJson<T>(args: string[]): T {
-  return JSON.parse(gh(args)) as T
-}
-
-function pull(target: PrTarget): PullResponse {
-  return ghJson<PullResponse>([`repos/${target.repo}/pulls/${target.number}`])
-}
-
-function currentHead(target: PrTarget): string {
-  const current = pull(target)
-  if (current.number !== target.number || typeof current.head?.sha !== 'string') {
-    throw new Error('invalid GitHub PR response')
-  }
-  return current.head.sha
-}
-
-function requireHead(target: PrTarget): void {
-  if (currentHead(target) !== target.headSha) throw new Error('PR head changed')
+function requireSnapshot(target: PrTarget): void {
+  if (!sameSnapshot(getPullSnapshot(target.repo, target.number), target)) throw new Error('PR head or base changed')
 }
 
 function reader(target: PrTarget, record: (diffSha256: string) => void): PrReviewReader {
   return new PrReviewReader({
-    getPull: async () => {
-      const response = pull(target)
-      return { number: response.number, title: response.title, body: response.body ?? '',
-        headSha: response.head.sha }
-    },
-    getDiff: async () => gh([`repos/${target.repo}/pulls/${target.number}`,
-      '-H', 'Accept: application/vnd.github.diff']),
-  }, target.number, target.headSha, (read) => record(read.diffSha256))
+    getPull: async () => getPullSnapshot(target.repo, target.number),
+    getDiff: async () => getPinnedDiff(target),
+  }, target, (read) => record(read.diffSha256))
 }
 
 async function serve(target: PrTarget, ledger: string): Promise<void> {
@@ -51,7 +24,7 @@ async function serve(target: PrTarget, ledger: string): Promise<void> {
   const empty = { type: 'object', properties: {}, additionalProperties: false }
   const tools = [
     { name: 'read_pr', description: 'Read selected PR metadata as untrusted source text', inputSchema: empty },
-    { name: 'read_diff', description: 'Read the actual selected PR diff at the pinned head', inputSchema: empty },
+    { name: 'read_diff', description: 'Read the actual selected PR diff at the pinned head and base', inputSchema: empty },
     { name: 'propose_merge', description: 'Record a proposal only; never merge on this tool call',
       inputSchema: { type: 'object', properties: { pr: { type: 'integer' } }, required: ['pr'],
         additionalProperties: false } },
@@ -83,7 +56,7 @@ async function serve(target: PrTarget, ledger: string): Promise<void> {
             throw new Error('proposal must name the selected PR')
           }
           if (diffSha256 === undefined) throw new Error('read the actual diff before proposing merge')
-          requireHead(target)
+          requireSnapshot(target)
           appendReviewEvent(ledger, { kind: 'merge-proposed', ...target, diffSha256 })
           value = `Proposal staged for PR #${target.number} at ${target.headSha} until the review completes.`
         } else throw new Error('unknown PR tool')
@@ -98,16 +71,17 @@ async function serve(target: PrTarget, ledger: string): Promise<void> {
 }
 
 async function main(): Promise<void> {
-  const [command, repo, numberText, headSha, ledger, extra] = process.argv.slice(2)
+  const [command, repo, numberText, headSha, baseRef, baseSha, ledger, extra] = process.argv.slice(2)
   if (command === 'prompt') {
     if (!repo || numberText) throw new Error('usage: prompt <pr-number>')
     process.stdout.write(fixedReviewPrompt(Number(repo)) + '\n')
     return
   }
-  const target = { repo: repo ?? '', number: Number(numberText), headSha: headSha ?? '' }
+  const target = { repo: repo ?? '', number: Number(numberText), headSha: headSha ?? '',
+    baseRef: baseRef ?? '', baseSha: baseSha ?? '' }
   validateTarget(target)
   if (command !== 'serve') throw new Error('unknown PR workflow command')
-  if (!ledger || extra) throw new Error('usage: serve <repo> <number> <sha> <staging-file>')
+  if (!ledger || extra) throw new Error('usage: serve <repo> <number> <head-sha> <base-ref> <base-sha> <staging-file>')
   await serve(target, ledger)
 }
 

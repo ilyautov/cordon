@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
 import { completeReview } from '../../src/pr-workflow/review.js'
 
-const target = { repo: 'owner/project', number: 12, headSha: 'a'.repeat(40) }
+const target = { repo: 'owner/project', number: 12, headSha: 'a'.repeat(40), baseRef: 'main', baseSha: 'b'.repeat(40) }
 const runId = 'e9169655-f8c8-4082-816e-cd16ba3a779b'
 const diff = 'diff --git a/notes.txt b/notes.txt\n+local note'
 const diffSha256 = createHash('sha256').update(diff).digest('hex')

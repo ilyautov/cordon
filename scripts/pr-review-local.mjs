@@ -6,16 +6,20 @@ import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { getPullSnapshot } from '../dist/pr-workflow/github.js'
 import { completeReview, fixedReviewPrompt } from '../dist/pr-workflow/review.js'
-import { publishReviewReceipt, readReviewEvents, requireNewReceiptPath, validateTarget } from '../dist/pr-workflow/store.js'
+import { publishReviewReceipt, readReviewEvents, requireNewReceiptPath, sameSnapshot, validateTarget } from '../dist/pr-workflow/store.js'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const [repo, numberText, headSha, output, extra] = process.argv.slice(2)
-const target = { repo: repo ?? '', number: Number(numberText), headSha: headSha ?? '' }
 if (!output || extra) throw new Error('usage: node scripts/pr-review-local.mjs <repo> <number> <sha> <receipt>')
-validateTarget(target)
 const receiptPath = resolve(output)
 requireNewReceiptPath(receiptPath)
+if (typeof headSha !== 'string' || !/^[a-f0-9]{40}$/u.test(headSha)) throw new Error('invalid PR head SHA')
+const { repo: pinnedRepo, number, headSha: currentHead, baseRef, baseSha } = getPullSnapshot(repo, Number(numberText))
+if (currentHead !== headSha) throw new Error('PR head changed')
+const target = { repo: pinnedRepo, number, headSha, baseRef, baseSha }
+validateTarget(target)
 const runId = randomUUID()
 
 const temp = mkdtempSync(join(tmpdir(), 'cordon-pr-local-'))
@@ -68,7 +72,7 @@ const args = [
   '-c', 'web_search="disabled"',
   '-c', 'mcp_servers.pr.command=' + toml(process.execPath),
   '-c', 'mcp_servers.pr.args=' + toml([join(root, 'dist/pr-workflow/cli.js'),
-    'serve', repo, String(target.number), headSha, ledger]),
+    'serve', target.repo, String(target.number), headSha, target.baseRef, target.baseSha, ledger]),
   '-c', 'mcp_servers.pr.required=true',
   '-c', 'mcp_servers.pr.tools.read_pr.approval_mode="approve"',
   '-c', 'mcp_servers.pr.tools.read_diff.approval_mode="approve"',
@@ -98,6 +102,7 @@ try {
     hooks: lines(readFileSync(hookLog, 'utf8')),
     staged: readReviewEvents(ledger),
   })
+  if (!sameSnapshot(getPullSnapshot(target.repo, target.number), target)) throw new Error('PR head or base changed')
   publishReviewReceipt(receiptPath, receipt)
   process.stderr.write(`\nCompleted review receipt: ${receiptPath}\n`)
 } catch (error) {

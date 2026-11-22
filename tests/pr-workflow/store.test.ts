@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { appendReviewEvent, publishReviewReceipt, readReviewEvents, readReviewReceipt } from '../../src/pr-workflow/store.js'
 
-const target = { repo: 'owner/project', number: 12, headSha: 'a'.repeat(40) }
+const target = { repo: 'owner/project', number: 12, headSha: 'a'.repeat(40), baseRef: 'main', baseSha: 'b'.repeat(40) }
 const diffSha256 = 'b'.repeat(64)
 const receipt = { ...target, kind: 'review-completed' as const, diffSha256,
   runId: '00000000-0000-4000-8000-000000000001', mergeProposed: true }

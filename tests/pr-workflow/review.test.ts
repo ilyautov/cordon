@@ -3,6 +3,7 @@ import { fixedReviewPrompt, PrReviewReader } from '../../src/pr-workflow/review.
 
 const SHA = 'a'.repeat(40)
 const NEXT_SHA = 'b'.repeat(40)
+const target = { repo: 'owner/project', number: 12, headSha: SHA, baseRef: 'main', baseSha: NEXT_SHA }
 
 describe('PR review inputs', () => {
   it('keeps PR-authored text out of the human prompt', () => {
@@ -16,9 +17,9 @@ describe('PR review inputs', () => {
   it('returns metadata only through a tool result and logs an actual stable diff read', async () => {
     const reads: Array<{ headSha: string; diffSha256: string }> = []
     const reader = new PrReviewReader({
-      getPull: async () => ({ number: 12, title: 'private payload', body: 'untrusted body', headSha: SHA }),
+      getPull: async () => ({ ...target, title: 'private payload', body: 'untrusted body', headSha: SHA }),
       getDiff: async () => 'diff --git a/x b/x\n+safe',
-    }, 12, SHA, (read) => reads.push(read))
+    }, target, (read) => reads.push(read))
     expect(await reader.readPr()).toContain('private payload')
     expect(reads).toEqual([])
     expect(await reader.readDiff()).toContain('diff --git')
@@ -29,10 +30,23 @@ describe('PR review inputs', () => {
     let calls = 0
     const reads: unknown[] = []
     const reader = new PrReviewReader({
-      getPull: async () => ({ number: 12, title: 'ordinary title', body: '', headSha: ++calls === 1 ? SHA : NEXT_SHA }),
+      getPull: async () => ({ ...target, title: 'ordinary title', body: '', headSha: ++calls === 1 ? SHA : NEXT_SHA }),
       getDiff: async () => 'diff --git a/x b/x',
-    }, 12, SHA, (read) => reads.push(read))
-    await expect(reader.readDiff()).rejects.toThrow(/head changed/)
+    }, target, (read) => reads.push(read))
+    await expect(reader.readDiff()).rejects.toThrow(/head or base changed/)
     expect(reads).toEqual([])
   })
+
+  it('refuses a moved base with the same head and records no diff read', async () => {
+    let calls = 0
+    const reads: unknown[] = []
+    const reader = new PrReviewReader({
+      getPull: async () => ({ ...target, title: 'ordinary title', body: '',
+        baseRef: ++calls === 1 ? 'main' : 'release' }),
+      getDiff: async () => 'diff --git a/x b/x',
+    }, target, (read) => reads.push(read))
+    await expect(reader.readDiff()).rejects.toThrow(/head or base changed/)
+    expect(reads).toEqual([])
+  })
+
 })

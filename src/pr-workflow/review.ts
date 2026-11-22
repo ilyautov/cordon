@@ -1,7 +1,5 @@
 import { createHash } from 'node:crypto'
-import type { PrTarget, ReviewEvent, ReviewReceipt } from './store.js'
-
-const shaPattern = /^[a-f0-9]{40}$/u
+import { sameSnapshot, validateTarget, type PrTarget, type ReviewEvent, type ReviewReceipt } from './store.js'
 
 function validNumber(number: number): void {
   if (!Number.isSafeInteger(number) || number < 1) throw new Error('invalid PR number')
@@ -14,20 +12,19 @@ export function fixedReviewPrompt(number: number): string {
     'Report findings in your answer. The proposal is saved locally only after the review completes.'
 }
 
-type Pull = { number: number; title: string; body: string; headSha: string }
+type Pull = PrTarget & { title: string; body: string }
 type Api = { getPull(): Promise<Pull>; getDiff(): Promise<string> }
 type DiffRead = { headSha: string; diffSha256: string }
 
 export class PrReviewReader {
-  constructor(private readonly api: Api, private readonly number: number,
-    private readonly headSha: string, private readonly record: (read: DiffRead) => void) {
-    validNumber(number)
-    if (!shaPattern.test(headSha)) throw new Error('invalid PR head SHA')
+  constructor(private readonly api: Api, private readonly target: PrTarget,
+    private readonly record: (read: DiffRead) => void) {
+    validateTarget(target)
   }
 
   private async currentPull(): Promise<Pull> {
     const pull = await this.api.getPull()
-    if (pull.number !== this.number || pull.headSha !== this.headSha) throw new Error('PR head changed')
+    if (!sameSnapshot(pull, this.target)) throw new Error('PR head or base changed')
     if (typeof pull.title !== 'string' || typeof pull.body !== 'string') throw new Error('invalid PR metadata')
     return pull
   }
@@ -42,7 +39,7 @@ export class PrReviewReader {
     if (typeof diff !== 'string' || diff.length === 0) throw new Error('empty PR diff')
     await this.currentPull()
     const diffSha256 = createHash('sha256').update(diff).digest('hex')
-    this.record({ headSha: this.headSha, diffSha256 })
+    this.record({ headSha: this.target.headSha, diffSha256 })
     return diff
   }
 }
@@ -161,8 +158,7 @@ export function completeReview(target: PrTarget, runId: string, input: {
 
   const digest = createHash('sha256').update(firstDiff.text).digest('hex')
   if (diffs.some(({ text }) => text !== firstDiff.text) ||
-    input.staged.some((row) => row.repo !== target.repo || row.number !== target.number ||
-      row.headSha !== target.headSha || row.diffSha256 !== digest) ||
+    input.staged.some((row) => !sameSnapshot(row, target) || row.diffSha256 !== digest) ||
     input.staged[0]?.kind !== 'diff-read' ||
     input.staged.filter((row) => row.kind === 'diff-read').length !== diffs.length ||
     input.staged.filter((row) => row.kind === 'merge-proposed').length !== proposals.length) incomplete('staged diff or proposal does not match')
