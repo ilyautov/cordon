@@ -97,6 +97,13 @@ describe('trusted CI evidence', () => {
     expect(paths).toEqual([runPath])
   })
 
+  it('rejects CI from a repository with the same name but a different pinned repository ID', () => {
+    const { api, paths } = mock()
+    const evidence = { ...receipt, mergePolicy: { repositoryId: 91 } }
+    expect(() => readTrustedCi(evidence, runId, config, api)).toThrow(/repository ID/u)
+    expect(paths).toEqual([runPath])
+  })
+
   it('refuses an artifact from another run independently of its name', () => {
     const { api, paths } = mock({ artifact: { workflow_run: { id: 2 } } })
     expect(() => readTrustedCi(receipt, runId, config, api)).toThrow(/artifact/)

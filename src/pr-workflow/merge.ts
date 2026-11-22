@@ -29,16 +29,16 @@ export function assessMerge(facts: MergeFacts): Decision {
   return { allow: true, reason: 'approved' }
 }
 
-export async function executeMerge(facts: MergeFacts, api: {
+export async function executeMerge<Result>(facts: MergeFacts, api: {
   currentSnapshot(): Promise<PrTarget>
   consumeApproval(approval: ApprovalRecord): Promise<boolean>
   /** The mutation must atomically enforce the full expected snapshot. */
-  merge(expected: PrTarget): Promise<void>
-}): Promise<void> {
+  merge(expected: PrTarget): Promise<Result>
+}): Promise<Result> {
   const decision = assessMerge(facts)
   if (!decision.allow || facts.approval === null) throw new Error(`merge refused: ${decision.reason}`)
   if (!sameSnapshot(await api.currentSnapshot(), facts.current)) throw new Error('PR head or base changed before merge')
   if (!await api.consumeApproval(facts.approval)) throw new Error('owner approval was already spent or expired')
   const { repo, number, headSha, baseRef, baseSha } = facts.current
-  await api.merge({ repo, number, headSha, baseRef, baseSha })
+  return api.merge({ repo, number, headSha, baseRef, baseSha })
 }

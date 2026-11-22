@@ -4,10 +4,10 @@ import { constants, closeSync, fstatSync, fsyncSync, linkSync, lstatSync, mkdirS
 import { join } from 'node:path'
 import type { CiIdentity } from './ci.js'
 export type { CiIdentity } from './ci.js'
-import { validateTarget, type ReviewReceipt } from './store.js'
+import { sameMergePolicy, validMergePolicy, validateTarget, type ReviewReceipt } from './store.js'
 
 export type ApprovalTarget = Pick<ReviewReceipt, 'repo' | 'number' | 'headSha' | 'baseRef' | 'baseSha' |
-  'runId' | 'diffSha256'>
+  'runId' | 'diffSha256' | 'mergePolicy'>
 type Binding = ApprovalTarget & { ci: CiIdentity }
 export type ApprovalRecord = Binding & { generation: string; approvedAt: number }
 
@@ -21,7 +21,8 @@ const uuid = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/u
 export function sameReview(left: ApprovalTarget, right: ApprovalTarget): boolean {
   return left.repo === right.repo && left.number === right.number && left.headSha === right.headSha &&
     left.baseRef === right.baseRef && left.baseSha === right.baseSha &&
-    left.runId === right.runId && left.diffSha256 === right.diffSha256
+    left.runId === right.runId && left.diffSha256 === right.diffSha256 &&
+    sameMergePolicy(left.mergePolicy, right.mergePolicy)
 }
 
 export function sameCiIdentity(left: CiIdentity, right: CiIdentity): boolean {
@@ -37,7 +38,7 @@ function sameGeneration(left: ApprovalRecord, right: ApprovalRecord): boolean {
 
 function bindingFor(receipt: ReviewReceipt, ci: CiIdentity): Binding {
   validateTarget(receipt)
-  const { repo, number, headSha, baseRef, baseSha, runId, diffSha256 } = receipt
+  const { repo, number, headSha, baseRef, baseSha, runId, diffSha256, mergePolicy } = receipt
   if (receipt.kind !== 'review-completed' || typeof runId !== 'string' || !uuid.test(runId) ||
     typeof diffSha256 !== 'string' || !digest.test(diffSha256)) {
     throw new Error('invalid completed review receipt')
@@ -48,8 +49,20 @@ function bindingFor(receipt: ReviewReceipt, ci: CiIdentity): Binding {
     !/^(?:sha256:)?[a-f0-9]{64}$/u.test(artifactDigest)) {
     throw new Error('invalid CI proof identity')
   }
-  return { repo, number, headSha, baseRef, baseSha, runId, diffSha256,
+  const binding = { repo, number, headSha, baseRef, baseSha, runId, diffSha256,
     ci: { workflowId, workflowSha, runId: ciRun, runAttempt, artifactId, artifactDigest } }
+  // A policy-free receipt must still use the original on-disk binding key.
+  if (mergePolicy === undefined) return binding
+  if (!validMergePolicy(mergePolicy) || mergePolicy.profile.baseRef !== baseRef) {
+    throw new Error('invalid merge policy')
+  }
+  // Hash the reviewed values in a fixed key order, even for reordered JSON.
+  const { profile, rulesSha256, repositoryId } = mergePolicy
+  const { statusAppId, statusAppSlug, statusContext, mergeAppId } = profile
+  return { ...binding, mergePolicy: {
+    profile: { baseRef, statusAppId, statusAppSlug, statusContext, mergeAppId },
+    rulesSha256, repositoryId,
+  } }
 }
 
 function errno(error: unknown, code: string): boolean {
@@ -85,9 +98,11 @@ function readRecord(fd: number, binding: Binding): ApprovalRecord {
     // A damaged generation is never a reason to issue or consume another.
     throw new Error('invalid approval record')
   }
-  if (record === null || !sameReview(record, binding) || !record.ci || !sameCiIdentity(record.ci, binding.ci) ||
+  const expectedFields = binding.mergePolicy === undefined ? 10 : 11
+  if (record === null || (record.mergePolicy !== undefined && !validMergePolicy(record.mergePolicy)) ||
+    !sameReview(record, binding) || !record.ci || !sameCiIdentity(record.ci, binding.ci) ||
     typeof record.generation !== 'string' || !uuid.test(record.generation) ||
-    !Number.isSafeInteger(record.approvedAt) || record.approvedAt < 0 || Object.keys(record).length !== 10) {
+    !Number.isSafeInteger(record.approvedAt) || record.approvedAt < 0 || Object.keys(record).length !== expectedFields) {
     throw new Error('invalid approval record')
   }
   return record
