@@ -44,4 +44,24 @@ describe('local PR review records', () => {
     chmodSync(output, 0o666)
     expect(() => readReviewReceipt(output)).toThrow(/invalid completed review receipt/)
   })
+
+  it('preserves a ruleset pinned during the completed review', () => {
+    const output = join(mkdtempSync(join(tmpdir(), 'cordon-pr-records-')), 'protected.json')
+    const mergePolicy = { repositoryId: 123, rulesSha256: 'f'.repeat(64), profile: {
+      baseRef: 'main', statusAppId: 15368, statusAppSlug: 'github-actions',
+      statusContext: 'cordon/exact-snapshot', mergeAppId: 567,
+    } }
+    publishReviewReceipt(output, { ...receipt, mergePolicy })
+    expect(readReviewReceipt(output)).toEqual({ ...receipt, mergePolicy })
+  })
+
+  it('refuses a pinned policy for a different target branch', () => {
+    const output = join(mkdtempSync(join(tmpdir(), 'cordon-pr-records-')), 'protected.json')
+    const mergePolicy = { repositoryId: 123, rulesSha256: 'f'.repeat(64), profile: {
+      baseRef: 'release', statusAppId: 15368, statusAppSlug: 'github-actions',
+      statusContext: 'cordon/exact-snapshot', mergeAppId: 567,
+    } }
+    expect(() => publishReviewReceipt(output, { ...receipt, mergePolicy })).toThrow(/invalid completed review receipt/)
+  })
+
 })

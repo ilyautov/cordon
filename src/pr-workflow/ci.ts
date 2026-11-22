@@ -100,7 +100,7 @@ function readEvidenceArchive(archive: Buffer): Record<string, unknown> {
 
 /** Accept only the latest successful attempt of the owner-pinned workflow. */
 export function readTrustedCi(
-  receipt: PrTarget & { diffSha256: string },
+  receipt: PrTarget & { diffSha256: string; mergePolicy?: { repositoryId: number } },
   runId: number,
   config: TrustedCiConfig,
   read: TrustedCiApi = readGitHub,
@@ -120,6 +120,9 @@ export function readTrustedCi(
     receipt.repo, runId, config,
   )
   const repositoryId = readRun()
+  if (receipt.mergePolicy !== undefined && receipt.mergePolicy.repositoryId !== repositoryId) {
+    throw new Error('trusted CI run repository ID does not match the reviewed repository')
+  }
   const name = `cordon-pr-quality-${runId}-${runAttempt}`
   const list = parseJson(read(`${runPath}/artifacts?name=${name}&per_page=2`, jsonMedia), maxApiBytes,
     'invalid GitHub workflow artifact listing')

@@ -12,6 +12,36 @@ const target = { repo: 'example/repo', number: 12, headSha: 'a'.repeat(40), base
 const diff = 'diff --git a/notes.txt b/notes.txt\n+Updated the spelling.\n'
 const diffSha256 = createHash('sha256').update(diff).digest('hex')
 const temporaryRoots: string[] = []
+const profile = { baseRef: 'main', statusAppId: 15368, statusAppSlug: 'github-actions',
+  statusContext: 'cordon/exact-snapshot', mergeAppId: 456 }
+
+function mergeProtectionResponses() {
+  const repoPath = 'repos/' + target.repo
+  const ref = 'refs/heads/' + target.baseRef
+  const ruleset = (id: number, include: string[], exclude: string[], rules: unknown[]) => ({
+    id, source: target.repo, source_type: 'Repository', target: 'branch', enforcement: 'active',
+    updated_at: '2026-11-21T10:00:00Z', bypass_actors: [],
+    conditions: { ref_name: { include, exclude } }, rules,
+  })
+  const base = ruleset(1, [ref], [], [
+    { type: 'pull_request', parameters: { allowed_merge_methods: ['merge'] } },
+    { type: 'required_status_checks', parameters: { strict_required_status_checks_policy: true,
+      required_status_checks: [{ integration_id: profile.statusAppId, context: profile.statusContext }] } },
+    { type: 'non_fast_forward' }, { type: 'deletion' },
+  ])
+  const others = ruleset(2, ['~ALL'], [ref], [{ type: 'update' }])
+  const effective = base.rules.map((rule) => ({ ...rule as object, ruleset_id: base.id,
+    ruleset_source: target.repo, ruleset_source_type: 'Repository' }))
+  return {
+    [repoPath]: { id: 85, full_name: target.repo, owner: { id: 123, type: 'User' },
+      permissions: { admin: true }, default_branch: 'main', allow_merge_commit: true },
+    [repoPath + '/rulesets?includes_parents=true&per_page=100']: [[base, others]],
+    [repoPath + '/rulesets/1']: base,
+    [repoPath + '/rulesets/2']: others,
+    [repoPath + '/rules/branches/main?per_page=100']: [effective],
+    [repoPath + '/branches/main/protection']: { required_linear_history: { enabled: false } },
+  }
+}
 
 afterEach(() => {
   for (const root of temporaryRoots.splice(0)) rmSync(root, { recursive: true, force: true })
@@ -34,9 +64,16 @@ const responses = ${JSON.stringify({
     'repos/example/repo/pulls/12': pull,
     'repos/example/repo/git/ref/heads/main': { ref: 'refs/heads/main', object: { type: 'commit', sha: target.baseSha } },
     'repos/example/repo/git/ref/pull/12/head': { ref: 'refs/pull/12/head', object: { type: 'commit', sha: target.headSha } },
+    ...mergeProtectionResponses(),
   })}
-const response = responses[process.argv.at(-1)]
+const { existsSync, readFileSync } = require('node:fs')
+const config = JSON.parse(readFileSync(${JSON.stringify(join(root, 'fixture-config.json'))}, 'utf8'))
+const endpoint = process.argv.at(-1)
+const response = responses[endpoint]
 if (response === undefined) process.exit(2)
+if (config.protection === 'changes' && existsSync(${JSON.stringify(codexStarted)}) && endpoint.endsWith('/protection')) {
+  response.required_linear_history.enabled = true
+}
 console.log(JSON.stringify(response))
 `, { mode: 0o700 })
   writeFileSync(join(root, 'codex'), `#!/usr/bin/env node
@@ -79,10 +116,16 @@ process.exitCode = config.exitCode
   return {
     receipt,
     codexStarted,
-    run: (exitCode: number, completed: boolean) => {
-      writeFileSync(join(root, 'fixture-config.json'), JSON.stringify({ exitCode, completed }))
+    run: (exitCode: number, completed: boolean, protection?: 'stable' | 'changes') => {
+      writeFileSync(join(root, 'fixture-config.json'), JSON.stringify({ exitCode, completed, protection }))
+      const env: NodeJS.ProcessEnv = { PATH: root, TMPDIR: root }
+      if (protection !== undefined) {
+        const path = join(root, 'merge-profile.json')
+        writeFileSync(path, JSON.stringify(profile))
+        env['CORDON_PR_MERGE_PROFILE_FILE'] = path
+      }
       return spawnSync(process.execPath, [runner, target.repo, String(target.number), target.headSha, receipt], {
-        encoding: 'utf8', timeout: 10_000, env: { PATH: root, TMPDIR: root },
+        encoding: 'utf8', timeout: 10_000, env,
       })
     },
   }
@@ -122,5 +165,24 @@ describe.skipIf(process.platform === 'win32')('local PR review runner', () => {
     expect(JSON.parse(readFileSync(receipt, 'utf8'))).toEqual({
       kind: 'review-completed', ...target, runId: expect.any(String), diffSha256, mergeProposed: true,
     })
+  })
+
+  it('records the rules and profile in a completed protected review', () => {
+    const { receipt, run } = setup()
+    const result = run(0, true, 'stable')
+    expect(result.status, result.stderr).toBe(0)
+    expect(JSON.parse(readFileSync(receipt, 'utf8'))).toMatchObject({
+      ...target, diffSha256, mergeProposed: true,
+      mergePolicy: { repositoryId: 85, profile, rulesSha256: expect.stringMatching(/^[a-f0-9]{64}$/u) },
+    })
+  })
+
+  it('withholds the receipt if branch protection changes after Codex starts', () => {
+    const { receipt, run } = setup()
+    const result = run(0, true, 'changes')
+    expect(result.stdout).toContain('Reviewed the copy edit.')
+    expect(result.status).toBe(1)
+    expect(result.stderr).toContain('GitHub branch protection changed during review')
+    expect(existsSync(receipt)).toBe(false)
   })
 })

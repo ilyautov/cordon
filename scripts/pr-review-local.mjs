@@ -7,8 +7,10 @@ import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { getPullSnapshot } from '../dist/pr-workflow/github.js'
+import { captureMergePolicy } from '../dist/pr-workflow/merge-policy.js'
 import { completeReview, fixedReviewPrompt } from '../dist/pr-workflow/review.js'
-import { publishReviewReceipt, readReviewEvents, requireNewReceiptPath, sameSnapshot, validateTarget } from '../dist/pr-workflow/store.js'
+import { parseMergeProfile, publishReviewReceipt, readReviewEvents, requireNewReceiptPath,
+  sameMergePolicy, sameSnapshot, validateTarget } from '../dist/pr-workflow/store.js'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const [repo, numberText, headSha, output, extra] = process.argv.slice(2)
@@ -20,6 +22,9 @@ const { repo: pinnedRepo, number, headSha: currentHead, baseRef, baseSha } = get
 if (currentHead !== headSha) throw new Error('PR head changed')
 const target = { repo: pinnedRepo, number, headSha, baseRef, baseSha }
 validateTarget(target)
+const profileFile = process.env.CORDON_PR_MERGE_PROFILE_FILE
+const profile = profileFile === undefined ? undefined : parseMergeProfile(JSON.parse(readFileSync(profileFile, 'utf8')))
+const mergePolicy = profile === undefined ? undefined : captureMergePolicy(target, profile)
 const runId = randomUUID()
 
 const temp = mkdtempSync(join(tmpdir(), 'cordon-pr-local-'))
@@ -103,7 +108,10 @@ try {
     staged: readReviewEvents(ledger),
   })
   if (!sameSnapshot(getPullSnapshot(target.repo, target.number), target)) throw new Error('PR head or base changed')
-  publishReviewReceipt(receiptPath, receipt)
+  if (profile !== undefined && !sameMergePolicy(mergePolicy, captureMergePolicy(target, profile))) {
+    throw new Error('GitHub branch protection changed during review')
+  }
+  publishReviewReceipt(receiptPath, mergePolicy === undefined ? receipt : { ...receipt, mergePolicy })
   process.stderr.write(`\nCompleted review receipt: ${receiptPath}\n`)
 } catch (error) {
   process.stderr.write(`\nPR review failed: ${error instanceof Error ? error.message : String(error)}\n`)

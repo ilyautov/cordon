@@ -3,12 +3,21 @@ import { constants, closeSync, fstatSync, fsyncSync, linkSync, lstatSync, openSy
 import { dirname, join } from 'node:path'
 
 export type PrTarget = { repo: string; number: number; headSha: string; baseRef: string; baseSha: string }
+export type MergeProfile = {
+  baseRef: string
+  statusAppId: number
+  statusAppSlug: string
+  statusContext: string
+  mergeAppId: number
+}
+export type MergePolicyEvidence = { profile: MergeProfile; rulesSha256: string; repositoryId: number }
 export type ReviewEvent = PrTarget & { kind: 'diff-read' | 'merge-proposed'; diffSha256: string }
 export type ReviewReceipt = PrTarget & {
   kind: 'review-completed'
   runId: string
   diffSha256: string
   mergeProposed: boolean
+  mergePolicy?: MergePolicyEvidence
 }
 
 const runIdPattern = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/u
@@ -27,6 +36,43 @@ function validBaseRef(ref: unknown): ref is string {
     !Array.from(ref).some((char) => char.charCodeAt(0) <= 32 || char.charCodeAt(0) === 127 ||
       '~^:?*[\\'.includes(char)) &&
     ref.split('/').every((part) => part.length > 0 && !part.startsWith('.') && !part.endsWith('.lock'))
+}
+
+function validId(id: unknown): id is number {
+  return typeof id === 'number' && Number.isSafeInteger(id) && id > 0
+}
+
+function validMergeProfile(value: unknown): value is MergeProfile {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false
+  const profile = value as Partial<MergeProfile>
+  return Object.keys(profile).length === 5 && validBaseRef(profile.baseRef) &&
+    validId(profile.mergeAppId) && validId(profile.statusAppId) &&
+    typeof profile.statusAppSlug === 'string' && /^[a-z0-9][a-z0-9-]{0,99}$/u.test(profile.statusAppSlug) &&
+    typeof profile.statusContext === 'string' && /^[A-Za-z0-9][A-Za-z0-9_./-]{0,99}$/u.test(profile.statusContext)
+}
+
+export function parseMergeProfile(value: unknown): MergeProfile {
+  if (!validMergeProfile(value)) throw new Error('invalid merge profile')
+  const { baseRef, statusAppId, statusAppSlug, statusContext, mergeAppId } = value
+  return { baseRef, statusAppId, statusAppSlug, statusContext, mergeAppId }
+}
+
+export function validMergePolicy(value: unknown): value is MergePolicyEvidence {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false
+  const evidence = value as Partial<MergePolicyEvidence>
+  return Object.keys(evidence).length === 3 && validMergeProfile(evidence.profile) &&
+    validId(evidence.repositoryId) &&
+    typeof evidence.rulesSha256 === 'string' && digestPattern.test(evidence.rulesSha256)
+}
+
+export function sameMergePolicy(left?: MergePolicyEvidence, right?: MergePolicyEvidence): boolean {
+  if (left === undefined || right === undefined) return left === right
+  return left.repositoryId === right.repositoryId && left.rulesSha256 === right.rulesSha256 &&
+    left.profile.baseRef === right.profile.baseRef &&
+    left.profile.statusAppId === right.profile.statusAppId &&
+    left.profile.statusAppSlug === right.profile.statusAppSlug &&
+    left.profile.statusContext === right.profile.statusContext &&
+    left.profile.mergeAppId === right.profile.mergeAppId
 }
 
 export function validateTarget(target: PrTarget): void {
@@ -91,7 +137,9 @@ function validReceipt(value: unknown): value is ReviewReceipt {
   if (typeof value !== 'object' || value === null) return false
   const receipt = value as Partial<ReviewReceipt>
   try { validateTarget(receipt as PrTarget) } catch { return false }
-  return receipt.kind === 'review-completed' && Object.keys(receipt).length === 9 &&
+  const hasMergePolicy = Object.hasOwn(receipt, 'mergePolicy')
+  return receipt.kind === 'review-completed' && Object.keys(receipt).length === (hasMergePolicy ? 10 : 9) &&
+    (!hasMergePolicy || (validMergePolicy(receipt.mergePolicy) && receipt.mergePolicy.profile.baseRef === receipt.baseRef)) &&
     typeof receipt.runId === 'string' && runIdPattern.test(receipt.runId) &&
     typeof receipt.diffSha256 === 'string' && digestPattern.test(receipt.diffSha256) &&
     typeof receipt.mergeProposed === 'boolean'
