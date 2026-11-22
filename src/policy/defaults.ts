@@ -152,6 +152,13 @@ export interface Policy {
    * steered, it cannot send more than this. Empty by default.
    */
   budgets: Budget[]
+  /**
+   * After this many calls refused to the agent in one turn, every call that
+   * acts goes back to the human until they write again: an agent that keeps
+   * meeting refusals is where it starts looking for another way to the same
+   * end. 0 turns it off.
+   */
+  refusals: number
   output: {
     /**
      * Whether to append a source-influence footer under the model's answer.
@@ -192,5 +199,6 @@ export const DEFAULT_POLICY: Policy = {
   memory: { files: [], tools: [] },
   mcp: { pin: true },
   budgets: [],
+  refusals: 3,
   output: { footer: true },
 }
