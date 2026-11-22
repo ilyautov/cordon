@@ -1010,7 +1010,7 @@ function approveCall(args: string[]): number {
   let approved: ReturnType<ApprovalStore['approve']>
   let failure = 'the question expired or was retired while it was being approved'
   try {
-    approved = store.approve(id)
+    approved = store.approve(id, request.instance)
   } catch (error) {
     // The line above already says "given": the one below must follow it
     // whatever stopped the approval (Codex).

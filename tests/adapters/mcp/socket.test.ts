@@ -3,9 +3,9 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, 
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createInterface } from 'node:readline'
-import { Readable, Writable } from 'node:stream'
+import { PassThrough, Readable, Writable } from 'node:stream'
 import { fileURLToPath } from 'node:url'
-import { createServer } from 'node:net'
+import { createServer, type Socket } from 'node:net'
 import { describe, expect, it } from 'vitest'
 import { ensureBuiltCli } from '../../support/built-cli.js'
 import { connectSocketGateway } from '../../../src/adapters/mcp/socket.js'
@@ -33,6 +33,36 @@ async function waitForSocket(path: string, server: ChildProcess): Promise<void> 
 }
 
 describe.skipIf(typeof process.getuid !== 'function')('owner-controlled MCP socket transport', () => {
+  it.each(['close', 'error'])('stops the bridge on abrupt host input %s before owner status', async (event) => {
+    const root = mkdtempSync(join(tmpdir(), 'cmcp-input-disconnect-'))
+    const socket = join(root, 'gateway.sock')
+    const input = new PassThrough()
+    const output = new PassThrough()
+    // Keep the pipe open until the bridge disconnects. Graceful EOF is tested
+    // separately with a server that returns its final status after host FIN.
+    let peer: Socket | undefined
+    const server = createServer((client) => { peer = client })
+    await new Promise<void>((resolve) => server.listen(socket, resolve))
+    chmodSync(socket, 0o600)
+    const logs: string[] = []
+    let settled: number | undefined
+    const done = connectSocketGateway(socket, currentUid(), input, output, (line) => logs.push(line))
+    void done.then((code) => { settled = code })
+    try {
+      await expect.poll(() => peer !== undefined).toBe(true)
+      // A listener here isolates the assertion from EventEmitter's default
+      // uncaught-error behavior on versions without bridge error handling.
+      input.on('error', () => {})
+      input.destroy(event === 'error' ? new Error('test host input error') : undefined)
+      await expect.poll(() => settled, { timeout: 500 }).toBe(1)
+      expect(logs.join('\n')).toContain('host input')
+    } finally {
+      peer?.destroy()
+      await new Promise<void>((resolve) => server.close(() => resolve()))
+      await done
+    }
+  })
+
   it('waits for the host output write before returning owner success', async () => {
     const root = mkdtempSync(join(tmpdir(), 'cmcp-slow-output-'))
     const socketDir = join(root, 'socket')
