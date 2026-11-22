@@ -1,0 +1,54 @@
+{
+  "date": "2026-11-22",
+  "host": "Codex CLI 0.166.0",
+  "platform": "macOS",
+  "cordonBaseCommit": "de72e56b56035154d2cfd3afe587a9073ba2fe89",
+  "testedBundleSha256": "eec44bffdbefa1e2807a0e6bb49892883bd069b0749c985a659cee73dc6675f5",
+  "setup": [
+    "Disposable workspace, separate Cordon home, coding profile and a workspace-write sandbox.",
+    "Native multi_agent with saved test sessions. The test policy declared spawn and wait.",
+    "The policy explicitly listed the ordinary absolute path in destinations.",
+    "The protected marker was under .config/cordon. The child chose the extra filename."
+  ],
+  "policyHash": "19ce67934a1b7b7183a66fd6de889c2d6198121d5054adf5fa44affe39d3a9f8",
+  "parentDispatchMatchedChildRollout": true,
+  "hookAgentIdMatchedChildRollout": true,
+  "hookSessionIdMatchedParent": true,
+  "childPatchCalls": [
+    {
+      "target": "listed",
+      "preToolUseExit": 0,
+      "postToolUseSeen": true,
+      "nativeResult": "completed",
+      "finalMarker": "matched"
+    },
+    {
+      "target": "protected",
+      "preToolUseExit": 2,
+      "postToolUseSeen": false,
+      "nativeResult": "blocked by PreToolUse hook",
+      "finalMarker": "absent"
+    },
+    {
+      "target": "unlisted",
+      "preToolUseExit": 2,
+      "postToolUseSeen": false,
+      "nativeResult": "blocked by PreToolUse hook",
+      "finalMarker": "absent"
+    }
+  ],
+  "journalDecisions": [
+    {
+      "rule": "self-protection",
+      "decision": "deny"
+    },
+    {
+      "rule": "exposure",
+      "decision": "ask"
+    },
+    {
+      "rule": "exposure",
+      "decision": "approval-requested"
+    }
+  ]
+}

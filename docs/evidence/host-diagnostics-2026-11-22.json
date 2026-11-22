@@ -1,0 +1,79 @@
+{
+  "date": "2026-11-22",
+  "platform": "macOS",
+  "scope": "Parent tool calls in disposable workspaces. Hook traces omit session identifiers and marker paths.",
+  "runs": [
+    {
+      "host": "codex",
+      "version": "0.166.0",
+      "setup": [
+        "Bundled Cordon hook and fresh coding policy",
+        "Ephemeral workspace-write execution with shell and other external tools disabled",
+        "The explicit local test hooks were trusted for this invocation only"
+      ],
+      "hostExit": 0,
+      "probeExit": 0,
+      "outcome": "passed",
+      "tool": "apply_patch",
+      "policyAtCheck": "a02b2ef4a0f705c12d479dd3db7043779edd60d7a15758bd2cfb4098d8e75543",
+      "allowedMarker": "matched",
+      "deniedMarker": "absent",
+      "refusalRecorded": true,
+      "hookTrace": [
+        {
+          "event": "UserPromptSubmit",
+          "code": 0,
+          "target": null,
+          "session": 1
+        },
+        {
+          "event": "PreToolUse",
+          "tool": "apply_patch",
+          "code": 0,
+          "target": "ordinary",
+          "session": 1
+        },
+        {
+          "event": "PostToolUse",
+          "tool": "apply_patch",
+          "code": 0,
+          "target": "ordinary",
+          "session": 1
+        },
+        {
+          "event": "PreToolUse",
+          "tool": "apply_patch",
+          "code": 2,
+          "target": "protected",
+          "session": 1
+        }
+      ]
+    },
+    {
+      "host": "claude-code",
+      "version": "2.1.323",
+      "setup": [
+        "Bundled Cordon hook and fresh coding policy",
+        "Print-mode run with only the native Write tool enabled"
+      ],
+      "hostExit": 1,
+      "probeExit": 1,
+      "outcome": "inconclusive",
+      "tool": "Write",
+      "policyAtCheck": "24257d3354a1226f9c5245a5421deba1422aecd9b58034d6d4373fd4718ae0f2",
+      "allowedMarker": "absent",
+      "deniedMarker": "absent",
+      "refusalRecorded": false,
+      "hookTrace": [
+        {
+          "event": "UserPromptSubmit",
+          "code": 0,
+          "target": null,
+          "session": 1
+        }
+      ],
+      "limitation": "The provider rejected the model request before either file call.",
+      "controlWithoutHooks": "A text-only request from a clean directory encountered the same provider refusal."
+    }
+  ]
+}
