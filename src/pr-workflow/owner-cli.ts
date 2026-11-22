@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-import { pathToFileURL } from 'node:url'
+import { realpathSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import { readReviewReceipt, type ReviewReceipt } from './store.js'
 
 export function fixedComment({ number, headSha }: Pick<ReviewReceipt, 'number' | 'headSha'>): string {
@@ -24,7 +25,7 @@ export function runOwnerCommand(args: string[]): {
   return { allow: false, reason: 'owner-actions-draft', receipt: readReviewReceipt(path) }
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (process.argv[1] && realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))) {
   try {
     const decision = runOwnerCommand(process.argv.slice(2))
     process.stdout.write(JSON.stringify(decision) + '\n')

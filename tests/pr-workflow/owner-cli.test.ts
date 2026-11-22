@@ -1,10 +1,13 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { spawnSync } from 'node:child_process'
+import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
 import { fixedComment, runOwnerCommand } from '../../src/pr-workflow/owner-cli.js'
 import { approveReceipt, approvalForReceipt, consumeReceiptApproval } from '../../src/pr-workflow/owner-approvals.js'
 import type { ReviewReceipt } from '../../src/pr-workflow/store.js'
+import { ensureBuiltCli } from '../support/built-cli.js'
 
 const receipt: ReviewReceipt = { kind: 'review-completed', repo: 'owner/project', number: 12, headSha: 'a'.repeat(40),
   runId: '599845b6-4408-4eae-9b35-036d78362b44', diffSha256: '1'.repeat(64), mergeProposed: true }
@@ -36,6 +39,18 @@ describe('fixed owner comment', () => {
 })
 
 describe('draft owner CLI', () => {
+  it.skipIf(process.platform === 'win32')('reports a refusal when invoked through a symlink', () => {
+    ensureBuiltCli()
+    const executable = fileURLToPath(new URL('../../dist/pr-workflow/owner-cli.js', import.meta.url))
+    const link = join(scratch(), 'owner-cli.js')
+    symlinkSync(executable, link)
+    const result = spawnSync(process.execPath, [link, 'merge', '/missing-review-receipt'], {
+      encoding: 'utf8', timeout: 5000,
+    })
+    expect(result.status).toBe(1)
+    expect(result.stderr).toContain('owner actions are disabled')
+  })
+
   it.each(['approve', 'comment', 'merge'])('refuses %s before opening a receipt or approval store', (command) => {
     expect(() => runOwnerCommand([command, '/missing-review-receipt'])).toThrow('owner actions are disabled')
   })
