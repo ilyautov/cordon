@@ -7367,14 +7367,14 @@ var require_dist = __commonJS({
 });
 
 // src/cli.ts
-import { accessSync as accessSync4, appendFileSync as appendFileSync2, constants as constants5, existsSync as existsSync3, lstatSync as lstatSync4, mkdtempSync, readdirSync as readdirSync8, readFileSync as readFileSync7, realpathSync as realpathSync4, renameSync as renameSync6, rmSync as rmSync6, writeFileSync as writeFileSync7 } from "node:fs";
+import { accessSync as accessSync4, appendFileSync as appendFileSync2, constants as constants6, existsSync as existsSync2, lstatSync as lstatSync4, mkdtempSync, readdirSync as readdirSync8, readFileSync as readFileSync7, realpathSync as realpathSync4, renameSync as renameSync6, rmSync as rmSync6, writeFileSync as writeFileSync7 } from "node:fs";
 import { randomBytes as randomBytes6 } from "node:crypto";
 import { homedir as homedir6, tmpdir, userInfo } from "node:os";
 import { dirname as dirname5, join as join17 } from "node:path";
 import { fileURLToPath } from "node:url";
 
 // src/adapters/claude-code/main.ts
-import { accessSync, constants } from "node:fs";
+import { accessSync, constants as constants2 } from "node:fs";
 import { homedir as homedir5 } from "node:os";
 import { join as join10 } from "node:path";
 
@@ -8726,6 +8726,13 @@ function held(call, ctx, decision) {
   }
   return escalate(ctx, "refusals", why);
 }
+function isToolNameList(value) {
+  if (!Array.isArray(value)) return false;
+  for (const name of value) {
+    if (typeof name !== "string" || name.trim() === "") return false;
+  }
+  return true;
+}
 function decide(call, ctx) {
   if (typeof call?.tool !== "string" || call.tool === "") {
     return { kind: "deny", rule: "malformed", reason: "a call without a tool name" };
@@ -8750,11 +8757,21 @@ function decide(call, ctx) {
       reason: `the MCP tool ${call.tool} ${held2.why === "new" ? "appeared" : "changed"} after the server was approved (${held2.server}); review the server, then run "cordon mcp approve -- ${held2.server}"`
     };
   }
-  if (ctx.policy.blockedTools.includes(call.tool)) {
+  const blockedTools = ctx.policy.blockedTools;
+  if (blockedTools !== void 0 && !isToolNameList(blockedTools)) {
+    return { kind: "deny", rule: "failure", reason: "blockedTools must be a list of nonempty tool names" };
+  }
+  if (blockedTools?.includes(call.tool)) {
     return { kind: "deny", rule: "tool-blocked", reason: `tool ${call.tool} is blocked by the policy` };
   }
-  if (ctx.policy.allowedTools !== null && (!Array.isArray(ctx.policy.allowedTools) || !ctx.policy.allowedTools.includes(call.tool))) {
-    return { kind: "deny", rule: "tool-not-allowed", reason: `tool ${call.tool} is not on the policy's allowedTools list` };
+  const allowedTools = ctx.policy.allowedTools;
+  if (allowedTools !== void 0 && allowedTools !== null) {
+    if (!isToolNameList(allowedTools)) {
+      return { kind: "deny", rule: "failure", reason: "allowedTools must be a list of nonempty tool names or null" };
+    }
+    if (!allowedTools.includes(call.tool)) {
+      return { kind: "deny", rule: "tool-not-allowed", reason: `tool ${call.tool} is not on the policy's allowedTools list` };
+    }
   }
   const parts = fields(own2);
   const selfHit = selfProtection(parts, ctx);
@@ -9284,7 +9301,9 @@ function fingerprint(tool) {
     ...tool.title === void 0 ? {} : { title: tool.title },
     ...tool.annotations === void 0 ? {} : { annotations: tool.annotations },
     ...tool.outputSchema === void 0 ? {} : { outputSchema: tool.outputSchema },
-    ...tool.icons === void 0 ? {} : { icons: tool.icons }
+    ...tool.icons === void 0 ? {} : { icons: tool.icons },
+    ...tool._meta === void 0 ? {} : { _meta: tool._meta },
+    ...tool.execution === void 0 ? {} : { execution: tool.execution }
   });
   return createHash("sha256").update(canonical2, "utf8").digest("hex");
 }
@@ -12390,11 +12409,13 @@ function isEntry(value) {
 
 // src/session/approvals.ts
 import { createHash as createHash3, randomBytes as randomBytes2 } from "node:crypto";
-import { existsSync, linkSync, readdirSync as readdirSync2, readFileSync as readFileSync3, renameSync as renameSync3, rmSync as rmSync2, statSync as statSync2, unlinkSync, writeFileSync as writeFileSync2 } from "node:fs";
+import { closeSync, constants, existsSync, fstatSync, linkSync, openSync, readdirSync as readdirSync2, readFileSync as readFileSync3, renameSync as renameSync3, rmSync as rmSync2, statSync as statSync2, unlinkSync, writeFileSync as writeFileSync2 } from "node:fs";
 import { join as join4 } from "node:path";
 var APPROVAL_TTL_MS = 60 * 60 * 1e3;
 var ID = /^[0-9a-f]{16}$/u;
 var NONCE = /^[0-9a-f]{16}$/u;
+var INSTANCE = /^[0-9a-f]{64}$/u;
+var APPROVAL_FILES = /^[0-9a-f]{16}\.(?:request\.json|request-writing\.[0-9a-f]{16}|approved(?:\.[0-9a-f]{64})?|approval-writing\.[0-9a-f]{16}|used\.[0-9a-f]{64}|taken\.[0-9a-f]{16}|taking\.\d+\.[0-9a-f]{8})$/u;
 function approvalId(sessionId, call) {
   const canonical2 = JSON.stringify([sessionId, call.tool, sorted(call.args ?? {})]);
   return createHash3("sha256").update(canonical2, "utf8").digest("hex").slice(0, 16);
@@ -12409,8 +12430,16 @@ var ApprovalStore = class {
   pendingPath(id) {
     return join4(this.dir, `${checked(id)}.request.json`);
   }
+  /** The publication path for the current question. */
   approvedPath(id) {
-    return join4(this.dir, `${checked(id)}.approved`);
+    const request = this.read(checked(id));
+    return request === null ? join4(this.dir, `${id}.approved`) : this.grantPath(id, request.instance);
+  }
+  grantPath(id, instance) {
+    return join4(this.dir, `${id}.approved.${instance}`);
+  }
+  usedPath(id, instance) {
+    return join4(this.dir, `${id}.used.${instance}`);
   }
   takenPath(id, nonce) {
     return join4(this.dir, `${checked(id)}.taken.${nonce}`);
@@ -12422,6 +12451,9 @@ var ApprovalStore = class {
     const binding = request.binding ?? "";
     if (!BINDING.test(binding)) throw new Error("an approval binding is a sha256 in hex");
     const body = JSON.stringify({
+      // Even two requests written in the same millisecond must have
+      // distinct identities when an earlier question is retired.
+      generation: randomBytes2(16).toString("hex"),
       tool: request.tool,
       reason: request.reason,
       args,
@@ -12431,14 +12463,6 @@ var ApprovalStore = class {
       at: (/* @__PURE__ */ new Date()).toISOString()
     });
     this.sweep();
-    if (this.stale(this.pendingPath(id))) {
-      for (const path of [this.pendingPath(id), this.approvedPath(id)]) {
-        try {
-          unlinkSync(path);
-        } catch {
-        }
-      }
-    }
     const writing = join4(this.dir, `${checked(id)}.request-writing.${randomBytes2(8).toString("hex")}`);
     try {
       writeFileSync2(writing, body, { encoding: "utf8", mode: 384, flag: "wx" });
@@ -12446,34 +12470,48 @@ var ApprovalStore = class {
         linkSync(writing, this.pendingPath(id));
       } catch (error) {
         if (error.code !== "EEXIST") throw error;
+        if (this.waiting(id) === null) {
+          throw new Error(`could not publish approval question ${id} because the existing request is unavailable`);
+        }
       }
     } finally {
       rmSync2(writing, { force: true });
     }
   }
   /**
-   * The owner's approval of a waiting request, or null when there is none to
-   * approve. Returns what was approved, so the owner sees it said back.
+   * Publishes the owner's grant for the question they inspected. The optional
+   * instance lets the CLI keep its journal and the grant about the same question.
    */
-  approve(id) {
-    const request = this.read(id);
-    if (request === null) return null;
-    const shown2 = { tool: request.tool, reason: request.reason, args: request.args, ...request.context === void 0 ? {} : { context: request.context } };
+  approve(id, expectedInstance) {
+    const request = this.waiting(id);
+    if (request === null || expectedInstance !== void 0 && request.instance !== expectedInstance) return null;
+    const { instance, binding, at: _at, ...shown2 } = request;
     const nonce = randomBytes2(8).toString("hex");
-    const writing = join4(this.dir, `${checked(id)}.approval-writing.${nonce}`);
+    const writing = join4(this.dir, `${id}.approval-writing.${nonce}`);
+    const publication = this.grantPath(id, instance);
     try {
-      writeFileSync2(writing, `${request.binding}
-${nonce}`, { mode: 384, flag: "wx" });
-      renameSync3(writing, this.approvedPath(id));
+      writeFileSync2(writing, `${binding}
+${nonce}
+${instance}`, { mode: 384, flag: "wx" });
+      if (this.waiting(id)?.instance !== instance) return null;
+      renameSync3(writing, publication);
     } finally {
       rmSync2(writing, { force: true });
     }
-    if (this.read(id) === null) {
-      if (existsSync(this.takenPath(id, nonce))) return shown2;
-      this.retire(id);
-      return null;
+    if (existsSync(this.takenPath(id, nonce))) return shown2;
+    if (this.read(id)?.instance === instance) {
+      const used = this.usedPath(id, instance);
+      if (!existsSync(used) || this.readGrant(used)?.nonce === nonce) return shown2;
     }
-    return shown2;
+    rmSync2(publication, { force: true });
+    return null;
+  }
+  /** A complete grant for the still-pending question, without consuming it. */
+  hasApproval(id, expectedInstance) {
+    const request = this.waiting(id);
+    if (request === null || expectedInstance !== void 0 && request.instance !== expectedInstance) return false;
+    const grant = this.readGrant(this.grantPath(id, request.instance));
+    return grant !== null && grant.instance === request.instance && grant.binding === request.binding && this.waiting(id)?.instance === request.instance;
   }
   stale(path) {
     try {
@@ -12483,47 +12521,52 @@ ${nonce}`, { mode: 384, flag: "wx" });
     }
   }
   /**
-   * Whether an approval for this call is waiting, taking it if so.
-   *
-   * Every failure answers false, and false is a refusal: an unreadable store
-   * or an approval that is not there never lets a call through.
-   */
-  /**
-   * Takes the approval for this call if it was given under this binding.
-   *
-   * Every failure answers not taken, and not taken is a refusal. An approval
-   * under another binding is voided, with its request, so the next refusal
-   * asks the question afresh and the owner sees the current one.
+   * Takes one fresh grant for the current question and context. An unreadable
+   * file, expired question or failed claim leaves the call refused.
    */
   take(id, binding) {
     if (!ID.test(id)) return { taken: false, void: false };
+    const request = this.waiting(id);
+    if (request === null) return { taken: false, void: false };
     const claimed = join4(this.dir, `${id}.taking.${process.pid}.${randomBytes2(4).toString("hex")}`);
     try {
-      renameSync3(this.approvedPath(id), claimed);
+      renameSync3(this.grantPath(id, request.instance), claimed);
     } catch {
       return { taken: false, void: false };
     }
     try {
-      const fresh = Date.now() - statSync2(claimed).mtimeMs <= APPROVAL_TTL_MS;
-      const fields2 = readFileSync3(claimed, "utf8").split("\n");
-      const nonce = fields2[1];
-      if (fields2.length !== 2 || nonce === void 0 || !NONCE.test(nonce)) return { taken: false, void: false };
-      const given = fields2[0];
-      if (!existsSync(this.pendingPath(id))) return { taken: false, void: false };
-      if (fresh && given !== binding) {
-        this.retire(id);
+      const grant = this.readGrant(claimed);
+      if (grant === null || grant.instance !== request.instance || grant.binding !== request.binding) {
+        return { taken: false, void: false };
+      }
+      linkSync(claimed, this.usedPath(id, request.instance));
+      if (this.read(id)?.instance !== request.instance) return { taken: false, void: false };
+      if (grant.binding !== binding) {
+        this.discard(id, request.instance);
         return { taken: false, void: true };
       }
-      if (fresh) writeFileSync2(this.takenPath(id, nonce), "", { mode: 384 });
-      try {
-        unlinkSync(this.pendingPath(id));
-      } catch {
-      }
-      return { taken: fresh, void: false };
+      writeFileSync2(this.takenPath(id, grant.nonce), "", { mode: 384, flag: "wx" });
+      this.discard(id, request.instance);
+      return { taken: true, void: false };
     } catch {
       return { taken: false, void: false };
     } finally {
-      rmSync2(claimed, { force: true });
+      try {
+        rmSync2(claimed, { force: true });
+      } catch {
+      }
+    }
+  }
+  readGrant(path) {
+    try {
+      const text = readFresh(path);
+      if (text === null) return null;
+      const fields2 = text.split("\n");
+      const [binding, nonce, instance] = fields2;
+      if (fields2.length !== 3 || binding === void 0 || !BINDING.test(binding) || nonce === void 0 || !NONCE.test(nonce) || instance === void 0 || !INSTANCE.test(instance)) return null;
+      return { binding, nonce, instance };
+    } catch {
+      return null;
     }
   }
   /**
@@ -12550,8 +12593,10 @@ ${nonce}`, { mode: 384, flag: "wx" });
         continue;
       }
       if (parsed?.call !== call) continue;
-      retired.push({ id, context: this.contextOf(id) });
-      this.retire(id);
+      const instance = this.read(id)?.instance;
+      if (instance === void 0) continue;
+      const context = this.contextOf(id);
+      if (this.retire(id, instance)) retired.push({ id, context });
     }
     return retired;
   }
@@ -12579,8 +12624,7 @@ ${nonce}`, { mode: 384, flag: "wx" });
       return;
     }
     for (const name of names2) {
-      const id = name.replace(/\.(?:request\.json|request-writing\.[0-9a-f]{16}|approved|approval-writing\.[0-9a-f]{16}|taken\.[0-9a-f]{16}|taking\.\d+\.[0-9a-f]{8})$/u, "");
-      if (id === name || !ID.test(id)) continue;
+      if (!APPROVAL_FILES.test(name)) continue;
       if (this.stale(join4(this.dir, name))) {
         try {
           unlinkSync(join4(this.dir, name));
@@ -12589,20 +12633,29 @@ ${nonce}`, { mode: 384, flag: "wx" });
       }
     }
   }
-  retire(id) {
-    for (const path of [this.pendingPath(id), this.approvedPath(id)]) {
-      try {
-        unlinkSync(path);
-      } catch {
-      }
+  retire(id, instance) {
+    if (this.read(id)?.instance !== instance) return false;
+    try {
+      writeFileSync2(this.usedPath(id, instance), "", { mode: 384, flag: "wx" });
+    } catch (error) {
+      if (error.code === "EEXIST") return false;
+      throw error;
+    }
+    this.discard(id, instance);
+    return true;
+  }
+  discard(id, instance) {
+    try {
+      if (this.read(id)?.instance === instance) rmSync2(this.pendingPath(id), { force: true });
+      rmSync2(this.grantPath(id, instance), { force: true });
+    } catch {
     }
   }
   /** Retires a held question when its host timed out or cancelled the call. */
-  cancel(id) {
-    const request = this.read(checked(id));
-    if (request === null) return null;
-    this.retire(id);
-    return request;
+  cancel(id, expectedInstance) {
+    const request = this.waiting(id);
+    if (request === null || expectedInstance !== void 0 && request.instance !== expectedInstance) return null;
+    return this.retire(id, request.instance) ? request : null;
   }
   /** The requests still waiting, for `cordon approve` with no id. */
   pending() {
@@ -12616,29 +12669,35 @@ ${nonce}`, { mode: 384, flag: "wx" });
     for (const name of names2) {
       const id = name.replace(/\.request\.json$/u, "");
       if (id === name || !ID.test(id)) continue;
-      const request = this.read(id);
-      if (request !== null) result.push({ id, ...request });
+      const request = this.waiting(id);
+      if (request !== null) {
+        const { instance: _instance, ...shown2 } = request;
+        result.push({ id, ...shown2 });
+      }
     }
     return result;
   }
-  /** A waiting request that is still fresh, or null. */
+  /** A waiting request that is still fresh and unused, or null. */
   waiting(id) {
-    return this.read(checked(id));
+    const request = this.read(checked(id));
+    return request === null || existsSync(this.usedPath(id, request.instance)) ? null : request;
   }
   read(id) {
-    const path = this.pendingPath(id);
     try {
-      if (Date.now() - statSync2(path).mtimeMs > APPROVAL_TTL_MS) return null;
-      const parsed = JSON.parse(readFileSync3(path, "utf8"));
+      const body = readFresh(this.pendingPath(id));
+      if (body === null) return null;
+      const parsed = JSON.parse(body);
       if (typeof parsed !== "object" || parsed === null) return null;
       const { tool, reason, at, args, binding, context } = parsed;
       if (typeof tool !== "string" || typeof reason !== "string" || typeof at !== "string") return null;
+      if (binding !== void 0 && (typeof binding !== "string" || !BINDING.test(binding))) return null;
       return {
         tool,
         reason,
         at,
         args: typeof args === "string" ? args : "",
-        binding: typeof binding === "string" ? binding : "",
+        binding: binding ?? "",
+        instance: createHash3("sha256").update(body).digest("hex"),
         ...isContext(context) ? { context } : {}
       };
     } catch {
@@ -12646,6 +12705,16 @@ ${nonce}`, { mode: 384, flag: "wx" });
     }
   }
 };
+function readFresh(path) {
+  const fd = openSync(path, constants.O_RDONLY | constants.O_NONBLOCK | constants.O_NOFOLLOW);
+  try {
+    const stat = fstatSync(fd);
+    if (!stat.isFile() || Date.now() - stat.mtimeMs > APPROVAL_TTL_MS) return null;
+    return readFileSync3(fd, "utf8");
+  } finally {
+    closeSync(fd);
+  }
+}
 function isContext(value) {
   if (typeof value !== "object" || value === null) return false;
   const { rule, exposure, policy, turn, reads } = value;
@@ -14080,8 +14149,8 @@ var Cordon = class {
     };
   }
   /** A host no longer waits for this exact question; a late yes must not release another call. */
-  cancelUnattendedApproval(id, reason) {
-    const request = new ApprovalStore(this.cordonHome).cancel(id);
+  cancelUnattendedApproval(id, reason, expectedInstance) {
+    const request = new ApprovalStore(this.cordonHome).cancel(id, expectedInstance);
     if (request === null) return;
     this.notifier.notify({
       at: (/* @__PURE__ */ new Date()).toISOString(),
@@ -14639,7 +14708,6 @@ var SWEEP_INTERVAL_MS = 60 * 60 * 1e3;
 var SWEEP_BUDGET = 5e3;
 var SWEEP_MARK = "last-sweep";
 var OURS = /^[A-Za-z0-9_-]{1,81}(?:\.[a-f0-9]{1,32})?\.json(?:\.\d{1,10}\.tmp)?$/u;
-var APPROVALS = /^[0-9a-f]{16}\.(?:request\.json|approved)$/u;
 function sweep(cordonHome2, keepSessionId, now = Date.now()) {
   try {
     if (!due(cordonHome2, now)) return;
@@ -14647,7 +14715,7 @@ function sweep(cordonHome2, keepSessionId, now = Date.now()) {
     const keep = safeName(keepSessionId);
     sweepDir(join9(cordonHome2, "sessions"), SESSION_TTL_MS, keep, now);
     sweepDir(join9(cordonHome2, "drafts"), DRAFT_TTL_MS, keep, now);
-    sweepDir(join9(cordonHome2, "approvals"), APPROVAL_TTL_MS, keep, now, APPROVALS);
+    sweepDir(join9(cordonHome2, "approvals"), APPROVAL_TTL_MS, keep, now, APPROVAL_FILES);
   } catch {
   }
 }
@@ -14887,10 +14955,10 @@ function inertOpaque(key, value) {
 }
 var MEDIA_TYPES = /* @__PURE__ */ new Set(["image", "audio", "video", "document", "input_image", "input_audio", "image_url"]);
 var MEDIA_KEYS = /* @__PURE__ */ new Set(["blob", "inlinedata", "filedata", "imageurl"]);
-function extractText(tool, response, textless = false) {
+function extractText(tool, response, textless = false, keys) {
   if (textless || TEXTLESS.has(tool)) return { known: true, parts: [], unseen: false, links: [], opaque: false };
   if (typeof response === "string") return { known: true, parts: [{ text: response, content: true }], unseen: false, links: [], opaque: false };
-  const scan = { parts: [], known: true, nodes: 0, size: 0, unseen: false, links: [], opaque: false };
+  const scan = { keys, parts: [], known: true, nodes: 0, size: 0, unseen: false, links: [], opaque: false };
   visit2(response, "", 0, scan);
   return scan.known ? { known: true, parts: scan.parts, unseen: scan.unseen, links: scan.links, opaque: scan.opaque } : { known: false, parts: [], unseen: false, links: [], opaque: false };
 }
@@ -14937,6 +15005,14 @@ function visit2(node, key, depth, scan, media = false) {
     const block = media || typeof type === "string" && MEDIA_TYPES.has(type.toLowerCase());
     if (block) scan.unseen = true;
     for (const [name, value] of Object.entries(node)) {
+      if (scan.keys !== void 0) {
+        scan.keys.add(name);
+        scan.size += name.length;
+        if (scan.size > MAX_TEXT) {
+          scan.known = false;
+          return;
+        }
+      }
       const keyed = MEDIA_KEYS.has(fold(name));
       if (keyed) scan.unseen = true;
       visit2(value, name, depth + 1, scan, block || keyed);
@@ -15411,7 +15487,7 @@ function runHook(stdin, home = cordonHome(), dialect = CLAUDE_CODE) {
 function ensureUsableHome(home) {
   const sessions = join10(home, "sessions");
   makeDirectory(sessions);
-  accessSync(sessions, constants.W_OK);
+  accessSync(sessions, constants2.W_OK);
 }
 function failure(event, reason) {
   return silentOnFailure(event) ? {} : deny2(reason);
@@ -15427,7 +15503,7 @@ function deny2(reason) {
 }
 
 // src/adapters/gemini-cli/main.ts
-import { accessSync as accessSync2, constants as constants2 } from "node:fs";
+import { accessSync as accessSync2, constants as constants3 } from "node:fs";
 import { join as join11 } from "node:path";
 
 // src/adapters/gemini-cli/protocol.ts
@@ -15691,7 +15767,7 @@ function runHook2(stdin, home = cordonHome()) {
 function ensureUsableHome2(home) {
   const sessions = join11(home, "sessions");
   makeDirectory(sessions);
-  accessSync2(sessions, constants2.W_OK);
+  accessSync2(sessions, constants3.W_OK);
 }
 function failure2(event, reason) {
   return silentOnFailure2(event) ? {} : { decision: "deny", reason };
@@ -15715,7 +15791,7 @@ function runHook5(stdin, home = cordonHome()) {
 // src/adapters/mcp/gateway.ts
 import { spawn } from "node:child_process";
 import { createHash as createHash7, randomBytes as randomBytes5 } from "node:crypto";
-import { accessSync as accessSync3, constants as constants3, existsSync as existsSync2 } from "node:fs";
+import { accessSync as accessSync3, constants as constants4 } from "node:fs";
 import { join as join12 } from "node:path";
 import { createInterface } from "node:readline";
 
@@ -15765,8 +15841,6 @@ var HOST_REQUEST_METHODS = /* @__PURE__ */ new Set([
   "resources/list",
   "resources/templates/list",
   "resources/read",
-  "resources/subscribe",
-  "resources/unsubscribe",
   "prompts/list",
   "prompts/get",
   "completion/complete",
@@ -15774,12 +15848,11 @@ var HOST_REQUEST_METHODS = /* @__PURE__ */ new Set([
 ]);
 var GATED_HOST_METHODS = /* @__PURE__ */ new Set([
   "resources/read",
-  "resources/subscribe",
-  "resources/unsubscribe",
   "prompts/get",
   "completion/complete",
   "logging/setLevel"
 ]);
+var RESERVED_TOOL_NAMES = /* @__PURE__ */ new Set([...GATED_HOST_METHODS, "resources/subscribe", "resources/unsubscribe"]);
 function forwardableHostNotification(message) {
   if (message.value["jsonrpc"] !== "2.0" || Object.keys(message.value).some((key) => !["jsonrpc", "method", "params"].includes(key))) return false;
   if (message.method === "notifications/cancelled") {
@@ -15798,24 +15871,26 @@ function runGateway(options) {
   return new Promise((resolve4) => {
     let settled = false;
     let upstream = null;
+    let closeReaders;
     const reviewTimers = /* @__PURE__ */ new Map();
     let cancelWaiting = null;
-    const retireIfLastWaiter = (id, reason) => {
-      if ([...reviewTimers.values()].some((held2) => held2.approvalId === id)) return;
-      cancelWaiting?.(id, reason);
+    const retireIfLastWaiter = (id, instance, reason) => {
+      if ([...reviewTimers.values()].some((held2) => held2.approvalId === id && held2.instance === instance)) return;
+      cancelWaiting?.(id, reason, instance);
     };
     const finish = (code, reason) => {
       if (settled) return;
       settled = true;
-      for (const { timer, approvalId: approvalId2 } of reviewTimers.values()) {
+      for (const { timer, approvalId: approvalId2, instance } of reviewTimers.values()) {
         clearInterval(timer);
         try {
-          cancelWaiting?.(approvalId2, "the MCP gateway stopped before the owner answered");
+          cancelWaiting?.(approvalId2, "the MCP gateway stopped before the owner answered", instance);
         } catch (error) {
           log(`could not retire held approval ${approvalId2}: ${error.message}`);
         }
       }
       reviewTimers.clear();
+      closeReaders?.();
       if (reason !== void 0) log(reason);
       if (upstream !== null && upstream.exitCode === null && !upstream.killed) upstream.kill();
       resolve4(code);
@@ -15846,7 +15921,7 @@ function runGateway(options) {
       finish(1, `the session state is broken: ${error.message}`);
       return;
     }
-    cancelWaiting = (id, reason) => cordon.cancelUnattendedApproval(id, reason);
+    cancelWaiting = (id, reason, instance) => cordon.cancelUnattendedApproval(id, reason, instance);
     if (typeof options.policy.task === "string" && options.policy.task !== "") {
       cordon.declareTask(options.policy.task);
     }
@@ -15871,6 +15946,24 @@ function runGateway(options) {
       child.stdin.write(JSON.stringify(message) + "\n");
     };
     const pending = /* @__PURE__ */ new Map();
+    const activeProgress = /* @__PURE__ */ new Map();
+    const forwardRequest = (id, entry, request) => {
+      const token = asRecord(asRecord(request["params"])?.["_meta"])?.["progressToken"];
+      if (isProgressToken(token)) {
+        const current = activeProgress.get(token);
+        if (current === void 0) {
+          const progress = { token, requests: 1 };
+          activeProgress.set(token, progress);
+          entry.progress = progress;
+        } else {
+          current.requests += 1;
+          current.suppressed = true;
+          entry.progress = current;
+        }
+      }
+      pending.set(pendingKey(id), entry);
+      sendUpstream(request);
+    };
     const onHostLine = (line) => {
       if (settled) return;
       let message;
@@ -15897,9 +15990,11 @@ function runGateway(options) {
             if (held2 !== void 0) {
               clearInterval(held2.timer);
               reviewTimers.delete(key2);
-              retireIfLastWaiter(held2.approvalId, "the host cancelled its MCP request");
+              retireIfLastWaiter(held2.approvalId, held2.instance, "the host cancelled its MCP request");
               return;
             }
+            const progress = pending.get(key2)?.progress;
+            if (progress !== void 0) progress.suppressed = true;
           }
         }
         sendUpstream(message.value);
@@ -15915,26 +16010,29 @@ function runGateway(options) {
           message,
           cordon,
           options.policy,
-          pending,
+          forwardRequest,
           sendToHost,
-          sendUpstream,
           approvalWaitMs === 0 ? void 0 : (approvalId2, reason) => {
-            const key2 = pendingKey(message.id);
-            if (reviewTimers.has(key2)) throw new Error(`a second review is waiting under request ${key2}`);
             const approvals = new ApprovalStore(options.cordonHome);
+            const question = approvals.waiting(approvalId2);
+            if (question === null) {
+              sendToHost(toolError(message.id, "Cordon refused the call because its approval question is no longer pending."));
+              return;
+            }
+            const { instance } = question;
             const deadline = Date.now() + approvalWaitMs;
             const timer = setInterval(() => {
               try {
                 if (Date.now() >= deadline) {
                   clearInterval(timer);
-                  reviewTimers.delete(key2);
-                  retireIfLastWaiter(approvalId2, "the owner did not approve before the wait ended");
+                  reviewTimers.delete(key);
+                  retireIfLastWaiter(approvalId2, instance, "the owner did not approve before the wait ended");
                   sendToHost(toolError(message.id, `Cordon approval wait timed out for ${message.method}: ${reason}`));
                   return;
                 }
-                if (!existsSync2(approvals.approvedPath(approvalId2))) return;
+                if (!approvals.hasApproval(approvalId2, instance)) return;
                 for (const [waitingKey, held2] of reviewTimers) {
-                  if (held2.approvalId !== approvalId2) continue;
+                  if (held2.approvalId !== approvalId2 || held2.instance !== instance) continue;
                   clearInterval(held2.timer);
                   reviewTimers.delete(waitingKey);
                   sendToHost(toolError(
@@ -15946,7 +16044,7 @@ function runGateway(options) {
                 finish(1, `approval wait failed: ${error.message}`);
               }
             }, Math.min(25, approvalWaitMs));
-            reviewTimers.set(key2, { timer, approvalId: approvalId2, requestId: message.id });
+            reviewTimers.set(key, { timer, approvalId: approvalId2, instance, requestId: message.id });
           }
         );
         return;
@@ -15969,8 +16067,7 @@ function runGateway(options) {
       if (message.method === "prompts/get" && typeof params?.["name"] === "string") {
         entry.label = params["name"];
       }
-      pending.set(pendingKey(message.id), entry);
-      sendUpstream(forwarded);
+      forwardRequest(message.id, entry, forwarded);
     };
     const onUpstreamLine = (line) => {
       if (settled) return;
@@ -15994,7 +16091,7 @@ function runGateway(options) {
         return;
       }
       if (message.type === "notification") {
-        const observed = observeServerNotification(message.value, message.method, cordon, options.policy);
+        const observed = observeServerNotification(message.value, message.method, cordon, options.policy, activeProgress);
         if (observed === null) log("unsupported server notification was withheld");
         else sendToHost(observed);
         return;
@@ -16004,6 +16101,11 @@ function runGateway(options) {
       if (entry === void 0) {
         finish(1, "unsolicited upstream response without a matching host request");
         return;
+      }
+      const progress = entry.progress;
+      if (progress !== void 0) {
+        progress.requests -= 1;
+        if (progress.requests === 0) activeProgress.delete(progress.token);
       }
       if (Object.hasOwn(message.value, "error")) {
         const error = asRecord(message.value["error"]);
@@ -16069,7 +16171,12 @@ function runGateway(options) {
       }
       sendToHost(observeOtherResponse(message.value, entry.method, cordon, options.policy));
     };
+    const inputClosed = () => {
+      if (!hostIn.readableEnded) finish(1, "host input closed unexpectedly");
+    };
+    hostIn.once("close", inputClosed);
     const hostLines = createInterface({ input: hostIn, terminal: false });
+    hostLines.on("error", (error) => finish(1, `host input failed: ${error.message}`));
     hostLines.on("line", (line) => {
       if (line.trim() === "") return;
       try {
@@ -16086,6 +16193,12 @@ function runGateway(options) {
       }
     });
     const upstreamLines = createInterface({ input: child.stdout, terminal: false });
+    upstreamLines.on("error", (error) => finish(1, `upstream output failed: ${error.message}`));
+    closeReaders = () => {
+      hostIn.off("close", inputClosed);
+      hostLines.close();
+      upstreamLines.close();
+    };
     upstreamLines.on("line", (line) => {
       if (line.trim() === "") return;
       try {
@@ -16094,6 +16207,7 @@ function runGateway(options) {
         finish(1, `a failure while handling the upstream's message: ${error.message}`);
       }
     });
+    if (hostIn.destroyed) inputClosed();
   });
 }
 function gateHostMethod(message, cordon, sendToHost) {
@@ -16105,7 +16219,8 @@ function gateHostMethod(message, cordon, sendToHost) {
     } });
     return null;
   }
-  const decision = cordon.gateUnattended({ tool: message.method, args: params });
+  const { _meta, ...args } = params;
+  const decision = cordon.gateUnattended({ tool: message.method, args });
   if (decision.kind !== "allow") {
     sendToHost({ jsonrpc: "2.0", id: message.id, error: {
       code: -32e3,
@@ -16113,10 +16228,9 @@ function gateHostMethod(message, cordon, sendToHost) {
     } });
     return null;
   }
-  const meta = asRecord(params["_meta"]);
-  const progressToken = meta?.["progressToken"];
+  const progressToken = asRecord(_meta)?.["progressToken"];
   return { jsonrpc: "2.0", id: message.id, method: message.method, params: {
-    ...Object.fromEntries(Object.entries(params).filter(([key]) => key !== "_meta")),
+    ...args,
     ...typeof progressToken === "string" || typeof progressToken === "number" ? { _meta: { progressToken } } : {}
   } };
 }
@@ -16134,7 +16248,7 @@ function validHostMethodParams(method, params) {
   if (method === "logging/setLevel") return typeof params["level"] === "string";
   return typeof params["uri"] === "string" && params["uri"] !== "";
 }
-function gateCall(message, cordon, policy, pending, sendToHost, sendUpstream, waitForApproval) {
+function gateCall(message, cordon, policy, forwardRequest, sendToHost, waitForApproval) {
   const params = asRecord(message.params);
   const meta = asRecord(params?.["_meta"]);
   if (message.value["jsonrpc"] !== "2.0" || Object.keys(message.value).some((key) => !["jsonrpc", "id", "method", "params"].includes(key)) || params === null || Object.keys(params).some((key) => !["name", "arguments", "_meta"].includes(key)) || typeof params["name"] !== "string" || params["name"].trim() === "" || params["arguments"] !== void 0 && asRecord(params["arguments"]) === null) {
@@ -16142,6 +16256,10 @@ function gateCall(message, cordon, policy, pending, sendToHost, sendUpstream, wa
     return;
   }
   const name = params["name"];
+  if (RESERVED_TOOL_NAMES.has(name)) {
+    sendToHost(toolError(message.id, "Cordon reserved this name for an MCP protocol method."));
+    return;
+  }
   const call = { tool: name, args: asRecord(params["arguments"]) ?? {} };
   const progressToken = meta?.["progressToken"];
   const forwarded = (args) => ({
@@ -16164,12 +16282,10 @@ function gateCall(message, cordon, policy, pending, sendToHost, sendUpstream, wa
     return;
   }
   if (decision.kind === "rewrite") {
-    pending.set(pendingKey(message.id), { method: message.method, call, notice: rewriteNotice(decision) });
-    sendUpstream(forwarded(decision.args));
+    forwardRequest(message.id, { method: message.method, call, notice: rewriteNotice(decision) }, forwarded(decision.args));
     return;
   }
-  pending.set(pendingKey(message.id), { method: message.method, call });
-  sendUpstream(forwarded(call.args));
+  forwardRequest(message.id, { method: message.method, call }, forwarded(call.args));
 }
 function observeToolList(value, cordon, policy, command) {
   const result = asRecord(value["result"]);
@@ -16183,17 +16299,20 @@ function observeToolList(value, cordon, policy, command) {
     if (observed === null) return withholdUnreadableResponse(value, "tools/list", source, cordon);
     result["_meta"] = observed.value;
   }
-  const named2 = listed.map((tool) => asRecord(tool)).filter((tool) => tool !== null && typeof tool["name"] === "string").map((tool) => ({
+  const eligible = listed.filter((tool) => !RESERVED_TOOL_NAMES.has(String(asRecord(tool)?.["name"])));
+  const named2 = eligible.map((tool) => asRecord(tool)).filter((tool) => tool !== null && typeof tool["name"] === "string").map((tool) => ({
     name: tool["name"],
     description: tool["description"],
     inputSchema: tool["inputSchema"],
     title: tool["title"],
     annotations: tool["annotations"],
     outputSchema: tool["outputSchema"],
-    icons: tool["icons"]
+    icons: tool["icons"],
+    _meta: tool["_meta"],
+    execution: tool["execution"]
   }));
   const held2 = new Set(cordon.admitTools(command, named2).map((tool) => tool.name));
-  const tools = listed.filter((tool) => !held2.has(String(asRecord(tool)?.["name"])));
+  const tools = eligible.filter((tool) => !held2.has(String(asRecord(tool)?.["name"])));
   value = { ...value, result: { ...result, tools } };
   for (const tool of tools) {
     const entry = asRecord(tool);
@@ -16205,6 +16324,11 @@ function observeToolList(value, cordon, policy, command) {
     if (entry["icons"] !== void 0) {
       const text = JSON.stringify(entry["icons"]);
       if (cordon.observe(text, source2).text !== text) return withholdUnreadableResponse(value, "tools/list", source2, cordon);
+    }
+    if (entry["_meta"] !== void 0) {
+      const observed = observeReadableResult(entry["_meta"], name, source2, cordon, []);
+      if (observed === null) return withholdUnreadableResponse(value, "tools/list", source2, cordon);
+      entry["_meta"] = observed.value;
     }
     const annotations = asRecord(entry["annotations"]);
     if (annotations !== null && typeof annotations["title"] === "string") {
@@ -16234,7 +16358,13 @@ var MAX_SCHEMA_NODES = 2e4;
 var SCHEMA_VALUE_KEYS = /* @__PURE__ */ new Set(["default", "const", "enum", "examples"]);
 function readableListedTool(value) {
   const entry = asRecord(value);
-  if (entry === null || typeof entry["name"] !== "string" || entry["name"] === "" || Object.keys(entry).some((key) => !TOOL_ENTRY_KEYS.has(key)) || entry["description"] !== void 0 && typeof entry["description"] !== "string" || entry["title"] !== void 0 && typeof entry["title"] !== "string" || entry["icons"] !== void 0 && !readableIcons(entry["icons"])) return false;
+  if (entry === null || typeof entry["name"] !== "string" || entry["name"] === "" || Object.keys(entry).some((key) => !TOOL_ENTRY_KEYS.has(key)) || entry["description"] !== void 0 && typeof entry["description"] !== "string" || entry["title"] !== void 0 && typeof entry["title"] !== "string" || entry["icons"] !== void 0 && !readableIcons(entry["icons"]) || entry["_meta"] !== void 0 && asRecord(entry["_meta"]) === null) return false;
+  if (entry["execution"] !== void 0) {
+    const execution = asRecord(entry["execution"]);
+    if (execution === null || Object.keys(execution).some((key) => key !== "taskSupport")) return false;
+    const taskSupport = execution["taskSupport"];
+    if (taskSupport !== void 0 && taskSupport !== "forbidden" && taskSupport !== "optional" && taskSupport !== "required") return false;
+  }
   const input = asRecord(entry["inputSchema"]);
   if (input === null || !readableSchemaText(input, 0)) return false;
   if (entry["outputSchema"] !== void 0) {
@@ -16313,7 +16443,7 @@ function withNotice(value, notice) {
 }
 var TOOL_RESULT_KEYS = /* @__PURE__ */ new Set(["resultType", "content", "structuredContent", "isError", "_meta"]);
 var TOOL_LIST_KEYS = /* @__PURE__ */ new Set(["resultType", "tools", "nextCursor", "_meta", "ttlMs", "cacheScope"]);
-var TOOL_ENTRY_KEYS = /* @__PURE__ */ new Set(["name", "description", "inputSchema", "title", "annotations", "outputSchema", "icons"]);
+var TOOL_ENTRY_KEYS = /* @__PURE__ */ new Set(["name", "description", "inputSchema", "title", "annotations", "outputSchema", "icons", "_meta", "execution"]);
 var TOOL_ANNOTATION_HINTS = /* @__PURE__ */ new Set(["readOnlyHint", "destructiveHint", "idempotentHint", "openWorldHint"]);
 var RESPONSE_KEYS = /* @__PURE__ */ new Set(["jsonrpc", "id", "result"]);
 var INITIALIZE_KEYS = /* @__PURE__ */ new Set(["protocolVersion", "capabilities", "serverInfo", "instructions", "_meta"]);
@@ -16324,7 +16454,7 @@ var SERVER_LIST_NOTIFICATIONS = /* @__PURE__ */ new Set([
   "notifications/resources/list_changed"
 ]);
 var LOG_LEVELS = /* @__PURE__ */ new Set(["debug", "info", "notice", "warning", "error", "critical", "alert", "emergency"]);
-function observeServerNotification(value, method, cordon, policy) {
+function observeServerNotification(value, method, cordon, policy, activeProgress) {
   if (value["jsonrpc"] !== "2.0" || Object.keys(value).some((key) => !["jsonrpc", "method", "params"].includes(key))) return null;
   if (SERVER_LIST_NOTIFICATIONS.has(method)) {
     const params2 = value["params"];
@@ -16333,6 +16463,9 @@ function observeServerNotification(value, method, cordon, policy) {
       if (record === null || Object.keys(record).length > 0) return null;
     }
     return { jsonrpc: "2.0", method, ...params2 === void 0 ? {} : { params: params2 } };
+  }
+  if (method === "notifications/progress") {
+    return observeProgress(asRecord(value["params"]), activeProgress, cordon, policy);
   }
   if (method !== "notifications/message") return null;
   const params = asRecord(value["params"]);
@@ -16344,12 +16477,37 @@ function observeServerNotification(value, method, cordon, policy) {
   if (cordon.observe(text, source).text !== text) return null;
   return { jsonrpc: "2.0", method, params: observed.value };
 }
+function isProgressToken(value) {
+  return typeof value === "string" || typeof value === "number" && Number.isSafeInteger(value);
+}
+function observeProgress(params, activeProgress, cordon, policy) {
+  if (params === null || Object.keys(params).some((key) => !["progressToken", "progress", "total", "message", "_meta"].includes(key)) || params["_meta"] !== void 0 && asRecord(params["_meta"]) === null) return null;
+  const { progressToken, progress, total, message } = params;
+  if (!isProgressToken(progressToken) || typeof progress !== "number" || !Number.isFinite(progress) || total !== void 0 && (typeof total !== "number" || !Number.isFinite(total)) || message !== void 0 && typeof message !== "string") return null;
+  const active = activeProgress.get(progressToken);
+  if (active === void 0 || active.suppressed === true || active.last !== void 0 && progress <= active.last) return null;
+  const forwarded = {
+    progressToken,
+    progress,
+    ...total === void 0 ? {} : { total },
+    ...message === void 0 ? {} : { message }
+  };
+  const method = "notifications/progress";
+  if (message !== void 0 && !observeInto(forwarded, "message", method, classifySource({ kind: "mcp-description", label: method, tool: method }, policy), cordon)) return null;
+  active.last = progress;
+  return { jsonrpc: "2.0", method, params: forwarded };
+}
+function removeSubscriptionCapability(result) {
+  const resources = asRecord(asRecord(result["capabilities"])?.["resources"]);
+  if (resources !== null) delete resources["subscribe"];
+}
 function observeInitialize(value, cordon, policy) {
   const source = classifySource({ kind: "mcp-description", label: "initialize" }, policy);
   const result = asRecord(value["result"]);
   if (Object.keys(value).some((key) => !RESPONSE_KEYS.has(key)) || result === null || Object.keys(result).some((key) => !INITIALIZE_KEYS.has(key)) || typeof result["protocolVersion"] !== "string" || asRecord(result["capabilities"]) === null || asRecord(result["serverInfo"]) === null || result["instructions"] !== void 0 && typeof result["instructions"] !== "string") {
     return withholdUnreadableResponse(value, "initialize", source, cordon);
   }
+  removeSubscriptionCapability(result);
   const observed = observeReadableResult(result, "initialize", source, cordon, []);
   if (observed === null) return withholdUnreadableResponse(value, "initialize", source, cordon);
   return { jsonrpc: "2.0", id: value["id"], result: observed.value };
@@ -16360,6 +16518,7 @@ function observeDiscover(value, cordon, policy) {
   if (Object.keys(value).some((key) => !RESPONSE_KEYS.has(key)) || result === null || Object.keys(result).some((key) => !DISCOVER_KEYS.has(key)) || result["resultType"] !== "complete" || !Array.isArray(result["supportedVersions"]) || result["supportedVersions"].length === 0 || result["supportedVersions"].some((version) => typeof version !== "string") || asRecord(result["capabilities"]) === null || result["instructions"] !== void 0 && typeof result["instructions"] !== "string" || result["_meta"] !== void 0 && asRecord(result["_meta"]) === null || result["ttlMs"] !== void 0 && (!Number.isSafeInteger(result["ttlMs"]) || result["ttlMs"] < 0) || result["cacheScope"] !== void 0 && result["cacheScope"] !== "public" && result["cacheScope"] !== "private") {
     return withholdUnreadableResponse(value, "server/discover", source, cordon);
   }
+  removeSubscriptionCapability(result);
   const observed = observeReadableResult(result, "server/discover", source, cordon, []);
   if (observed === null) return withholdUnreadableResponse(value, "server/discover", source, cordon);
   return { jsonrpc: "2.0", id: value["id"], result: observed.value };
@@ -16436,9 +16595,54 @@ function observeToolResult(value, call, cordon, policy) {
   cordon.recordLookup(call, texts);
   return value;
 }
+var RESULT_STRUCTURE_KEYS = /* @__PURE__ */ new Set([
+  "type",
+  "text",
+  "content",
+  "contents",
+  "structuredContent",
+  "_meta",
+  "annotations",
+  "role",
+  "messages",
+  "uri",
+  "mimeType",
+  "blob",
+  "resource",
+  "name",
+  "title",
+  "description",
+  "instructions",
+  "version",
+  "protocolVersion",
+  "capabilities",
+  "serverInfo",
+  "supportedVersions",
+  "tools",
+  "resources",
+  "prompts",
+  "logging",
+  "completion",
+  "listChanged",
+  "subscribe",
+  "resultType",
+  "ttlMs",
+  "cacheScope",
+  "nextCursor",
+  "level",
+  "logger",
+  "data",
+  "progressToken",
+  "progress",
+  "total",
+  "message"
+]);
 function observeReadableResult(value, tool, source, cordon, texts, allowUnseen = false) {
-  const extracted = extractText("", value);
+  const keys = /* @__PURE__ */ new Set();
+  const extracted = extractText("", value, false, keys);
   if (!extracted.known || extracted.unseen && !allowUnseen) return null;
+  const labels = [...keys].filter((key) => !RESULT_STRUCTURE_KEYS.has(key)).join("\n");
+  if (labels !== "" && cordon.observe(labels, source, "label").text !== labels) return null;
   if (extracted.unseen) cordon.markUnredacted();
   let changed2 = false;
   let substitutable = true;
@@ -16521,7 +16725,7 @@ function asRecord(value) {
 function ensureUsableHome3(home) {
   const sessions = join12(home, "sessions");
   makeDirectory(sessions);
-  accessSync3(sessions, constants3.W_OK);
+  accessSync3(sessions, constants4.W_OK);
 }
 
 // src/adapters/mcp/socket.ts
@@ -16650,7 +16854,7 @@ function connectSocketGateway(path, ownerUid, hostIn = process.stdin, hostOut = 
   return new Promise((resolve4) => {
     const socket = createConnection(resolved);
     let settled = false;
-    let hostEnded = false;
+    let hostEnded = hostIn.readableEnded;
     let connected = false;
     let status = null;
     let buffer = Buffer.alloc(0);
@@ -16662,18 +16866,28 @@ function connectSocketGateway(path, ownerUid, hostIn = process.stdin, hostOut = 
       settled = true;
       if (flushTimer !== null) clearTimeout(flushTimer);
       if (reason !== void 0) log(reason);
+      hostIn.off("end", onHostEnd);
+      hostIn.off("close", onHostClose);
+      hostIn.off("error", onHostError);
       hostIn.unpipe(socket);
       socket.destroy();
       resolve4(code);
     };
-    hostIn.once("end", () => {
+    const onHostEnd = () => {
       hostEnded = true;
       if (connected) socket.end();
-    });
+    };
+    const onHostClose = () => {
+      if (!hostEnded) finish(1, "host input closed unexpectedly");
+    };
+    const onHostError = (error) => finish(1, `host input failed: ${error.message}`);
+    hostIn.once("end", onHostEnd);
+    hostIn.once("close", onHostClose);
+    hostIn.on("error", onHostError);
     socket.on("connect", () => {
       connected = true;
       if (hostEnded) socket.end();
-      else hostIn.pipe(socket);
+      else hostIn.pipe(socket, { end: false });
     });
     socket.on("data", (chunk) => {
       buffer = Buffer.concat([buffer, chunk]);
@@ -16731,6 +16945,7 @@ function connectSocketGateway(path, ownerUid, hostIn = process.stdin, hostOut = 
       else socketClosed = true;
     });
     hostOut.on("error", (error) => finish(1, `host output failed: ${error.message}`));
+    if (hostIn.destroyed) onHostClose();
   });
 }
 function socketPathForClient(path, ownerUid) {
@@ -17201,11 +17416,13 @@ function explain(policy) {
       `Tools: ${tools.map(([tool, effects]) => `${tool} counts as ${effects.join(" and ") || "nothing (refused)"}`).join("; ")}. This classifies a tool, it does not allow it: a tool whose class is not granted above is still refused.`
     );
   }
-  if (policy.blockedTools.length > 0) {
-    lines.push(`Blocked tools: ${policy.blockedTools.join(", ")}. These calls are refused even if their effects are granted; no approval lifts the refusal.`);
+  const blockedTools = policy.blockedTools ?? [];
+  if (blockedTools.length > 0) {
+    lines.push(`Blocked tools: ${blockedTools.join(", ")}. These calls are refused even if their effects are granted; no approval lifts the refusal.`);
   }
-  if (policy.allowedTools !== null) {
-    lines.push(policy.allowedTools.length === 0 ? "Allowed tools: none. Every tool call is refused; no approval lifts the refusal." : `Allowed tools: ${policy.allowedTools.join(", ")}. Only these exact names reach the other checks; no approval lifts a refusal for an unlisted tool.`);
+  const allowedTools = policy.allowedTools;
+  if (allowedTools !== void 0 && allowedTools !== null) {
+    lines.push(allowedTools.length === 0 ? "Allowed tools: none. Every tool call is refused; no approval lifts the refusal." : `Allowed tools: ${allowedTools.join(", ")}. Only these exact names reach the other checks; no approval lifts a refusal for an unlisted tool.`);
   }
   for (const [tool, roles] of Object.entries(policy.arguments)) {
     for (const [field3, role] of Object.entries(roles)) {
@@ -17411,7 +17628,7 @@ notify:
 }
 
 // src/diagnostics/probe.ts
-import { closeSync, constants as constants4, fstatSync, lstatSync as lstatSync3, openSync, readSync } from "node:fs";
+import { closeSync as closeSync2, constants as constants5, fstatSync as fstatSync2, lstatSync as lstatSync3, openSync as openSync2, readSync } from "node:fs";
 import { join as join16 } from "node:path";
 function recordedRefusal(events, tool, path, policy) {
   return events.some(
@@ -17422,15 +17639,15 @@ function allowedMarker(path, id) {
   const stat = lstatSync3(path, { throwIfNoEntry: false });
   if (!stat) return "absent";
   if (!stat.isFile()) return "mismatch";
-  const fd = openSync(path, constants4.O_RDONLY | constants4.O_NOFOLLOW | constants4.O_NONBLOCK);
+  const fd = openSync2(path, constants5.O_RDONLY | constants5.O_NOFOLLOW | constants5.O_NONBLOCK);
   try {
-    if (!fstatSync(fd).isFile()) return "mismatch";
+    if (!fstatSync2(fd).isFile()) return "mismatch";
     const bytes = Buffer.alloc(id.length + 3);
     const read = readSync(fd, bytes, 0, bytes.length, 0);
     const value = bytes.toString("utf8", 0, read);
     return [id, id + "\n", id + "\r\n"].includes(value) ? "matched" : "mismatch";
   } finally {
-    closeSync(fd);
+    closeSync2(fd);
   }
 }
 function pairedProbe(harness, id, start, events, policyAtCheck, reportedHostVersion) {
@@ -17771,7 +17988,7 @@ function doctor(home = cordonHome()) {
     );
   }
   return {
-    policySource: existsSync3(path) ? path : "default",
+    policySource: existsSync2(path) ? path : "default",
     mode: policy.mode,
     effects: [...policy.profile.effects],
     warnings,
@@ -17794,7 +18011,7 @@ function pinnedServers(home) {
 }
 function writable(dir) {
   try {
-    accessSync4(dir, constants5.W_OK);
+    accessSync4(dir, constants6.W_OK);
     return true;
   } catch {
     return false;
@@ -17977,7 +18194,7 @@ ${USAGE}
   }
   const home = cordonHome();
   const path = join17(home, "policy.yaml");
-  if (existsSync3(path) && !args.includes("--force")) {
+  if (existsSync2(path) && !args.includes("--force")) {
     process.stdout.write(`${path} already exists; nothing was written. Pass --force to replace it
 `);
     return 1;
@@ -18212,7 +18429,7 @@ then approve with: cordon approve ${id} --read
   let approved;
   let failure3 = "the question expired or was retired while it was being approved";
   try {
-    approved = store.approve(id);
+    approved = store.approve(id, request.instance);
   } catch (error) {
     approved = null;
     failure3 = `the approval could not be written (${error.message})`;

@@ -45,6 +45,30 @@ describe('ApprovalStore: one approval, one call', () => {
     expect(approvals.take(id, '').taken).toBe(false)
   })
 
+  it('reports a used request left on disk after interrupted cleanup', () => {
+    const home = mkdtempSync(join(tmpdir(), 'cordon-approvals-'))
+    const approvals = new ApprovalStore(home)
+    const call = { tool: 'save_note', args: { title: 'Daily notes' } }
+    const id = approvalId('s', call)
+    const request = { ...call, reason: 'review' }
+    approvals.request(id, request)
+    const first = approvals.waiting(id)!
+    // A process can stop after recording retirement and before removing the request.
+    writeFileSync(join(home, 'approvals', `${id}.used.${first.instance}`), '', { mode: 0o600 })
+    expect(approvals.waiting(id)).toBeNull()
+    expect(() => approvals.request(id, request)).toThrow(/approval question.*unavailable/)
+    expect(existsSync(approvals.pendingPath(id))).toBe(true)
+    expect(approvals.approve(id)).toBeNull()
+
+    const past = new Date(Date.now() - APPROVAL_TTL_MS - 1000)
+    utimesSync(approvals.pendingPath(id), past, past)
+    approvals.request(id, request)
+    expect(approvals.waiting(id)?.instance).not.toBe(first.instance)
+    expect(approvals.approve(id)).not.toBeNull()
+    expect(approvals.take(id, '').taken).toBe(true)
+    expect(approvals.take(id, '').taken).toBe(false)
+  })
+
   it('a damaged approval without its nonce cannot authorize the call', () => {
     const approvals = store()
     const id = approvalId('s', CALL)
@@ -121,14 +145,71 @@ describe('ApprovalStore: what both reviews found', () => {
     expect(approvals.approve(id)).not.toBeNull()
   })
 
+  it('a fresh grant expires with the specific question it answers', () => {
+    const approvals = store()
+    const id = approvalId('s', CALL)
+    approvals.request(id, { tool: CALL.tool, reason: 'first review' })
+    expect(approvals.approve(id)).not.toBeNull()
+    const old = new Date(Date.now() - APPROVAL_TTL_MS - 1000)
+    utimesSync(approvals.pendingPath(id), old, old)
+    approvals.request(id, { tool: CALL.tool, reason: 'second review' })
+    expect(approvals.take(id, '').taken).toBe(false)
+    expect(approvals.waiting(id)?.reason).toBe('second review')
+  })
+
+  it('approves only the request the CLI had already inspected', () => {
+    const approvals = store()
+    const id = approvalId('s', CALL)
+    approvals.request(id, { tool: CALL.tool, reason: 'first review' })
+    const inspected = approvals.waiting(id)!
+    const old = new Date(Date.now() - APPROVAL_TTL_MS - 1000)
+    utimesSync(approvals.pendingPath(id), old, old)
+    approvals.request(id, { tool: CALL.tool, reason: 'second review' })
+    expect(approvals.approve(id, inspected.instance)).toBeNull()
+    expect(approvals.take(id, '').taken).toBe(false)
+    expect(approvals.approve(id)?.reason).toBe('second review')
+  })
+
+  it('does not cancel a renewed question on behalf of an earlier waiter', () => {
+    const approvals = store()
+    const id = approvalId('s', CALL)
+    approvals.request(id, { tool: CALL.tool, reason: 'first review' })
+    const first = approvals.waiting(id)!
+    const old = new Date(Date.now() - APPROVAL_TTL_MS - 1000)
+    utimesSync(approvals.pendingPath(id), old, old)
+    approvals.request(id, { tool: CALL.tool, reason: 'second review' })
+    expect(approvals.approve(id)?.reason).toBe('second review')
+    expect(approvals.hasApproval(id, first.instance)).toBe(false)
+    expect(approvals.cancel(id, first.instance)).toBeNull()
+    expect(approvals.hasApproval(id)).toBe(true)
+  })
+
+  it('can freshly approve a pending request written before instance-bound grants', () => {
+    const home = mkdtempSync(join(tmpdir(), 'cordon-approvals-'))
+    const approvals = new ApprovalStore(home)
+    const id = approvalId('s', CALL)
+    const request = { tool: CALL.tool, reason: 'review' }
+    approvals.request(id, request)
+    writeFileSync(approvals.pendingPath(id), JSON.stringify({
+      ...request, at: new Date().toISOString(), args: '{}', binding: '',
+    }), { mode: 0o600 })
+    writeFileSync(join(home, 'approvals', `${id}.approved`), '\n' + 'ca'.repeat(8), { mode: 0o600 })
+
+    expect(approvals.hasApproval(id)).toBe(false)
+    expect(approvals.take(id, '').taken).toBe(false)
+    const waiting = approvals.waiting(id)!
+    expect(approvals.approve(id, waiting.instance)).toMatchObject(request)
+    expect(approvals.take(id, '').taken).toBe(true)
+  })
+
   it('a stale approval does not survive the renewal of its request', () => {
     const approvals = store()
     const id = approvalId('s', CALL)
     approvals.request(id, { tool: CALL.tool, reason: 'r' })
     approvals.approve(id)
     const old = new Date(Date.now() - APPROVAL_TTL_MS - 1000)
-    utimesSync(approvals.pendingPath(id), old, old)
     utimesSync(approvals.approvedPath(id), old, old)
+    utimesSync(approvals.pendingPath(id), old, old)
     approvals.request(id, { tool: CALL.tool, reason: 'r' })
     expect(approvals.take(id, '').taken).toBe(false)
   })
@@ -203,11 +284,12 @@ describe('ApprovalStore: old questions are swept', () => {
     approvals.request(old.slice(0, 16), { tool: CALL.tool, reason: 'r', binding: old })
     approvals.approve(old.slice(0, 16))
     const past = new Date(Date.now() - APPROVAL_TTL_MS - 60_000)
+    const approved = approvals.approvedPath(old.slice(0, 16))
     utimesSync(approvals.pendingPath(old.slice(0, 16)), past, past)
-    utimesSync(approvals.approvedPath(old.slice(0, 16)), past, past)
+    utimesSync(approved, past, past)
     const fresh = 'b'.repeat(64)
     approvals.request(fresh.slice(0, 16), { tool: CALL.tool, reason: 'r', binding: fresh })
     expect(existsSync(approvals.pendingPath(old.slice(0, 16)))).toBe(false)
-    expect(existsSync(approvals.approvedPath(old.slice(0, 16)))).toBe(false)
+    expect(existsSync(approved)).toBe(false)
   })
 })

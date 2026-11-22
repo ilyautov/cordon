@@ -2,9 +2,7 @@ import { mkdtempSync, readFileSync, readdirSync, existsSync, writeFileSync } fro
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { Cordon } from '../src/cordon.js'
-import type { Source } from '../src/core/types.js'
-import { DEFAULT_POLICY, type Policy } from '../src/policy/defaults.js'
+import { Cordon, DEFAULT_POLICY, type Policy, type Source } from '../src/index.js'
 import { SessionStore } from '../src/session/store.js'
 import { policyHash } from '../src/policy/hash.js'
 
@@ -19,6 +17,39 @@ function make(overrides: Partial<Policy> = {}) {
   const policy: Policy = { ...base, ...overrides }
   return { cordon: new Cordon({ policy, cordonHome: home }), log }
 }
+
+describe('Cordon: tool blocks in the public policy API', () => {
+  it('accepts a policy created before the tool block list existed', () => {
+    const { blockedTools: _blockedTools, ...policy } = structuredClone(DEFAULT_POLICY)
+    const cordonHome = mkdtempSync(join(tmpdir(), 'cordon-legacy-policy-'))
+    const cordon = new Cordon({ policy, cordonHome })
+
+    expect(cordon.gate({ tool: 'Read', args: { file_path: 'notes.txt' } })).toEqual({ kind: 'allow' })
+  })
+
+  it('keeps explicitly blocked tools refused on the unattended path', () => {
+    const { cordon } = make({ mode: 'interactive', blockedTools: ['wb_reply'] })
+
+    const decision = cordon.gateUnattended({ tool: 'wb_reply', args: {} })
+
+    expect(decision).toMatchObject({ kind: 'deny', rule: 'tool-blocked' })
+    expect(decision).not.toHaveProperty('approvalId')
+  })
+
+  it.each([
+    { declaration: 'Write' },
+    { declaration: null },
+    { declaration: ['Write', null] },
+    { declaration: [' '] },
+    { declaration: new Array<string>(1) },
+  ])('fails closed for a malformed tool block list ($declaration)', ({ declaration }) => {
+    const { cordon } = make({ blockedTools: declaration as unknown as Policy['blockedTools'] })
+
+    expect(cordon.gate({ tool: 'Read', args: { file_path: 'notes.txt' } })).toMatchObject({
+      kind: 'deny', rule: 'failure',
+    })
+  })
+})
 
 describe('Cordon: the scenario of replying to reviews automatically', () => {
   const attack = [

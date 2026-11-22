@@ -1,6 +1,6 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 import { createHash, randomBytes } from 'node:crypto'
-import { accessSync, constants, existsSync } from 'node:fs'
+import { accessSync, constants } from 'node:fs'
 import { join } from 'node:path'
 import { createInterface } from 'node:readline'
 import type { Readable, Writable } from 'node:stream'
@@ -15,7 +15,7 @@ import { classifySource } from '../../provenance/trust.js'
 import { APPROVAL_TTL_MS, ApprovalStore } from '../../session/approvals.js'
 import { extractText, replaceText } from '../../output/tool-text.js'
 import { sanitize } from '../../sanitize/index.js'
-import { parseError, parseLine, pendingKey, toolError, type Message } from './jsonrpc.js'
+import { parseError, parseLine, pendingKey, toolError, type JsonRpcId, type Message } from './jsonrpc.js'
 
 export interface GatewayOptions {
   /** The upstream server command: `cordon mcp -- npx server-x` gives ['npx', 'server-x']. */
@@ -38,8 +38,16 @@ export interface GatewayOptions {
   log?: (line: string) => void
 }
 
+interface ProgressState {
+  token: string | number
+  requests: number
+  last?: number
+  suppressed?: true
+}
+
 interface Pending {
   method: string
+  progress?: ProgressState
   /** The gated call, kept for a tools/call: the result's source is named by it. */
   call?: ToolCall
   /** The request's own name for the content, for resources/read and prompts/get. */
@@ -53,7 +61,6 @@ interface Pending {
 const HOST_REQUEST_METHODS = new Set([
   'initialize', 'server/discover', 'ping', 'tools/list',
   'resources/list', 'resources/templates/list', 'resources/read',
-  'resources/subscribe', 'resources/unsubscribe',
   'prompts/list', 'prompts/get', 'completion/complete', 'logging/setLevel',
 ])
 
@@ -61,9 +68,11 @@ const HOST_REQUEST_METHODS = new Set([
 // must use the same certificate, exact-name list and exposure decision as a
 // tools/call; connection discovery remains available so a runner can load.
 const GATED_HOST_METHODS = new Set([
-  'resources/read', 'resources/subscribe', 'resources/unsubscribe',
+  'resources/read',
   'prompts/get', 'completion/complete', 'logging/setLevel',
 ])
+
+const RESERVED_TOOL_NAMES = new Set([...GATED_HOST_METHODS, 'resources/subscribe', 'resources/unsubscribe'])
 
 function forwardableHostNotification(message: Extract<Message, { type: 'notification' }>): boolean {
   if (message.value['jsonrpc'] !== '2.0' ||
@@ -101,12 +110,15 @@ export function runGateway(options: GatewayOptions): Promise<number> {
   return new Promise((resolve) => {
     let settled = false
     let upstream: ChildProcess | null = null
-    const reviewTimers = new Map<string, { timer: NodeJS.Timeout; approvalId: string; requestId: string | number }>()
-    let cancelWaiting: ((id: string, reason: string) => void) | null = null
+    let closeReaders: (() => void) | undefined
+    const reviewTimers = new Map<string, {
+      timer: NodeJS.Timeout; approvalId: string; instance: string; requestId: string | number
+    }>()
+    let cancelWaiting: ((id: string, reason: string, instance: string) => void) | null = null
 
-    const retireIfLastWaiter = (id: string, reason: string): void => {
-      if ([...reviewTimers.values()].some((held) => held.approvalId === id)) return
-      cancelWaiting?.(id, reason)
+    const retireIfLastWaiter = (id: string, instance: string, reason: string): void => {
+      if ([...reviewTimers.values()].some((held) => held.approvalId === id && held.instance === instance)) return
+      cancelWaiting?.(id, reason, instance)
     }
 
     // Every exit runs through here, exactly once. Killing the upstream on the
@@ -116,10 +128,10 @@ export function runGateway(options: GatewayOptions): Promise<number> {
     const finish = (code: number, reason?: string): void => {
       if (settled) return
       settled = true
-      for (const { timer, approvalId } of reviewTimers.values()) {
+      for (const { timer, approvalId, instance } of reviewTimers.values()) {
         clearInterval(timer)
         try {
-          cancelWaiting?.(approvalId, 'the MCP gateway stopped before the owner answered')
+          cancelWaiting?.(approvalId, 'the MCP gateway stopped before the owner answered', instance)
         } catch (error) {
           // The host has already lost this gateway. Never resume a held call;
           // report the failed cleanup on the loud channel.
@@ -127,6 +139,7 @@ export function runGateway(options: GatewayOptions): Promise<number> {
         }
       }
       reviewTimers.clear()
+      closeReaders?.()
       if (reason !== undefined) log(reason)
       if (upstream !== null && upstream.exitCode === null && !upstream.killed) upstream.kill()
       resolve(code)
@@ -171,7 +184,7 @@ export function runGateway(options: GatewayOptions): Promise<number> {
       finish(1, `the session state is broken: ${(error as Error).message}`)
       return
     }
-    cancelWaiting = (id, reason) => cordon.cancelUnattendedApproval(id, reason)
+    cancelWaiting = (id, reason, instance) => cordon.cancelUnattendedApproval(id, reason, instance)
 
     // The certificate is the profile for the whole run — there is no user
     // message to widen or narrow it. What the policy can still carry is the
@@ -209,6 +222,26 @@ export function runGateway(options: GatewayOptions): Promise<number> {
     }
 
     const pending = new Map<string, Pending>()
+    const activeProgress = new Map<string | number, ProgressState>()
+    const forwardRequest: ForwardRequest = (id, entry, request) => {
+      const token = asRecord(asRecord(request['params'])?.['_meta'])?.['progressToken']
+      if (isProgressToken(token)) {
+        const current = activeProgress.get(token)
+        if (current === undefined) {
+          const progress: ProgressState = { token, requests: 1 }
+          activeProgress.set(token, progress)
+          entry.progress = progress
+        } else {
+          // An in-flight token identifies one request. Once reused, withhold
+          // its progress until both responses settle, even if one arrives first.
+          current.requests += 1
+          current.suppressed = true
+          entry.progress = current
+        }
+      }
+      pending.set(pendingKey(id), entry)
+      sendUpstream(request)
+    }
 
     const onHostLine = (line: string): void => {
       if (settled) return
@@ -242,9 +275,11 @@ export function runGateway(options: GatewayOptions): Promise<number> {
             if (held !== undefined) {
               clearInterval(held.timer)
               reviewTimers.delete(key)
-              retireIfLastWaiter(held.approvalId, 'the host cancelled its MCP request')
+              retireIfLastWaiter(held.approvalId, held.instance, 'the host cancelled its MCP request')
               return
             }
+            const progress = pending.get(key)?.progress
+            if (progress !== undefined) progress.suppressed = true
           }
         }
         // Only known lifecycle and cancellation notifications reach the
@@ -262,22 +297,26 @@ export function runGateway(options: GatewayOptions): Promise<number> {
       }
 
       if (message.method === 'tools/call') {
-        gateCall(message, cordon, options.policy, pending, sendToHost, sendUpstream,
+        gateCall(message, cordon, options.policy, forwardRequest, sendToHost,
           approvalWaitMs === 0 ? undefined : (approvalId, reason) => {
-            const key = pendingKey(message.id)
-            if (reviewTimers.has(key)) throw new Error(`a second review is waiting under request ${key}`)
             const approvals = new ApprovalStore(options.cordonHome)
+            const question = approvals.waiting(approvalId)
+            if (question === null) {
+              sendToHost(toolError(message.id, 'Cordon refused the call because its approval question is no longer pending.'))
+              return
+            }
+            const { instance } = question
             const deadline = Date.now() + approvalWaitMs
             const timer = setInterval(() => {
               try {
                 if (Date.now() >= deadline) {
                   clearInterval(timer)
                   reviewTimers.delete(key)
-                  retireIfLastWaiter(approvalId, 'the owner did not approve before the wait ended')
+                  retireIfLastWaiter(approvalId, instance, 'the owner did not approve before the wait ended')
                   sendToHost(toolError(message.id, `Cordon approval wait timed out for ${message.method}: ${reason}`))
                   return
                 }
-                if (!existsSync(approvals.approvedPath(approvalId))) return
+                if (!approvals.hasApproval(approvalId, instance)) return
                 // The host may have timed out without cancelling the request.
                 // A late approval can only tell the model to retry; it cannot
                 // execute a side effect after the host stopped waiting. The
@@ -286,7 +325,7 @@ export function runGateway(options: GatewayOptions): Promise<number> {
                 // their waiters together, so one host cancellation cannot
                 // revoke a retry instruction already sent to another.
                 for (const [waitingKey, held] of reviewTimers) {
-                  if (held.approvalId !== approvalId) continue
+                  if (held.approvalId !== approvalId || held.instance !== instance) continue
                   clearInterval(held.timer)
                   reviewTimers.delete(waitingKey)
                   sendToHost(toolError(held.requestId,
@@ -299,7 +338,7 @@ export function runGateway(options: GatewayOptions): Promise<number> {
                 finish(1, `approval wait failed: ${(error as Error).message}`)
               }
             }, Math.min(25, approvalWaitMs))
-            reviewTimers.set(key, { timer, approvalId, requestId: message.id })
+            reviewTimers.set(key, { timer, approvalId, instance, requestId: message.id })
           })
         return
       }
@@ -326,8 +365,7 @@ export function runGateway(options: GatewayOptions): Promise<number> {
       if (message.method === 'prompts/get' && typeof params?.['name'] === 'string') {
         entry.label = params['name']
       }
-      pending.set(pendingKey(message.id), entry)
-      sendUpstream(forwarded)
+      forwardRequest(message.id, entry, forwarded)
     }
 
     const onUpstreamLine = (line: string): void => {
@@ -363,7 +401,7 @@ export function runGateway(options: GatewayOptions): Promise<number> {
         return
       }
       if (message.type === 'notification') {
-        const observed = observeServerNotification(message.value, message.method, cordon, options.policy)
+        const observed = observeServerNotification(message.value, message.method, cordon, options.policy, activeProgress)
         if (observed === null) log('unsupported server notification was withheld')
         else sendToHost(observed)
         return
@@ -377,6 +415,11 @@ export function runGateway(options: GatewayOptions): Promise<number> {
         // A duplicate response is also a protocol break, so stop loudly.
         finish(1, 'unsolicited upstream response without a matching host request')
         return
+      }
+      const progress = entry.progress
+      if (progress !== undefined) {
+        progress.requests -= 1
+        if (progress.requests === 0) activeProgress.delete(progress.token)
       }
 
       if (Object.hasOwn(message.value, 'error')) {
@@ -457,7 +500,12 @@ export function runGateway(options: GatewayOptions): Promise<number> {
       sendToHost(observeOtherResponse(message.value, entry.method, cordon, options.policy))
     }
 
+    const inputClosed = (): void => {
+      if (!hostIn.readableEnded) finish(1, 'host input closed unexpectedly')
+    }
+    hostIn.once('close', inputClosed)
     const hostLines = createInterface({ input: hostIn, terminal: false })
+    hostLines.on('error', (error: Error) => finish(1, `host input failed: ${error.message}`))
     hostLines.on('line', (line) => {
       if (line.trim() === '') return
       try {
@@ -480,6 +528,12 @@ export function runGateway(options: GatewayOptions): Promise<number> {
     })
 
     const upstreamLines = createInterface({ input: child.stdout!, terminal: false })
+    upstreamLines.on('error', (error: Error) => finish(1, `upstream output failed: ${error.message}`))
+    closeReaders = () => {
+      hostIn.off('close', inputClosed)
+      hostLines.close()
+      upstreamLines.close()
+    }
     upstreamLines.on('line', (line) => {
       if (line.trim() === '') return
       try {
@@ -488,6 +542,7 @@ export function runGateway(options: GatewayOptions): Promise<number> {
         finish(1, `a failure while handling the upstream's message: ${(error as Error).message}`)
       }
     })
+    if (hostIn.destroyed) inputClosed()
   })
 }
 
@@ -507,7 +562,8 @@ function gateHostMethod(
     return null
   }
 
-  const decision = cordon.gateUnattended({ tool: message.method, args: params })
+  const { _meta, ...args } = params
+  const decision = cordon.gateUnattended({ tool: message.method, args })
   if (decision.kind !== 'allow') {
     // A read method has no CallToolResult notice slot for a narrowed request.
     // Refusing a rewrite keeps the host's requested URI or prompt identity
@@ -521,10 +577,9 @@ function gateHostMethod(
     return null
   }
 
-  const meta = asRecord(params['_meta'])
-  const progressToken = meta?.['progressToken']
+  const progressToken = asRecord(_meta)?.['progressToken']
   return { jsonrpc: '2.0', id: message.id, method: message.method, params: {
-    ...Object.fromEntries(Object.entries(params).filter(([key]) => key !== '_meta')),
+    ...args,
     ...(typeof progressToken === 'string' || typeof progressToken === 'number'
       ? { _meta: { progressToken } } : {}),
   } }
@@ -551,6 +606,8 @@ function validHostMethodParams(method: string, params: Record<string, unknown>):
   return typeof params['uri'] === 'string' && params['uri'] !== ''
 }
 
+type ForwardRequest = (id: JsonRpcId, entry: Pending, request: Record<string, unknown>) => void
+
 /**
  * The decision on a tools/call. The call is gated BEFORE the upstream sees
  * it: a refused call never reaches the server, and the refusal is answered
@@ -567,9 +624,8 @@ function gateCall(
   message: Extract<Message, { type: 'request' }>,
   cordon: Cordon,
   policy: Policy,
-  pending: Map<string, Pending>,
+  forwardRequest: ForwardRequest,
   sendToHost: (message: Record<string, unknown>) => void,
-  sendUpstream: (message: Record<string, unknown>) => void,
   waitForApproval?: (id: string, reason: string) => void,
 ): void {
   const params = asRecord(message.params)
@@ -584,6 +640,11 @@ function gateCall(
     return
   }
   const name = params['name'] as string
+  // Protocol declarations must not also authorize an upstream namesake tool.
+  if (RESERVED_TOOL_NAMES.has(name)) {
+    sendToHost(toolError(message.id, 'Cordon reserved this name for an MCP protocol method.'))
+    return
+  }
   const call: ToolCall = { tool: name, args: asRecord(params['arguments']) ?? {} }
   const progressToken = meta?.['progressToken']
   // The core reviews exactly the arguments sent upstream. Vendor metadata
@@ -608,14 +669,12 @@ function gateCall(
   }
 
   if (decision.kind === 'rewrite') {
-    pending.set(pendingKey(message.id), { method: message.method, call, notice: rewriteNotice(decision) })
     // The forwarded request is reserialized: the original line carries the
     // arguments the model wrote, and they are exactly what was cut.
-    sendUpstream(forwarded(decision.args))
+    forwardRequest(message.id, { method: message.method, call, notice: rewriteNotice(decision) }, forwarded(decision.args))
     return
   }
-  pending.set(pendingKey(message.id), { method: message.method, call })
-  sendUpstream(forwarded(call.args))
+  forwardRequest(message.id, { method: message.method, call }, forwarded(call.args))
 }
 
 /**
@@ -655,13 +714,15 @@ function observeToolList(
   // held tool leaves the list the host receives, so the model never reads
   // the changed text; the core refuses a call to it by name. A damaged pin
   // file throws here, and the gateway stops loudly.
-  const named = listed
+  const eligible = listed.filter((tool) => !RESERVED_TOOL_NAMES.has(String(asRecord(tool)?.['name'])))
+  const named = eligible
     .map((tool) => asRecord(tool))
     .filter((tool): tool is Record<string, unknown> => tool !== null && typeof tool['name'] === 'string')
     .map((tool) => ({ name: tool['name'] as string, description: tool['description'], inputSchema: tool['inputSchema'],
-      title: tool['title'], annotations: tool['annotations'], outputSchema: tool['outputSchema'], icons: tool['icons'] }))
+      title: tool['title'], annotations: tool['annotations'], outputSchema: tool['outputSchema'], icons: tool['icons'],
+      _meta: tool['_meta'], execution: tool['execution'] }))
   const held = new Set(cordon.admitTools(command, named).map((tool) => tool.name))
-  const tools = listed.filter((tool) => !held.has(String(asRecord(tool)?.['name'])))
+  const tools = eligible.filter((tool) => !held.has(String(asRecord(tool)?.['name'])))
   value = { ...value, result: { ...result, tools } }
 
   for (const tool of tools) {
@@ -676,6 +737,11 @@ function observeToolList(
       // the resource fetched by the host, so withhold when cleaning is needed.
       const text = JSON.stringify(entry['icons'])
       if (cordon.observe(text, source).text !== text) return withholdUnreadableResponse(value, 'tools/list', source, cordon)
+    }
+    if (entry['_meta'] !== undefined) {
+      const observed = observeReadableResult(entry['_meta'], name, source, cordon, [])
+      if (observed === null) return withholdUnreadableResponse(value, 'tools/list', source, cordon)
+      entry['_meta'] = observed.value
     }
     const annotations = asRecord(entry['annotations'])
     if (annotations !== null && typeof annotations['title'] === 'string') {
@@ -717,7 +783,14 @@ function readableListedTool(value: unknown): boolean {
     Object.keys(entry).some((key) => !TOOL_ENTRY_KEYS.has(key)) ||
     (entry['description'] !== undefined && typeof entry['description'] !== 'string') ||
     (entry['title'] !== undefined && typeof entry['title'] !== 'string') ||
-    (entry['icons'] !== undefined && !readableIcons(entry['icons']))) return false
+    (entry['icons'] !== undefined && !readableIcons(entry['icons'])) ||
+    (entry['_meta'] !== undefined && asRecord(entry['_meta']) === null)) return false
+  if (entry['execution'] !== undefined) {
+    const execution = asRecord(entry['execution'])
+    if (execution === null || Object.keys(execution).some((key) => key !== 'taskSupport')) return false
+    const taskSupport = execution['taskSupport']
+    if (taskSupport !== undefined && taskSupport !== 'forbidden' && taskSupport !== 'optional' && taskSupport !== 'required') return false
+  }
   const input = asRecord(entry['inputSchema'])
   if (input === null || !readableSchemaText(input, 0)) return false
   if (entry['outputSchema'] !== undefined) {
@@ -844,7 +917,7 @@ function withNotice(value: Record<string, unknown>, notice: string): Record<stri
 
 const TOOL_RESULT_KEYS = new Set(['resultType', 'content', 'structuredContent', 'isError', '_meta'])
 const TOOL_LIST_KEYS = new Set(['resultType', 'tools', 'nextCursor', '_meta', 'ttlMs', 'cacheScope'])
-const TOOL_ENTRY_KEYS = new Set(['name', 'description', 'inputSchema', 'title', 'annotations', 'outputSchema', 'icons'])
+const TOOL_ENTRY_KEYS = new Set(['name', 'description', 'inputSchema', 'title', 'annotations', 'outputSchema', 'icons', '_meta', 'execution'])
 const TOOL_ANNOTATION_HINTS = new Set(['readOnlyHint', 'destructiveHint', 'idempotentHint', 'openWorldHint'])
 const RESPONSE_KEYS = new Set(['jsonrpc', 'id', 'result'])
 const INITIALIZE_KEYS = new Set(['protocolVersion', 'capabilities', 'serverInfo', 'instructions', '_meta'])
@@ -860,6 +933,7 @@ function observeServerNotification(
   method: string,
   cordon: Cordon,
   policy: Policy,
+  activeProgress: ReadonlyMap<string | number, ProgressState>,
 ): Record<string, unknown> | null {
   if (value['jsonrpc'] !== '2.0' || Object.keys(value).some((key) =>
     !['jsonrpc', 'method', 'params'].includes(key))) return null
@@ -870,6 +944,9 @@ function observeServerNotification(
       if (record === null || Object.keys(record).length > 0) return null
     }
     return { jsonrpc: '2.0', method, ...(params === undefined ? {} : { params }) }
+  }
+  if (method === 'notifications/progress') {
+    return observeProgress(asRecord(value['params']), activeProgress, cordon, policy)
   }
   if (method !== 'notifications/message') return null
   const params = asRecord(value['params'])
@@ -888,6 +965,44 @@ function observeServerNotification(
   return { jsonrpc: '2.0', method, params: observed.value }
 }
 
+function isProgressToken(value: unknown): value is string | number {
+  return typeof value === 'string' || (typeof value === 'number' && Number.isSafeInteger(value))
+}
+
+function observeProgress(
+  params: Record<string, unknown> | null,
+  activeProgress: ReadonlyMap<string | number, ProgressState>,
+  cordon: Cordon,
+  policy: Policy,
+): Record<string, unknown> | null {
+  if (params === null || Object.keys(params).some((key) =>
+    !['progressToken', 'progress', 'total', 'message', '_meta'].includes(key)) ||
+    (params['_meta'] !== undefined && asRecord(params['_meta']) === null)) return null
+  const { progressToken, progress, total, message } = params
+  if (!isProgressToken(progressToken) || typeof progress !== 'number' || !Number.isFinite(progress) ||
+    (total !== undefined && (typeof total !== 'number' || !Number.isFinite(total))) ||
+    (message !== undefined && typeof message !== 'string')) return null
+  const active = activeProgress.get(progressToken)
+  if (active === undefined || active.suppressed === true ||
+    (active.last !== undefined && progress <= active.last)) return null
+
+  // Only standard progress fields reach the host. Extension metadata has
+  // no safe role here, and even a human-readable message is server text.
+  const forwarded = { progressToken, progress,
+    ...(total === undefined ? {} : { total }), ...(message === undefined ? {} : { message }) }
+  const method = 'notifications/progress'
+  if (message !== undefined &&
+    !observeInto(forwarded, 'message', method, classifySource({ kind: 'mcp-description', label: method, tool: method }, policy), cordon)) return null
+  active.last = progress
+  return { jsonrpc: '2.0', method, params: forwarded }
+}
+
+/** Preserve resource reads and list changes without advertising subscriptions. */
+function removeSubscriptionCapability(result: Record<string, unknown>): void {
+  const resources = asRecord(asRecord(result['capabilities'])?.['resources'])
+  if (resources !== null) delete resources['subscribe']
+}
+
 /** The server can send model-facing instructions before the host lists any tools. */
 function observeInitialize(
   value: Record<string, unknown>,
@@ -904,6 +1019,7 @@ function observeInitialize(
     (result['instructions'] !== undefined && typeof result['instructions'] !== 'string')) {
     return withholdUnreadableResponse(value, 'initialize', source, cordon)
   }
+  removeSubscriptionCapability(result)
   const observed = observeReadableResult(result, 'initialize', source, cordon, [])
   if (observed === null) return withholdUnreadableResponse(value, 'initialize', source, cordon)
   return { jsonrpc: '2.0', id: value['id'], result: observed.value }
@@ -932,6 +1048,7 @@ function observeDiscover(
       result['cacheScope'] !== 'private')) {
     return withholdUnreadableResponse(value, 'server/discover', source, cordon)
   }
+  removeSubscriptionCapability(result)
   const observed = observeReadableResult(result, 'server/discover', source, cordon, [])
   if (observed === null) return withholdUnreadableResponse(value, 'server/discover', source, cordon)
   return { jsonrpc: '2.0', id: value['id'], result: observed.value }
@@ -1048,6 +1165,18 @@ function observeToolResult(
   return value
 }
 
+// Fixed field names are protocol structure. Other names may be shown to the
+// model just like values, and are observed as labels without renaming fields.
+const RESULT_STRUCTURE_KEYS = new Set([
+  'type', 'text', 'content', 'contents', 'structuredContent', '_meta', 'annotations',
+  'role', 'messages', 'uri', 'mimeType', 'blob', 'resource',
+  'name', 'title', 'description', 'instructions', 'version', 'protocolVersion',
+  'capabilities', 'serverInfo', 'supportedVersions', 'tools', 'resources',
+  'prompts', 'logging', 'completion', 'listChanged', 'subscribe',
+  'resultType', 'ttlMs', 'cacheScope', 'nextCursor', 'level', 'logger', 'data',
+  'progressToken', 'progress', 'total', 'message',
+])
+
 function observeReadableResult(
   value: unknown,
   tool: string,
@@ -1058,8 +1187,11 @@ function observeReadableResult(
 ): { value: unknown } | null {
   // An MCP server controls tool names. `Write` is textless in Claude Code,
   // but a server with that name can still return arbitrary readable data.
-  const extracted = extractText('', value)
+  const keys = new Set<string>()
+  const extracted = extractText('', value, false, keys)
   if (!extracted.known || (extracted.unseen && !allowUnseen)) return null
+  const labels = [...keys].filter((key) => !RESULT_STRUCTURE_KEYS.has(key)).join('\n')
+  if (labels !== '' && cordon.observe(labels, source, 'label').text !== labels) return null
   if (extracted.unseen) cordon.markUnredacted()
   let changed = false
   let substitutable = true

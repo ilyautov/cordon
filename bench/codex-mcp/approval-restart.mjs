@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { createInterface } from 'node:readline'
 import { fileURLToPath } from 'node:url'
+import { ApprovalStore } from '../../dist/session/approvals.js'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const BUNDLE = join(HERE, '../../plugin/dist/cli.js')
@@ -108,7 +109,7 @@ try {
     encoding: 'utf8',
     timeout: 10_000,
   })
-  const ownerApprovalRecorded = approved.status === 0 && existsSync(join(home, 'approvals', oldId + '.approved'))
+  const ownerApprovalRecorded = approved.status === 0 && new ApprovalStore(home).hasApproval(oldId)
   if (!ownerApprovalRecorded) throw new Error('the owner CLI did not record the old approval: ' + approved.stderr)
 
   second = await startGateway(home, log)
@@ -119,7 +120,7 @@ try {
     firstDraftHeld,
     ownerApprovalRecorded,
     retryHeldUnderNewId: secondReply.result?.isError === true && newId !== null && newId !== oldId,
-    oldApprovalUnspent: existsSync(join(home, 'approvals', oldId + '.approved')),
+    oldApprovalUnspent: new ApprovalStore(home).hasApproval(oldId),
     emailReachedServer,
   }) + '\n')
 } finally {

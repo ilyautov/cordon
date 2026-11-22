@@ -33,10 +33,13 @@ export interface Policy {
   }
   /** Effect classes for tools the core does not know about. */
   tools: Record<string, EffectClass[]>
-  /** Exact tool names refused even when their effect class is granted. */
-  blockedTools: string[]
-  /** Exact tool names permitted to reach later checks; null adds no name restriction, [] refuses every call. */
-  allowedTools: string[] | null
+  /** Exact tool names refused even when their effect class is granted. Omitted in older SDK policies. */
+  blockedTools?: string[]
+  /**
+   * Exact tool names permitted to reach later checks. Omission and null add no
+   * name restriction. An empty list refuses every call.
+   */
+  allowedTools?: string[] | null
   /** Sources declared trusted by an explicit decision of the user. */
   trustedSources: string[]
   /**

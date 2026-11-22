@@ -117,6 +117,7 @@ const MAX_TEXT = 8_000_000
 const TOKEN_LIMIT = 64
 
 interface Scan {
+  keys: Set<string> | undefined
   parts: Piece[]
   known: boolean
   nodes: number
@@ -169,14 +170,14 @@ const MEDIA_KEYS: ReadonlySet<string> = new Set(['blob', 'inlinedata', 'filedata
  * the whole shape unknown: that is exactly the text the model will read
  * uncleaned.
  */
-export function extractText(tool: string, response: unknown, textless = false): Extracted {
+export function extractText(tool: string, response: unknown, textless = false, keys?: Set<string>): Extracted {
   // Before the string case: Kimi and Codex report a write as a plain string
   // ("Wrote 1 bytes to notes.txt"), and read as content it marked the session
   // as having read something untrusted after every edit the model made.
   if (textless || TEXTLESS.has(tool)) return { known: true, parts: [], unseen: false, links: [], opaque: false }
   if (typeof response === 'string') return { known: true, parts: [{ text: response, content: true }], unseen: false, links: [], opaque: false }
 
-  const scan: Scan = { parts: [], known: true, nodes: 0, size: 0, unseen: false, links: [], opaque: false }
+  const scan: Scan = { keys, parts: [], known: true, nodes: 0, size: 0, unseen: false, links: [], opaque: false }
   visit(response, '', 0, scan)
   return scan.known
     ? { known: true, parts: scan.parts, unseen: scan.unseen, links: scan.links, opaque: scan.opaque }
@@ -243,6 +244,14 @@ function visit(node: unknown, key: string, depth: number, scan: Scan, media = fa
     const block = media || (typeof type === 'string' && MEDIA_TYPES.has(type.toLowerCase()))
     if (block) scan.unseen = true
     for (const [name, value] of Object.entries(node)) {
+      if (scan.keys !== undefined) {
+        scan.keys.add(name)
+        scan.size += name.length
+        if (scan.size > MAX_TEXT) {
+          scan.known = false
+          return
+        }
+      }
       const keyed = MEDIA_KEYS.has(fold(name))
       if (keyed) scan.unseen = true
       visit(value, name, depth + 1, scan, block || keyed)

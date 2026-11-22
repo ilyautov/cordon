@@ -116,13 +116,15 @@ export function explain(policy: Policy): string[] {
         'This classifies a tool, it does not allow it: a tool whose class is not granted above is still refused.',
     )
   }
-  if (policy.blockedTools.length > 0) {
-    lines.push(`Blocked tools: ${policy.blockedTools.join(', ')}. These calls are refused even if their effects are granted; no approval lifts the refusal.`)
+  const blockedTools = policy.blockedTools ?? []
+  if (blockedTools.length > 0) {
+    lines.push(`Blocked tools: ${blockedTools.join(', ')}. These calls are refused even if their effects are granted; no approval lifts the refusal.`)
   }
-  if (policy.allowedTools !== null) {
-    lines.push(policy.allowedTools.length === 0
+  const allowedTools = policy.allowedTools
+  if (allowedTools !== undefined && allowedTools !== null) {
+    lines.push(allowedTools.length === 0
       ? 'Allowed tools: none. Every tool call is refused; no approval lifts the refusal.'
-      : `Allowed tools: ${policy.allowedTools.join(', ')}. Only these exact names reach the other checks; no approval lifts a refusal for an unlisted tool.`)
+      : `Allowed tools: ${allowedTools.join(', ')}. Only these exact names reach the other checks; no approval lifts a refusal for an unlisted tool.`)
   }
 
   for (const [tool, roles] of Object.entries(policy.arguments)) {

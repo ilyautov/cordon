@@ -127,6 +127,14 @@ function held(call: ToolCall, ctx: GateContext, decision: Decision): Decision {
   return escalate(ctx, 'refusals', why)
 }
 
+function isToolNameList(value: unknown): boolean {
+  if (!Array.isArray(value)) return false
+  for (const name of value) {
+    if (typeof name !== 'string' || name.trim() === '') return false
+  }
+  return true
+}
+
 function decide(call: ToolCall, ctx: GateContext): Decision {
   if (typeof call?.tool !== 'string' || call.tool === '') {
     return { kind: 'deny', rule: 'malformed', reason: 'a call without a tool name' }
@@ -160,15 +168,25 @@ function decide(call: ToolCall, ctx: GateContext): Decision {
   // The owner can grant exec to a restricted runner without granting the
   // harness's native shell. This is a hard refusal, not an interactive question:
   // an approval would reopen the host path the owner meant to remove.
-  if (ctx.policy.blockedTools.includes(call.tool)) {
+  const blockedTools = ctx.policy.blockedTools
+  // The SDK also accepts programmatic policies, which may have skipped YAML validation.
+  if (blockedTools !== undefined && !isToolNameList(blockedTools)) {
+    return { kind: 'deny', rule: 'failure', reason: 'blockedTools must be a list of nonempty tool names' }
+  }
+  if (blockedTools?.includes(call.tool)) {
     return { kind: 'deny', rule: 'tool-blocked', reason: `tool ${call.tool} is blocked by the policy` }
   }
   // A runner-only policy must not depend on naming every native tool a future
   // harness release might add. This list narrows by exact name before an
   // interactive question can reopen an unlisted host path.
-  if (ctx.policy.allowedTools !== null &&
-    (!Array.isArray(ctx.policy.allowedTools) || !ctx.policy.allowedTools.includes(call.tool))) {
-    return { kind: 'deny', rule: 'tool-not-allowed', reason: `tool ${call.tool} is not on the policy's allowedTools list` }
+  const allowedTools = ctx.policy.allowedTools
+  if (allowedTools !== undefined && allowedTools !== null) {
+    if (!isToolNameList(allowedTools)) {
+      return { kind: 'deny', rule: 'failure', reason: 'allowedTools must be a list of nonempty tool names or null' }
+    }
+    if (!allowedTools.includes(call.tool)) {
+      return { kind: 'deny', rule: 'tool-not-allowed', reason: `tool ${call.tool} is not on the policy's allowedTools list` }
+    }
   }
 
   const parts = fields(own)

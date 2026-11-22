@@ -14,7 +14,7 @@ Web pages, emails, issues, documents, tool results and MCP tool descriptions can
 
 **Model-origin limit:** A modified model can request a harmful call before reading any outside content. Cordon can refuse that call under a restrictive policy, but it cannot verify model weights or contain what an allowed shell command does next. The [measured boundary](docs/model-origin-benchmark.md) and [restricted coding runbook](docs/restricted-coding.md) keep the gate and operating-system isolation separate.
 
-**Measured:** 2045 tests · 26 pinned attack vectors · 10 legitimate documents · 2 runtime dependencies.
+**Measured:** 2083 tests · 26 pinned attack vectors · 10 legitimate documents · 2 runtime dependencies.
 
 [Measured host versions and installation checks](docs/compatibility.md)
 

@@ -1,7 +1,7 @@
 import { existsSync, mkdtempSync, readdirSync, utimesSync, writeFileSync } from 'node:fs'
 import * as fs from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 
 let duringWrite: (() => void) | null = null
@@ -54,7 +54,25 @@ describe('ApprovalStore: approval publication', () => {
     store.request(id, { tool: 'send_email', reason: 'review', binding })
     expect(store.approve(id)).not.toBeNull()
     expect(store.approve(id)).not.toBeNull()
-    expect(readdirSync(join(home, 'approvals')).sort()).toEqual([`${id}.approved`, `${id}.request.json`])
+    expect(readdirSync(join(home, 'approvals')).sort()).toEqual([basename(store.approvedPath(id)), `${id}.request.json`])
+    expect(store.take(id, binding).taken).toBe(true)
+    expect(store.take(id, binding).taken).toBe(false)
+  })
+
+  it('keeps a renewed question and its approval when an old approval finishes late', () => {
+    const home = mkdtempSync(join(tmpdir(), 'cordon-approvals-'))
+    const store = new ApprovalStore(home)
+    const id = 'ab'.repeat(8)
+    const binding = 'ab'.repeat(32)
+    store.request(id, { tool: 'save_note', reason: 'first review', binding })
+    duringWrite = () => {
+      const past = new Date(Date.now() - APPROVAL_TTL_MS - 1000)
+      utimesSync(store.pendingPath(id), past, past)
+      store.request(id, { tool: 'save_note', reason: 'second review', binding })
+      expect(store.approve(id)?.reason).toBe('second review')
+    }
+    expect(store.approve(id)).toBeNull()
+    expect(store.waiting(id)?.reason).toBe('second review')
     expect(store.take(id, binding).taken).toBe(true)
     expect(store.take(id, binding).taken).toBe(false)
   })
