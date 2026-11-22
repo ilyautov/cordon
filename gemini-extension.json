@@ -1,5 +1,5 @@
 {
   "name": "cordon",
-  "version": "0.12.1",
+  "version": "0.13.0",
   "description": "A deterministic policy gate for observable AI agent actions, with no AI inside. For Claude Code, Codex CLI, Kimi Code, DeepSeek Harness, Gemini CLI, MCP hosts and LangChain."
 }
