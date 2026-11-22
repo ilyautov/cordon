@@ -1,0 +1,126 @@
+{
+  "date": "2026-11-23",
+  "host": "codex-cli 0.166.0",
+  "cordonCommit": "a801f07d3b3f1075b6c60257fe3b89125690774d",
+  "repository": "https://github.com/ilyautov/cordon-app42-lab-20261123-f9f48e",
+  "mergeApp": {
+    "id": 5879301,
+    "login": "cordon-app42-lab-f9f48e[bot]",
+    "bypass": false
+  },
+  "requiredStatus": {
+    "appId": 15368,
+    "context": "cordon-lab/exact-snapshot"
+  },
+  "cases": [
+    {
+      "case": "unchanged",
+      "pullRequest": "https://github.com/ilyautov/cordon-app42-lab-20261123-f9f48e/pull/1",
+      "trustedCi": "https://github.com/ilyautov/cordon-app42-lab-20261123-f9f48e/actions/runs/45072211370",
+      "reviewed": {
+        "headSha": "ea4b9e670e9b9fe90cef3689077931579d452131",
+        "baseRef": "target",
+        "baseSha": "ac071a3a7c8e5868b090db6d5df5e6b3520b21dd",
+        "diffSha256": "994fcbfb2b730598b90ce3e359152399725c07951f6b5d6651d5d9497d202d53"
+      },
+      "exitCode": 0,
+      "outcome": "merged",
+      "mergeSha": "da4235cadff9ac2e3938c6960c0ea337bc3b8d9a",
+      "mergedBy": "cordon-app42-lab-f9f48e[bot]",
+      "parents": [
+        "ac071a3a7c8e5868b090db6d5df5e6b3520b21dd",
+        "ea4b9e670e9b9fe90cef3689077931579d452131"
+      ],
+      "rulesSha256": "227af96e861ce49b7ab7241d25a1ebe11c19bba2112107661421df4b41679a92",
+      "approvalConsumed": true
+    },
+    {
+      "case": "head-sha",
+      "pullRequest": "https://github.com/ilyautov/cordon-app42-lab-20261123-f9f48e/pull/2",
+      "trustedCi": "https://github.com/ilyautov/cordon-app42-lab-20261123-f9f48e/actions/runs/45072211637",
+      "reviewed": {
+        "headSha": "10fbc0b29c62ab1bfa9640e3cc9448cc8e583513",
+        "baseRef": "target",
+        "baseSha": "ac071a3a7c8e5868b090db6d5df5e6b3520b21dd",
+        "diffSha256": "6c85234c9fca881a7402d087f87e80474047f70d9d1355d293bb5f268108332f"
+      },
+      "exitCode": 1,
+      "outcome": "refused",
+      "after": {
+        "headSha": "eb07fe25cc5eb67bb1ab7c77c9580f0180b72cd8",
+        "baseSha": "ac071a3a7c8e5868b090db6d5df5e6b3520b21dd",
+        "baseRef": "target"
+      },
+      "rulesBefore": "afebcc59bffcc68e50ecdb3b8d97c219e80c49293f212ea5a741f8c54073fe74",
+      "rulesAfter": "afebcc59bffcc68e50ecdb3b8d97c219e80c49293f212ea5a741f8c54073fe74",
+      "reason": "snapshot-changed",
+      "approvalUnspent": true
+    },
+    {
+      "case": "base-sha",
+      "pullRequest": "https://github.com/ilyautov/cordon-app42-lab-20261123-f9f48e/pull/3",
+      "trustedCi": "https://github.com/ilyautov/cordon-app42-lab-20261123-f9f48e/actions/runs/45072211696",
+      "reviewed": {
+        "headSha": "6468403b6d5ac879f0ec16c5248859924bbb11aa",
+        "baseRef": "target",
+        "baseSha": "ac071a3a7c8e5868b090db6d5df5e6b3520b21dd",
+        "diffSha256": "bcc375b1aa77e96793aa70cc2bea3eff92dc670f881cf9c2b98dcb853429bf5c"
+      },
+      "exitCode": 1,
+      "outcome": "refused",
+      "after": {
+        "headSha": "6468403b6d5ac879f0ec16c5248859924bbb11aa",
+        "baseSha": "da4235cadff9ac2e3938c6960c0ea337bc3b8d9a",
+        "baseRef": "target"
+      },
+      "rulesBefore": "227af96e861ce49b7ab7241d25a1ebe11c19bba2112107661421df4b41679a92",
+      "rulesAfter": "227af96e861ce49b7ab7241d25a1ebe11c19bba2112107661421df4b41679a92",
+      "reason": "snapshot-changed",
+      "approvalUnspent": true
+    },
+    {
+      "case": "base-ref",
+      "pullRequest": "https://github.com/ilyautov/cordon-app42-lab-20261123-f9f48e/pull/4",
+      "trustedCi": "https://github.com/ilyautov/cordon-app42-lab-20261123-f9f48e/actions/runs/45072211540",
+      "reviewed": {
+        "headSha": "e754d541cc556ee5953f7360b6df708b4728cddf",
+        "baseRef": "target",
+        "baseSha": "ac071a3a7c8e5868b090db6d5df5e6b3520b21dd",
+        "diffSha256": "1d1b538ea3550e4082650910cac14a2915316abf0b3915daa7d1b71f4e959045"
+      },
+      "exitCode": 1,
+      "outcome": "refused",
+      "after": {
+        "headSha": "e754d541cc556ee5953f7360b6df708b4728cddf",
+        "baseSha": "ac071a3a7c8e5868b090db6d5df5e6b3520b21dd",
+        "baseRef": "alternate"
+      },
+      "rulesBefore": "afebcc59bffcc68e50ecdb3b8d97c219e80c49293f212ea5a741f8c54073fe74",
+      "rulesAfter": "afebcc59bffcc68e50ecdb3b8d97c219e80c49293f212ea5a741f8c54073fe74",
+      "reason": "snapshot-changed",
+      "approvalUnspent": true
+    },
+    {
+      "case": "branch-protection",
+      "pullRequest": "https://github.com/ilyautov/cordon-app42-lab-20261123-f9f48e/pull/5",
+      "trustedCi": "https://github.com/ilyautov/cordon-app42-lab-20261123-f9f48e/actions/runs/45072211490",
+      "reviewed": {
+        "headSha": "c0183f049dd0089a6ca14166474a0bb91716ed20",
+        "baseRef": "target",
+        "baseSha": "ac071a3a7c8e5868b090db6d5df5e6b3520b21dd",
+        "diffSha256": "6145ddf4031f3704b3de11aff3651cac4a05621ee4e29e484dad00a3f2e41f1d"
+      },
+      "exitCode": 1,
+      "outcome": "refused",
+      "after": {
+        "headSha": "c0183f049dd0089a6ca14166474a0bb91716ed20",
+        "baseSha": "ac071a3a7c8e5868b090db6d5df5e6b3520b21dd",
+        "baseRef": "target"
+      },
+      "rulesBefore": "afebcc59bffcc68e50ecdb3b8d97c219e80c49293f212ea5a741f8c54073fe74",
+      "rulesAfter": "227af96e861ce49b7ab7241d25a1ebe11c19bba2112107661421df4b41679a92",
+      "reason": "GitHub branch protection changed since review",
+      "approvalUnspent": true
+    }
+  ]
+}
