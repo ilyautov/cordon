@@ -1,5 +1,6 @@
 import { isAbsolute, sep } from 'node:path'
 import type { EffectClass, ToolCall } from '../../core/types.js'
+import type { Policy } from '../../policy/defaults.js'
 import { CODEX_BUILTIN, DEEPSEEK_BUILTIN, KIMI_BUILTIN } from '../../scope/effects.js'
 import { readPatch } from '../../scope/patch.js'
 
@@ -170,4 +171,10 @@ export const DEEPSEEK: Dialect = {
     || (call.tool === 'str_replace_editor' && typeof call.args.command === 'string' && EDITS.has(call.args.command)),
   builtin: DEEPSEEK_BUILTIN,
   translate: asIs,
+}
+
+export function policyForDialect(policy: Policy, dialect: Dialect): Policy {
+  // The owner's declarations override the harness defaults in both the hook and its diagnostics.
+  if (Object.keys(dialect.builtin).length === 0) return policy
+  return { ...policy, tools: { ...dialect.builtin, ...policy.tools } }
 }

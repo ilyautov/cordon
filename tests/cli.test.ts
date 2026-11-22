@@ -3,7 +3,7 @@ import { ensureBuiltCli } from './support/built-cli.js'
 import { PinStore } from '../src/session/pins.js'
 import { ApprovalStore, approvalId } from '../src/session/approvals.js'
 import { spawnSync } from 'node:child_process'
-import { chmodSync, readFileSync, writeFileSync, mkdtempSync } from 'node:fs'
+import { chmodSync, mkdirSync, readFileSync, realpathSync, writeFileSync, mkdtempSync } from 'node:fs'
 import { tmpdir, userInfo } from 'node:os'
 import { dirname, join } from 'node:path'
 
@@ -16,8 +16,10 @@ function run(
   args: string[],
   input?: string,
   env?: Record<string, string>,
+  cwd?: string,
 ): { stdout: string; stderr: string; status: number } {
   const result = spawnSync('node', [CLI, ...args], {
+    cwd,
     input: input ?? '',
     encoding: 'utf8',
     env: { ...process.env, ...env },
@@ -259,6 +261,108 @@ describe('CORDON_HOME with a leading tilde', () => {
     const user = mkdtempSync(join(tmpdir(), 'cordon-tilde-'))
     const { stdout } = run(['doctor'], '', { HOME: user, CORDON_HOME: '~/.cordon-pinned' })
     expect(stdout).toContain(join(user, '.cordon-pinned'))
+  })
+})
+
+describe('cordon doctor --json', () => {
+  beforeAll(() => {
+    ensureBuiltCli()
+  }, 60_000)
+
+  it('reports the effective policy and the scope of the check to CI', () => {
+    const home = mkdtempSync(join(tmpdir(), 'cordon-doctor-'))
+    writeFileSync(join(home, 'policy.yaml'), 'exposure: false\n')
+    const { stdout, status } = run(['doctor', '--json'], '', { CORDON_HOME: home })
+    expect(status).toBe(0)
+    expect(JSON.parse(stdout)).toMatchObject({
+      home, selfCheck: 'ok', hookWiring: 'unchecked', exposure: false,
+      warnings: expect.arrayContaining([expect.stringContaining('exposure')]),
+    })
+  })
+
+  it('keeps a broken policy machine-readable and exits with failure', () => {
+    const home = mkdtempSync(join(tmpdir(), 'cordon-doctor-'))
+    writeFileSync(join(home, 'policy.yaml'), 'mode: [\n')
+    const { stdout, status } = run(['doctor', '--json'], '', { CORDON_HOME: home })
+    expect(status).toBe(1)
+    expect(JSON.parse(stdout)).toMatchObject({
+      selfCheck: 'broken', warnings: expect.arrayContaining([expect.stringContaining('policy')]),
+    })
+  })
+})
+
+describe('cordon probe codex', () => {
+  beforeAll(() => ensureBuiltCli(), 60_000)
+
+  it('requires the refusal for this challenge and an absent marker', () => {
+    const cwd = realpathSync(mkdtempSync(join(tmpdir(), 'cordon-probe-project-')))
+    const home = mkdtempSync(join(tmpdir(), 'cordon-probe-home-'))
+    const env = { CORDON_HOME: home }
+    const cli = (args: string[], input = '') => run(args, input, env, cwd)
+    expect(cli(['init', '--profile', 'coding']).status).toBe(0)
+    const start = () => JSON.parse(cli(['probe', 'codex']).stdout) as { id: string; path: string }
+    const first = start()
+    const other = start()
+    const check = (id: string) => cli(['probe', 'codex', '--check', id])
+    expect(check(first.id).status).toBe(1)
+    const event = {
+      session_id: 'probe-test', hook_event_name: 'PreToolUse', cwd,
+      tool_name: 'apply_patch',
+      tool_input: { command: `*** Begin Patch\n*** Add File: ${first.path}\n+probe\n*** End Patch` },
+    }
+    expect(cli(['hook', '--harness', 'codex'], JSON.stringify(event)).status).toBe(2)
+    expect(check(other.id).status).toBe(1)
+    expect(check(first.id).status).toBe(0)
+    const marker = join(cwd, first.path)
+    mkdirSync(dirname(marker), { recursive: true })
+    writeFileSync(marker, 'probe')
+    expect(check(first.id).status).toBe(1)
+  })
+
+  it.each(['codex', 'claude-code'])('checks both file outcomes for %s', harness => {
+    const cwd = realpathSync(mkdtempSync(join(tmpdir(), 'cordon-pair-project-')))
+    const env = { CORDON_HOME: mkdtempSync(join(tmpdir(), 'cordon-pair-home-')) }
+    const cli = (args: string[], input = '') => run(args, input, env, cwd)
+    expect(cli(['init', '--profile', 'coding']).status).toBe(0)
+    const args = ['probe', harness, '--pair']
+    const start = cli(args)
+    expect(start.status).toBe(0)
+    const { id, allowedPath, deniedPath } = JSON.parse(start.stdout)
+    const check = () => cli([...args, '--check', id, '--host-version', 'test-build'])
+    const send = (path: string) => cli(['hook', '--harness', harness], JSON.stringify({
+      session_id: 'probe', hook_event_name: 'PreToolUse', cwd,
+      tool_name: harness === 'codex' ? 'apply_patch' : 'Write',
+      tool_input: harness === 'codex'
+        ? { command: `*** Begin Patch\n*** Add File: ${path}\n+${id}\n*** End Patch` }
+        : { file_path: path, content: id },
+    }))
+    expect(send(allowedPath).status).toBe(0)
+    expect(send(deniedPath).status).toBe(2)
+    expect(check().status).toBe(1)
+    writeFileSync(allowedPath, 'incorrect marker')
+    expect(check().status).toBe(1)
+    writeFileSync(allowedPath, id + '\n')
+    const passed = check()
+    expect(passed.status).toBe(0)
+    expect(JSON.parse(passed.stdout)).toMatchObject({
+      harness, id, reportedHostVersion: 'test-build', policyAtCheck: expect.any(String), allowedMarker: 'matched', deniedMarker: 'absent', refusalRecorded: true, outcome: 'passed',
+    })
+    const policyFile = join(env.CORDON_HOME, 'policy.yaml')
+    const original = readFileSync(policyFile, 'utf8')
+    writeFileSync(policyFile, original.replace('exposure: true', 'exposure: false'))
+    expect(check().status).toBe(1)
+    writeFileSync(policyFile, original)
+    mkdirSync(dirname(deniedPath), { recursive: true })
+    writeFileSync(deniedPath, id)
+    const failed = check()
+    expect(failed.status).toBe(1)
+    expect(JSON.parse(failed.stdout)).toMatchObject({ deniedMarker: 'present', outcome: 'failed' })
+  })
+
+  it('rejects arbitrary paths in place of a challenge id', () => {
+    const result = run(['probe', 'codex', '--check', '../other-file'])
+    expect(result.status).toBe(2)
+    expect(result.stderr).toContain('usage: cordon probe codex')
   })
 })
 
