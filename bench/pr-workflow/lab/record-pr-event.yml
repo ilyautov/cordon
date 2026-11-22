@@ -1,0 +1,13 @@
+name: PR event evidence
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+permissions:
+  contents: read
+jobs:
+  capture:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Print selected event fields
+        run: |
+          jq -c '{action,number,pull_request:(.pull_request | {number,title,body,head:(.head | {sha}),base:(.base | {sha})})}' "$GITHUB_EVENT_PATH"

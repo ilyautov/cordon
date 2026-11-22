@@ -21,7 +21,7 @@ import { ApprovalStore, approvalId, canonical, type ApprovalContext } from './se
 import { PinStore } from './session/pins.js'
 import { BudgetStore } from './session/budgets.js'
 import { classify } from './scope/effects.js'
-import { MAX_LOOKUPS, MAX_READ_IDS, MAX_USER_ATOMS, SessionStore, noteRead, type SessionState, type TurnNames } from './session/store.js'
+import { MAX_LOOKUPS, MAX_READ_IDS, MAX_REFUSAL_IDS, MAX_USER_ATOMS, SessionStore, noteRead, refusalId, refusalsIn, type SessionState, type TurnNames } from './session/store.js'
 import { assignments } from './provenance/assignments.js'
 
 export interface Envelope {
@@ -81,6 +81,9 @@ export type PieceRole = 'content' | 'label'
  */
 const INERT = /^(?:|"?(?:none|null|undefined|true|false|ok|success)"?|\{\}|\[\]|-?\d+(?:\.\d+)?)$/iu
 
+/** What every refusal tells the agent to do instead of routing around it. */
+const STOP = 'Do not try another way to the same end; tell the user what was refused and why, and let them decide'
+
 /** A link in one spelling: lower case, no trailing slash. */
 function canonicalLink(link: string): string {
   return link.trim().toLowerCase().replace(/\/+$/u, '')
@@ -117,6 +120,10 @@ export class Cordon {
   private unredacted = false
   /** One id per untrusted result read in this session; see SessionState.readIds. */
   private readIds: string[] = []
+  /** One id per call refused to the agent; see SessionState.refusalIds. */
+  private refusalIds: string[] = []
+  /** The turn whose refusals-hold alert was sent; see SessionState.refusalAlert. */
+  private refusalAlert: number | null = null
   private directive: EffectClass[] | null = null
   private lastSource: Source | null = null
   /**
@@ -181,6 +188,8 @@ export class Cordon {
     this.taint = restored.taint
     this.unredacted = restored.unredacted === true
     this.readIds = restored.readIds ?? []
+    this.refusalIds = restored.refusalIds ?? []
+    this.refusalAlert = restored.refusalAlert ?? null
     this.exposure = restored.exposure ?? null
     this.userAtoms = restored.userAtoms ?? []
     this.userNames = restored.userNames ?? []
@@ -308,13 +317,12 @@ export class Cordon {
   /**
    * Cleans a piece of a tool's result and remembers where it came from.
    *
-   * `role` separates two questions that are not the same one. Everything the
-   * source put in front of the model is cleaned, without exception. Only what
-   * the source authored is recorded as provenance: a heading, a name or the
-   * query echoed back are the values the user hands over as arguments a moment
-   * later, and recording those would declare the user's own words untrusted.
-   * A miss in provenance costs one unmarked value; false taint there stops
-   * work that was never an attack, and stops it quietly.
+   * `role` separates two questions that are not the same one. Every text
+   * piece handed here is cleaned and counts as a read. Only content enters
+   * provenance: a heading, a name or the query echoed back can
+   * be the user's own value, and recording it would taint an honest retry.
+   * A label can still contain an instruction, so it cannot exempt a later
+   * action from the exposure rule merely because its field name is structural.
    */
   observe(text: string, source: Source, role: PieceRole = 'content'): Envelope {
     const { clean, findings } = sanitize(text)
@@ -322,23 +330,13 @@ export class Cordon {
     if (role === 'content') {
       this.taint.record(clean, source)
       if (!substitute && clean !== text) this.taint.record(text, source)
-      // The fact of the read is marked apart from what was read: an attack
-      // whose arguments share no byte with the page (a paraphrase, an
-      // encoding, a clean curl command) leaves provenance silent, and the
-      // mark is what the gate answers to there. Labels do not count: a
-      // heading the source wrote ABOUT the content is not the content the
-      // model read — recording those would mark the session for the user's
-      // own values echoed back.
-      // A reply with nothing in it is the exception: a write that returns
-      // None marked the session in AgentDojo's slack suite, and the next
-      // call of the same honest loop was refused. The list is closed, so
-      // anything that is not exactly one of these literals still marks.
-      // Both texts are tested: a hidden comment around "ok" is inert once
-      // cleaned, and a source the human reads as source text reaches the
-      // model whole.
-      const inert = INERT.test(clean.trim()) && INERT.test(text.trim())
-      if (source.trust === 'untrusted' && !inert) this.exposure = { at: this.turn, source: source.label }
     }
+    // The fact of the read is marked apart from provenance: a title-only
+    // result can steer a new recipient without sharing words with the call.
+    // An empty or status-only reply is the exception; both the original and
+    // cleaned text must be inert, so a hidden layer around "ok" still marks.
+    const inert = INERT.test(clean.trim()) && INERT.test(text.trim())
+    if (source.trust === 'untrusted' && !inert) this.exposure = { at: this.turn, source: source.label }
     // A tool description is read once for the whole session, in a batch, so
     // "the last one" is an arbitrary name; the live MCP run showed it being
     // blamed for a certificate refusal it had no part in. Descriptions still
@@ -400,7 +398,43 @@ export class Cordon {
   }
 
   gate(call: ToolCall): Decision {
-    return this.judge(call, true)
+    return this.counted(this.judge(call, true))
+  }
+
+  /**
+   * Counts a refusal the agent meets. A question is not one: a human answers
+   * it. The count is written like any mark, and a store that cannot take it
+   * throws, which the adapter answers with a refusal anyway.
+   */
+  private counted(decision: Decision): Decision {
+    if (decision.kind !== 'deny') return decision
+    // A refusal that only explains invites the agent to route around it,
+    // and drift starts there (NVIDIA). It says what to do instead. Added
+    // here, where the refusal reaches the agent, so every harness says it
+    // and the owner's journal keeps the reason as the gate gave it.
+    const told: Decision = { ...decision, reason: `${decision.reason.replace(/\.+$/u, '')}. ${STOP}` }
+    this.refusalIds = [...this.refusalIds, refusalId(this.turn)].slice(-MAX_REFUSAL_IDS)
+    const limit = this.policy.refusals ?? 0
+    // The alert is owed once per turn and remembered in the state, not
+    // inferred from landing on the limit: hooks refusing in parallel each
+    // count their own, and the merged count stepped over the limit without
+    // ever equalling it, so the alert never came (review of this rule).
+    // Whoever first sees the count at the limit with no alert sent sends it;
+    // two at once send it twice, which is the cheaper error.
+    const owed = limit > 0 && refusalsIn(this.refusalIds, this.turn) >= limit && this.refusalAlert !== this.turn
+    if (owed) this.refusalAlert = this.turn
+    this.persist()
+    if (owed) {
+      this.notifier.notify({
+        at: new Date().toISOString(),
+        decision: 'refusals-hold',
+        tool: '',
+        reason: `${limit} calls were refused to the agent since your last message; every call that acts now waits for you until you write again`,
+        source: this.lastSource?.label ?? null,
+        ...labelled('refusals'),
+      })
+    }
+    return told
   }
 
   /**
@@ -411,6 +445,7 @@ export class Cordon {
   private judge(call: ToolCall, askSpends: boolean): Decision {
     let decision = decide(call, {
       policy: this.policy,
+      refusals: refusalsIn(this.refusalIds, this.turn),
       cert: this.cert,
       taint: this.taint,
       cordonHome: this.cordonHome,
@@ -486,6 +521,10 @@ export class Cordon {
    * there the policy is what should change, in the open.
    */
   gateUnattended(call: ToolCall): Decision {
+    return this.counted(this.unattended(call))
+  }
+
+  private unattended(call: ToolCall): Decision {
     const moved = this.policyMoved()
     if (moved !== null) {
       this.notifier.notify({ at: new Date().toISOString(), decision: 'deny', tool: call.tool, reason: moved, source: null, ...labelled('failure') })
@@ -596,10 +635,25 @@ export class Cordon {
     return {
       kind: 'deny',
       rule: decision.rule,
+      approvalId: id,
       reason: `${decision.reason}. Nobody is here to ask, so the call is refused; the owner can allow this exact call once ` +
         `with "cordon approve ${id}", and retrying it unchanged then goes through`,
       ...(decision.source === undefined ? {} : { source: decision.source }),
     }
+  }
+
+  /** A host no longer waits for this exact question; a late yes must not release another call. */
+  cancelUnattendedApproval(id: string, reason: string, expectedInstance?: string): void {
+    const request = new ApprovalStore(this.cordonHome).cancel(id, expectedInstance)
+    if (request === null) return
+    this.notifier.notify({
+      at: new Date().toISOString(),
+      decision: 'approval-void',
+      tool: request.tool,
+      reason: `the question ${id} was cancelled: ${reason}`,
+      source: null,
+      id,
+    })
   }
 
   /**
@@ -660,11 +714,10 @@ export class Cordon {
   }
 
   /**
-   * Marks the fact of a read whose content Cordon did not see: an image in
-   * a result, or a harness that hands the hook only the text of what the
-   * model got. The inert exemption in `observe` rests on having seen the
-   * whole result, so it cannot apply here; an untrusted source marks the
-   * session whatever its text said.
+   * Marks the fact of a read whose content Cordon did not clean: an image,
+   * a source-selected opaque identifier, or a harness that hands the hook
+   * only part of what the model got. These values must keep their spelling,
+   * but an inert `text: "ok"` beside them cannot exempt the later action.
    */
   observeUnseen(source: Source): void {
     if (source.trust !== 'untrusted') return
@@ -901,6 +954,8 @@ export class Cordon {
       taint: this.taint,
       unredacted: this.unredacted,
       readIds: this.readIds,
+      refusalIds: this.refusalIds,
+      refusalAlert: this.refusalAlert,
       directive: this.directive,
       exposure: this.exposure,
       userAtoms: this.userAtoms,
@@ -1018,4 +1073,3 @@ export function changed(earlier: ApprovalContext | null, now: ApprovalContext): 
 function digest(text: string): string {
   return createHash('sha256').update(text, 'utf8').digest('hex')
 }
-

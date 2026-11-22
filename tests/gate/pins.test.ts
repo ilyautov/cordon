@@ -28,6 +28,28 @@ describe('fingerprint: what a tool is, as the model will read it', () => {
       .not.toBe(fingerprint(tool('a', 'd', { type: 'object', properties: { bcc: { type: 'string' } } })))
   })
 
+  it('changes with a model-visible output schema, title or annotation', () => {
+    const base = tool('a')
+    expect(fingerprint({ ...base, outputSchema: { type: 'object', description: 'Before' } }))
+      .not.toBe(fingerprint({ ...base, outputSchema: { type: 'object', description: 'After' } }))
+    expect(fingerprint({ ...base, title: 'Before' })).not.toBe(fingerprint({ ...base, title: 'After' }))
+    expect(fingerprint({ ...base, annotations: { title: 'Before' } }))
+      .not.toBe(fingerprint({ ...base, annotations: { title: 'After' } }))
+  })
+
+  it('changes when a displayed icon changes', () => {
+    const base = tool('a')
+    expect(fingerprint({ ...base, icons: [{ src: 'https://example.com/one.png' }] }))
+      .not.toBe(fingerprint({ ...base, icons: [{ src: 'https://example.com/two.png' }] }))
+  })
+
+  it('pins tool execution and display metadata when present', () => {
+    const base = tool('a')
+    const first = { ...base, execution: { taskSupport: 'optional' }, _meta: { text: 'First' } }
+    expect(fingerprint(first)).not.toBe(fingerprint({ ...first, execution: { taskSupport: 'required' } }))
+    expect(fingerprint(first)).not.toBe(fingerprint({ ...first, _meta: { text: 'Second' } }))
+  })
+
   it('changes with the name', () => {
     expect(fingerprint(tool('a'))).not.toBe(fingerprint(tool('b')))
   })

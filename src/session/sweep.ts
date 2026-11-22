@@ -1,7 +1,7 @@
 import { lstatSync, readdirSync, rmSync, writeFileSync, type Dirent } from 'node:fs'
 import { join } from 'node:path'
 import { safeName } from './store.js'
-import { APPROVAL_TTL_MS } from './approvals.js'
+import { APPROVAL_FILES, APPROVAL_TTL_MS } from './approvals.js'
 
 /**
  * The lifetime of a session's state.
@@ -71,9 +71,6 @@ export const SWEEP_MARK = 'last-sweep'
  */
 const OURS = /^[A-Za-z0-9_-]{1,81}(?:\.[a-f0-9]{1,32})?\.json(?:\.\d{1,10}\.tmp)?$/u
 
-/** The two files a one-time approval leaves: see `approvals.ts`. */
-const APPROVALS = /^[0-9a-f]{16}\.(?:request\.json|approved)$/u
-
 /**
  * Cleans up session states and drafts whose time has run out.
  *
@@ -113,7 +110,7 @@ export function sweep(cordonHome: string, keepSessionId: string, now: number = D
     sweepDir(join(cordonHome, 'drafts'), DRAFT_TTL_MS, keep, now)
     // Approvals are void after their hour whatever the disk holds; this is
     // hygiene for the reasons they carry, not a part of the rule.
-    sweepDir(join(cordonHome, 'approvals'), APPROVAL_TTL_MS, keep, now, APPROVALS)
+    sweepDir(join(cordonHome, 'approvals'), APPROVAL_TTL_MS, keep, now, APPROVAL_FILES)
   } catch {
     // Deliberately silent: see the function's description.
   }

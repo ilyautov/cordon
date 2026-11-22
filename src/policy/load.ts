@@ -102,6 +102,14 @@ function validate(parsed: unknown, path: string): Policy {
     }
   }
 
+  if (Object.hasOwn(input, 'blockedTools')) {
+    policy.blockedTools = asNames(input['blockedTools'], `${path}: blockedTools`)
+  }
+
+  if (Object.hasOwn(input, 'allowedTools')) {
+    policy.allowedTools = asNames(input['allowedTools'], `${path}: allowedTools`)
+  }
+
   if ('trustedSources' in input) {
     policy.trustedSources = asStrings(input.trustedSources, `${path}: trustedSources`)
   }
@@ -121,6 +129,14 @@ function validate(parsed: unknown, path: string): Policy {
 
   if (Object.hasOwn(input, 'budgets')) {
     policy.budgets = asBudgets(input['budgets'], `${path}: budgets`)
+  }
+
+  if (Object.hasOwn(input, 'refusals')) {
+    const refusals = input['refusals']
+    if (typeof refusals !== 'number' || !Number.isInteger(refusals) || refusals < 0) {
+      throw new Error(`${path}: refusals must be a whole number, 0 to turn the hold off`)
+    }
+    policy.refusals = refusals
   }
 
   if ('destinations' in input) {
@@ -244,8 +260,8 @@ function journalPath(value: unknown, path: string): string | null {
 }
 
 const TOP_LEVEL = [
-  'mode', 'profile', 'tools', 'trustedSources', 'toolsReturn', 'arguments', 'destinations', 'lookups', 'budgets',
-  'notify', 'exposure', 'task', 'memory', 'mcp', 'output',
+  'mode', 'profile', 'tools', 'blockedTools', 'allowedTools', 'trustedSources', 'toolsReturn', 'arguments', 'destinations', 'lookups', 'budgets',
+  'refusals', 'notify', 'exposure', 'task', 'memory', 'mcp', 'output',
 ]
 
 /**

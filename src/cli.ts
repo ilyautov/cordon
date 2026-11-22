@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-import { accessSync, appendFileSync, constants, existsSync, mkdtempSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { accessSync, appendFileSync, constants, existsSync, lstatSync, mkdtempSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { randomBytes } from 'node:crypto'
 import { homedir, tmpdir, userInfo } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -10,6 +11,7 @@ import { runHook as runCodexHook } from './adapters/codex/main.js'
 import { runHook as runKimiHook } from './adapters/kimi/main.js'
 import { runHook as runDeepseekHook } from './adapters/deepseek/main.js'
 import { runGateway } from './adapters/mcp/gateway.js'
+import { connectSocketGateway, serveSocketGateway } from './adapters/mcp/socket.js'
 import { humanSeesRendered, type SourceView } from './core/types.js'
 import { audit, CODES, type AuditFinding, type Severity } from './audit/audit.js'
 import { Cordon } from './cordon.js'
@@ -22,11 +24,13 @@ import { labelled, type NotifyEvent } from './notify/notifier.js'
 import { RULES, type Rule } from './gate/rules.js'
 import { PROFILES, renderPolicy } from './policy/templates.js'
 import { sanitize } from './sanitize/index.js'
-import { ApprovalStore, MAX_SHOWN_ARGS, type ShownRequest } from './session/approvals.js'
+import { APPROVAL_TTL_MS, ApprovalStore, MAX_SHOWN_ARGS, type ShownRequest } from './session/approvals.js'
 import { MemoryLedger } from './session/memory.js'
+import { CLAUDE_CODE, CODEX, policyForDialect } from './adapters/claude-code/dialect.js'
+import { pairedProbe, recordedRefusal } from './diagnostics/probe.js'
 
 const USAGE =
-  'usage: cordon scan <file|-> [--json] | cordon hook [--harness claude-code|gemini|codex|kimi|deepseek] | cordon mcp -- <server command...> | cordon mcp approve -- <server command...> | cordon doctor | cordon init [--profile locked|research|documents|coding|service] [--force] | cordon log [--last N] [--json] | cordon approve [id [--read] [--as name]] | cordon policy check|explain [file] | cordon policy apply <file> [--accept-warnings] [--as name] | cordon audit [dir] [--json|--sarif] [--fail-on high|medium|low]'
+  'usage: cordon scan <file|-> [--json] | cordon hook [--harness claude-code|gemini|codex|kimi|deepseek] | cordon mcp [--wait-for-approval-ms N] -- <server command...> | cordon mcp serve --socket PATH [--wait-for-approval-ms N] -- <server command...> | cordon mcp connect --socket PATH --owner-uid UID | cordon mcp approve -- <server command...> | cordon doctor [--json] | cordon probe codex [--check ID] | cordon probe codex|claude-code --pair [--check ID [--host-version VERSION]] | cordon init [--profile locked|research|documents|coding|service] [--force] | cordon log [--last N] [--json] | cordon approve [id [--show|--read] [--as name]] | cordon policy check|explain [file] | cordon policy apply <file> [--accept-warnings] [--as name] | cordon audit [dir] [--json|--sarif] [--fail-on high|medium|low]'
 
 /**
  * Event parsing depends on the harness, so the harness is named explicitly.
@@ -62,7 +66,9 @@ export function main(argv: string[]): number | Promise<number> {
 
   if (command === 'mcp') return mcp(rest)
 
-  if (command === 'doctor') return printDoctor(cordonHome())
+  if (command === 'doctor') return printDoctor(cordonHome(), rest.includes('--json'))
+
+  if (command === 'probe') return probe(rest)
 
   if (command === 'audit') return runAudit(rest)
 
@@ -152,6 +158,7 @@ const HARNESS_LIMITS: readonly HarnessReport[] = [
       'arguments are changed only next to an explicit allow, which would override your own approval settings, so a call Cordon would cut is refused instead',
       'a result is replaced only through a block: the model reads the cleaned result as a tool error',
       'a hook that crashes, hangs or prints garbage lets the call through',
+      'in Codex CLI 0.161.0, write_stdin into an allowed shell session emitted no hook event; restricted runner workflows need --disable shell_tool and OS confinement',
     ],
   },
   {
@@ -541,9 +548,17 @@ function writable(dir: string): boolean {
   }
 }
 
-/** Printing the report for the human. Non-zero exit only on a breakage. */
-function printDoctor(home: string): number {
+function printDoctor(home: string, asJson: boolean): number {
   const report = doctor(home)
+  if (asJson) {
+    process.stdout.write(JSON.stringify({ home, ...report, hookWiring: 'unchecked' }) + '\n')
+  } else {
+    printDoctorText(home, report)
+  }
+  return report.selfCheck === 'ok' ? 0 : 1
+}
+
+function printDoctorText(home: string, report: DoctorReport): void {
   process.stdout.write(`home directory: ${home}\n`)
   process.stdout.write(`policy: ${report.policySource}\n`)
   process.stdout.write(`presence mode: ${report.mode}\n`)
@@ -589,15 +604,14 @@ function printDoctor(home: string): number {
   // and that is the most dangerous state there is.
   process.stdout.write(
     'note: doctor checks the mechanism, not the wiring. ' +
-      'Whether the harness actually calls the hook is shown by /hooks in Claude Code ' +
-      'and by /hooks panel in Gemini CLI\n',
+      'Review and trust the hook entries in /hooks for Claude Code and Codex CLI, ' +
+      'or in the /hooks panel for Gemini CLI; then confirm a harmless refusal in the journal\n',
   )
   if (report.warnings.length === 0) {
     process.stdout.write('no warnings\n')
   } else {
     for (const warning of report.warnings) process.stdout.write(`warning: ${warning}\n`)
   }
-  return report.selfCheck === 'ok' ? 0 : 1
 }
 
 /**
@@ -616,11 +630,26 @@ function printDoctor(home: string): number {
  */
 function mcp(args: string[]): Promise<number> | number {
   if (args[0] === 'approve') return approve(args.slice(1))
+  if (args[0] === 'serve') return mcpServe(args.slice(1))
+  if (args[0] === 'connect') return mcpConnect(args.slice(1))
   const at = args.indexOf('--')
   const command = at === -1 ? [] : args.slice(at + 1)
   if (command.length === 0 || command[0] === '') {
     process.stderr.write(`mcp needs the upstream server command after --\n${USAGE}\n`)
     return 2
+  }
+  const flags = args.slice(0, at)
+  let approvalWaitMs = 0
+  if (flags.length > 0) {
+    if (flags.length !== 2 || flags[0] !== '--wait-for-approval-ms' || !/^[1-9][0-9]*$/u.test(flags[1] ?? '')) {
+      process.stderr.write(`mcp accepts only --wait-for-approval-ms N before --\n${USAGE}\n`)
+      return 2
+    }
+    approvalWaitMs = Number(flags[1])
+    if (!Number.isSafeInteger(approvalWaitMs) || approvalWaitMs > APPROVAL_TTL_MS) {
+      process.stderr.write(`--wait-for-approval-ms must be at most ${APPROVAL_TTL_MS}\n${USAGE}\n`)
+      return 2
+    }
   }
 
   const home = cordonHome()
@@ -632,7 +661,61 @@ function mcp(args: string[]): Promise<number> | number {
     return 1
   }
 
-  return runGateway({ command, policy, cordonHome: home, policyFile: join(home, 'policy.yaml') })
+  return runGateway({ command, policy, cordonHome: home, policyFile: join(home, 'policy.yaml'), approvalWaitMs })
+}
+
+function mcpServe(args: string[]): Promise<number> | number {
+  const at = args.indexOf('--')
+  const command = at === -1 ? [] : args.slice(at + 1)
+  if (command.length === 0 || command[0] === '') {
+    process.stderr.write(`mcp serve needs the upstream command after --\n${USAGE}\n`)
+    return 2
+  }
+  let path: string | undefined
+  let approvalWaitMs = 0
+  for (let i = 0; i < at; i += 2) {
+    const flag = args[i]
+    const value = args[i + 1]
+    if (value === undefined || (flag !== '--socket' && flag !== '--wait-for-approval-ms')) {
+      process.stderr.write(`invalid mcp serve flags\n${USAGE}\n`)
+      return 2
+    }
+    if (flag === '--socket' && path === undefined) path = value
+    else if (flag === '--wait-for-approval-ms' && approvalWaitMs === 0 && /^[1-9][0-9]*$/u.test(value)) {
+      approvalWaitMs = Number(value)
+    } else {
+      process.stderr.write(`invalid or repeated mcp serve flag ${flag}\n${USAGE}\n`)
+      return 2
+    }
+  }
+  if (path === undefined || path === '' ||
+    !Number.isSafeInteger(approvalWaitMs) || approvalWaitMs > APPROVAL_TTL_MS) {
+    process.stderr.write(`mcp serve needs a valid socket path and wait\n${USAGE}\n`)
+    return 2
+  }
+  const home = cordonHome()
+  try {
+    const policy = loadPolicy(home)
+    return serveSocketGateway({ path, command, policy, cordonHome: home,
+      policyFile: join(home, 'policy.yaml'), approvalWaitMs })
+  } catch (error) {
+    process.stderr.write(`mcp serve refused to start: ${(error as Error).message}\n`)
+    return 1
+  }
+}
+
+function mcpConnect(args: string[]): Promise<number> | number {
+  if (args.length !== 4 || args[0] !== '--socket' || args[2] !== '--owner-uid' ||
+    !/^(?:0|[1-9][0-9]*)$/u.test(args[3] ?? '')) {
+    process.stderr.write(`mcp connect needs --socket PATH --owner-uid UID\n${USAGE}\n`)
+    return 2
+  }
+  try {
+    return connectSocketGateway(args[1]!, Number(args[3]))
+  } catch (error) {
+    process.stderr.write(`mcp connect refused: ${(error as Error).message}\n`)
+    return 1
+  }
 }
 
 /**
@@ -843,7 +926,10 @@ if (launchedDirectly()) {
       },
     )
   } else {
-    process.exit(code)
+    // Node 22 can truncate a SARIF response written to a pipe when exit()
+    // runs before stdout drains. The exit code preserves the hook's refusal
+    // while letting the synchronous command finish its output.
+    process.exitCode = code
   }
 }
 
@@ -882,23 +968,41 @@ function approveCall(args: string[]): number {
     process.stderr.write(`not an approval id: ${visible(id)}\n${USAGE}\n`)
     return 2
   }
-  const request = store.waiting(id)
-  if (request !== null && request.args.length > MAX_SHOWN_ARGS && !args.includes('--read')) {
-    process.stderr.write(
-      `the arguments run to ${request.args.length} characters, more than a terminal shows\n` +
-        `read all of them in ${store.pendingPath(id)}, then approve with: cordon approve ${id} --read\n`,
-    )
-    return 1
+  let show = false
+  let read = false
+  let declared: string | undefined
+  for (let i = 1; i < args.length; i++) {
+    const option = args[i]
+    if (option === '--show' && !show) show = true
+    else if (option === '--read' && !read) read = true
+    else if (option === '--as' && declared === undefined && args[i + 1] !== undefined &&
+      !args[i + 1]!.startsWith('--')) declared = args[++i]
+    else {
+      process.stderr.write(`invalid approval option: ${visible(option)}\n${USAGE}\n`)
+      return 2
+    }
   }
+  if (show && (read || declared !== undefined)) {
+    process.stderr.write(`--show only displays the pending call; use it separately from --read or --as\n${USAGE}\n`)
+    return 2
+  }
+  const request = store.waiting(id)
   if (request === null) {
     process.stderr.write(`nothing waits under ${id}: it was never asked for, was already used, is older than an hour, or was asked again under a changed context\n`)
     return 1
   }
-  const at = args.indexOf('--as')
-  const declared = at >= 0 ? args[at + 1] : undefined
-  if (at >= 0 && (declared === undefined || declared.startsWith('--'))) {
-    process.stderr.write(`--as takes a name\n${USAGE}\n`)
-    return 2
+  if (show) {
+    process.stdout.write(`pending, not approved: ${visible(request.tool)}\n    arguments: ${visible(request.args)}\n    ${asked(request)}${visible(request.reason)}\n`)
+    return 0
+  }
+  if (request.args.length > MAX_SHOWN_ARGS && !read) {
+    process.stderr.write(
+      `the arguments run to ${request.args.length} characters, more than a terminal shows\n` +
+        `show all of them safely with: cordon approve ${id} --show\n` +
+        `the complete request file is ${visible(store.pendingPath(id))}\n` +
+        `then approve with: cordon approve ${id} --read\n`,
+    )
+    return 1
   }
   // No record, no approval: an owner's act nobody can audit afterwards is
   // the gap this record exists to close. The line is written first, so no
@@ -925,7 +1029,7 @@ function approveCall(args: string[]): number {
   let approved: ReturnType<ApprovalStore['approve']>
   let failure = 'the question expired or was retired while it was being approved'
   try {
-    approved = store.approve(id)
+    approved = store.approve(id, request.instance)
   } catch (error) {
     // The line above already says "given": the one below must follow it
     // whatever stopped the approval (Codex).
@@ -961,7 +1065,9 @@ function policyCommand(args: string[]): number {
   const path = file ?? join(cordonHome(), 'policy.yaml')
   let policy: Policy
   try {
-    policy = loadPolicyFile(path)
+    // An absent active policy uses the safe default; an explicitly named
+    // draft must exist, or a typo would be reported as a valid mandate.
+    policy = file === undefined ? loadPolicyFile(path) : parsePolicy(readFileSync(path, 'utf8'), path)
   } catch (error) {
     process.stderr.write(`cordon policy ${verb}: ${visible((error as Error).message)}\n`)
     return 1
@@ -1135,31 +1241,21 @@ function shortened(args: string, path: string): string {
   return `${args.slice(0, MAX_SHOWN_ARGS)}… (${args.length} characters in all, every one of them in ${path})`
 }
 
-function showLog(args: string[]): number {
-  const asJson = args.includes('--json')
-  const at = args.indexOf('--last')
-  let last = Infinity
-  if (at >= 0) {
-    last = Number(args[at + 1])
-    if (!Number.isInteger(last) || last < 1) {
-      process.stderr.write('cordon log: --last takes a positive whole number\n')
-      return 2
-    }
-  }
-
+function readJournal(command: string): { policy: Policy; file: string; events: Array<Record<string, unknown>>; unreadable: number } | null {
   const home = cordonHome()
-  let file: string | null
+  let policy: Policy
   try {
-    file = loadPolicy(home).notify.file
+    policy = loadPolicy(home)
   } catch (error) {
-    process.stderr.write(`cordon log: ${(error as Error).message}\n`)
-    return 1
+    process.stderr.write(`${command}: ${(error as Error).message}\n`)
+    return null
   }
+  const file = policy.notify.file
   if (file === null) {
     process.stderr.write(
-      `cordon log: no journal is configured; set notify.file in ${join(home, 'policy.yaml')} (cordon init writes one)\n`,
+      `${command}: no journal is configured; set notify.file in ${join(home, 'policy.yaml')} (cordon init writes one)\n`,
     )
-    return 1
+    return null
   }
 
   let text = ''
@@ -1167,8 +1263,8 @@ function showLog(args: string[]): number {
     text = readFileSync(file, 'utf8')
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
-      process.stderr.write(`cordon log: could not read ${file}: ${(error as Error).message}\n`)
-      return 1
+      process.stderr.write(`${command}: could not read ${file}: ${(error as Error).message}\n`)
+      return null
     }
   }
 
@@ -1185,6 +1281,77 @@ function showLog(args: string[]): number {
       unreadable++
     }
   }
+  return { policy, file, events, unreadable }
+}
+
+/** The owner runs both phases. Only the harmless patch prompt goes to the agent. */
+function probe(args: string[]): number {
+  const [harness, ...rest] = args
+  const pair = rest[0] === '--pair'
+  const options = pair ? rest.slice(1) : rest
+  const [flag, supplied, versionFlag, hostVersion] = options
+  const start = options.length === 0
+  const versioned = pair && options.length === 4 && versionFlag === '--host-version'
+    && typeof hostVersion === 'string' && /^[a-zA-Z0-9][a-zA-Z0-9.+ _()-]{0,79}$/u.test(hostVersion)
+  const check = (options.length === 2 || versioned) && flag === '--check' && /^[a-f0-9]{32}$/u.test(supplied ?? '')
+  if ((harness !== 'codex' && !(pair && harness === 'claude-code')) || (!start && !check)) {
+    process.stderr.write('usage: cordon probe codex [--check ID] | cordon probe codex|claude-code --pair [--check ID [--host-version VERSION]]\n')
+    return 2
+  }
+  const journal = readJournal('cordon probe')
+  if (journal === null) return 1
+  const id = supplied ?? randomBytes(16).toString('hex')
+  if (pair) {
+    const effective = policyForDialect(journal.policy, harness === 'codex' ? CODEX : CLAUDE_CODE)
+    return pairedProbe(harness, id, start, journal.events, policyHash(effective), hostVersion ?? null)
+  }
+  const path = join(`cordon-probe-${id}`, '.codex', 'marker.txt')
+  const target = join(process.cwd(), path)
+  if (start) {
+    process.stdout.write(JSON.stringify({
+      id, path,
+      prompt: `Use the native apply_patch tool once to add the file ${path} containing the word probe. Stop after the tool responds.`,
+      check: `cordon probe codex --check ${id}`,
+    }, null, 2) + '\n')
+    return 0
+  }
+
+  // A refusal from another run, or a refusal followed by a write, proves nothing
+  // about this patch. A dangling symlink also counts as a marker on disk.
+  const refusal = recordedRefusal(journal.events, 'apply_patch', target)
+  try {
+    if (lstatSync(target, { throwIfNoEntry: false }) !== undefined) {
+      process.stderr.write('cordon probe: marker exists in the project\n')
+      return 1
+    }
+  } catch (error) {
+    // An unreadable marker must never be mistaken for an absent one.
+    process.stderr.write(`cordon probe: could not check the marker: ${visible((error as Error).message)}\n`)
+    return 1
+  }
+  if (!refusal) {
+    process.stderr.write('cordon probe: no matching apply_patch refusal in the current journal\n')
+    return 1
+  }
+  process.stdout.write('Matching apply_patch refusal recorded. Marker absent.\n')
+  return 0
+}
+
+function showLog(args: string[]): number {
+  const asJson = args.includes('--json')
+  const at = args.indexOf('--last')
+  let last = Infinity
+  if (at >= 0) {
+    last = Number(args[at + 1])
+    if (!Number.isInteger(last) || last < 1) {
+      process.stderr.write('cordon log: --last takes a positive whole number\n')
+      return 2
+    }
+  }
+
+  const journal = readJournal('cordon log')
+  if (journal === null) return 1
+  const { events, unreadable, file } = journal
   const shown = events.slice(Math.max(0, events.length - last))
 
   if (asJson) {
@@ -1233,11 +1400,17 @@ function showLog(args: string[]): number {
   return 0
 }
 
-/** A journal field as one printable line: control characters become escapes. */
+/** A journal field as one printable line: invisible controls become escapes. */
 function visible(value: unknown): string {
   const text = typeof value === 'string' ? value : JSON.stringify(value) ?? ''
+  // Bidi controls can make a recipient look different from the call being approved.
   return text.replace(
-    /[\u0000-\u001f\u007f-\u009f]/gu,
-    (char) => `\\u${char.charCodeAt(0).toString(16).padStart(4, '0')}`,
+    /[\u0000-\u001f\u007f-\u009f\u2028\u2029\p{Default_Ignorable_Code_Point}]/gu,
+    (char) => {
+      const point = char.codePointAt(0)!
+      return point <= 0xffff
+        ? `\\u${point.toString(16).padStart(4, '0')}`
+        : `\\u{${point.toString(16)}}`
+    },
   )
 }

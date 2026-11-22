@@ -1,27 +1,33 @@
 // Run the review with only the fixed PR MCP tools and Cordon hooks.
-// The local agent gets no shell, token environment variable, or approval directory.
+// Only a completed local review publishes a receipt.
 import { spawnSync } from 'node:child_process'
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { randomUUID } from 'node:crypto'
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { fixedReviewPrompt } from '../dist/pr-workflow/review.js'
-import { readReviewEvents, validateTarget } from '../dist/pr-workflow/store.js'
+import { completeReview, fixedReviewPrompt } from '../dist/pr-workflow/review.js'
+import { publishReviewReceipt, readReviewEvents, requireNewReceiptPath, validateTarget } from '../dist/pr-workflow/store.js'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
-const [repo, numberText, headSha, ledger] = process.argv.slice(2)
+const [repo, numberText, headSha, output, extra] = process.argv.slice(2)
 const target = { repo: repo ?? '', number: Number(numberText), headSha: headSha ?? '' }
+if (!output || extra) throw new Error('usage: node scripts/pr-review-local.mjs <repo> <number> <sha> <receipt>')
 validateTarget(target)
-if (!ledger) throw new Error('usage: node scripts/pr-review-local.mjs <repo> <number> <sha> <ledger>')
+const receiptPath = resolve(output)
+requireNewReceiptPath(receiptPath)
+const runId = randomUUID()
 
 const temp = mkdtempSync(join(tmpdir(), 'cordon-pr-local-'))
 const work = join(temp, 'work')
 const cordonHome = join(temp, 'cordon-home')
 const hookLog = join(temp, 'hook-events.jsonl')
+const ledger = join(temp, 'staged-review.jsonl')
 mkdirSync(work, { mode: 0o700 })
 mkdirSync(cordonHome, { mode: 0o700 })
 writeFileSync(join(cordonHome, 'policy.yaml'), [
   'mode: autonomous',
+  'allowedTools: [mcp__pr__read_pr, mcp__pr__read_diff, mcp__pr__propose_merge]',
   `task: Review PR number ${target.number} at the pinned head and report findings`,
   'profile:',
   '  effects: [read, summarize, update]',
@@ -52,7 +58,8 @@ const args = [
   '--strict-config', '--color', 'never', '--sandbox', 'read-only',
   '--enable', 'hooks', '--dangerously-bypass-hook-trust',
   '--disable', 'shell_tool', '--disable', 'apps', '--disable', 'browser_use',
-  '--disable', 'computer_use', '--disable', 'multi_agent_v2', '--disable', 'memories',
+  '--disable', 'computer_use', '--disable', 'multi_agent', '--disable', 'multi_agent_v2',
+  '--disable', 'view_image', '--disable', 'sleep_tool', '--disable', 'memories',
   '--disable', 'plugins', '--disable', 'remote_plugin',
   '-c', 'hooks.UserPromptSubmit=' + hook(null),
   '-c', 'hooks.PreToolUse=' + hook('*'),
@@ -68,30 +75,34 @@ const args = [
   '-c', 'mcp_servers.pr.tools.propose_merge.approval_mode="approve"',
   '-C', work, fixedReviewPrompt(target.number),
 ]
-const agentEnv = { ...process.env, CORDON_HOME: cordonHome, CORDON_PR_HOOK_LOG: hookLog }
-delete agentEnv.GH_TOKEN
-delete agentEnv.GITHUB_TOKEN
-const result = spawnSync('codex', args, {
-  cwd: work, env: agentEnv, encoding: 'utf8',
-  timeout: 180_000, maxBuffer: 16 * 1024 * 1024,
-})
-process.stdout.write(result.stdout ?? '')
-process.stderr.write(result.stderr ?? '')
-process.stderr.write(`\nReview evidence: ${ledger}\nHook evidence: ${hookLog}\n`)
-if (result.error) throw result.error
-const events = (result.stdout ?? '').split('\n').filter(Boolean).map((line) => JSON.parse(line))
-const calls = events.filter((row) => row.type === 'item.completed' && row.item?.type === 'mcp_tool_call')
-const hooks = readFileSync(hookLog, 'utf8').split('\n').filter(Boolean).map((line) => JSON.parse(line))
-const readDiff = calls.some((row) => row.item.tool === 'read_diff' && row.item.status === 'completed')
-const diffEvidence = readReviewEvents(ledger).some((event) => event.kind === 'diff-read' &&
-  event.repo === repo && event.number === target.number && event.headSha === headSha)
-const hooksCovered = hooks.some((row) => row.kind === 'UserPromptSubmit' && row.status === 0) &&
-  calls.every((call) => hooks.some((row) => row.kind === 'PreToolUse' && row.status === 0 &&
-    row.tool === `mcp__pr__${call.item.tool}`) && hooks.some((row) => row.kind === 'PostToolUse' &&
-    row.tool === `mcp__pr__${call.item.tool}` && (row.status === 0 ||
-      (row.status === 2 && row.decision === 'block'))))
-const finalAnswer = events.some((row) => row.type === 'item.completed' && row.item?.type === 'agent_message')
-if (result.status !== 0 || !readDiff || !diffEvidence || !hooksCovered || !finalAnswer) {
-  process.stderr.write('PR review incomplete: missing diff, hook, or final-answer evidence\n')
+const agentEnv = {}
+for (const key of ['PATH', 'HOME', 'CODEX_HOME', 'USER', 'LOGNAME', 'TMPDIR', 'LANG', 'LC_ALL']) {
+  if (process.env[key] !== undefined) agentEnv[key] = process.env[key]
+}
+agentEnv.CORDON_HOME = cordonHome
+agentEnv.CORDON_PR_HOOK_LOG = hookLog
+
+const lines = (text) => text.split('\n').filter(Boolean).map((line) => JSON.parse(line))
+try {
+  const result = spawnSync('codex', args, {
+    cwd: work, env: agentEnv, encoding: 'utf8',
+    timeout: 180_000, killSignal: 'SIGKILL', maxBuffer: 16 * 1024 * 1024,
+  })
+  process.stdout.write(result.stdout ?? '')
+  process.stderr.write(result.stderr ?? '')
+  if (result.error) throw result.error
+  if (result.status !== 0) throw new Error('PR review incomplete: Codex exited unsuccessfully')
+  const receipt = completeReview(target, runId, {
+    status: result.status,
+    events: lines(result.stdout),
+    hooks: lines(readFileSync(hookLog, 'utf8')),
+    staged: readReviewEvents(ledger),
+  })
+  publishReviewReceipt(receiptPath, receipt)
+  process.stderr.write(`\nCompleted review receipt: ${receiptPath}\n`)
+} catch (error) {
+  process.stderr.write(`\nPR review failed: ${error instanceof Error ? error.message : String(error)}\n`)
   process.exitCode = 1
+} finally {
+  rmSync(temp, { recursive: true, force: true })
 }

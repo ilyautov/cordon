@@ -150,6 +150,9 @@ describe('cordon doctor: printing for the human', () => {
     })
     expect(out).toContain('self-check: ok')
     expect(out).toContain('/hooks')
+    expect(out).toContain('Codex CLI')
+    expect(out).toContain('trust')
+    expect(out).toContain('--disable shell_tool')
   })
 
   it('non-zero exit code only on a breakage', () => {

@@ -90,6 +90,13 @@ exposure: true
 # tools:
 #   mcp__github__create_issue: [create, network-egress]
 
+# Refuse an exact tool name even when its effects are granted. This can keep
+# the native shell closed while a separately isolated executor uses exec.
+# blockedTools: [Bash]
+# To refuse every tool except exact names, declare the complete set. An empty
+# list refuses all calls; omitting this field adds no name restriction.
+# allowedTools: [Read, mcp__sandbox__run, run]
+
 # Memory the agent reloads in later sessions, beyond CLAUDE.md and the like.
 # memory:
 #   files: [TEAM-RULES.md]
@@ -107,7 +114,11 @@ ${profile.budgets.map((budget) => `  - { effect: ${budget.effect}, limit: ${budg
 # task: answer customer tickets for acme.example
 # destinations: ['*@acme.example']
 
-`}# Every refusal, question and rewrite is appended here as JSON Lines.
+`}# After this many calls refused to the agent since your last message, every
+# call that acts waits for you until you write again. 0 turns it off.
+# refusals: 3
+
+# Every refusal, question and rewrite is appended here as JSON Lines.
 notify:
   file: ${join(cordonHome, 'events.jsonl')}
 `

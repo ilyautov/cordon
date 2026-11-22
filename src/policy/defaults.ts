@@ -33,6 +33,13 @@ export interface Policy {
   }
   /** Effect classes for tools the core does not know about. */
   tools: Record<string, EffectClass[]>
+  /** Exact tool names refused even when their effect class is granted. Omitted in older SDK policies. */
+  blockedTools?: string[]
+  /**
+   * Exact tool names permitted to reach later checks. Omission and null add no
+   * name restriction. An empty list refuses every call.
+   */
+  allowedTools?: string[] | null
   /** Sources declared trusted by an explicit decision of the user. */
   trustedSources: string[]
   /**
@@ -152,6 +159,13 @@ export interface Policy {
    * steered, it cannot send more than this. Empty by default.
    */
   budgets: Budget[]
+  /**
+   * After this many calls refused to the agent in one turn, every call that
+   * acts goes back to the human until they write again: an agent that keeps
+   * meeting refusals is where it starts looking for another way to the same
+   * end. 0 turns it off.
+   */
+  refusals: number
   output: {
     /**
      * Whether to append a source-influence footer under the model's answer.
@@ -181,6 +195,8 @@ export const DEFAULT_POLICY: Policy = {
     resources: { paths: [], hosts: [] },
   },
   tools: {},
+  blockedTools: [],
+  allowedTools: null,
   trustedSources: [],
   toolsReturn: {},
   arguments: {},
@@ -192,5 +208,6 @@ export const DEFAULT_POLICY: Policy = {
   memory: { files: [], tools: [] },
   mcp: { pin: true },
   budgets: [],
+  refusals: 3,
   output: { footer: true },
 }

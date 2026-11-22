@@ -1,0 +1,193 @@
+{
+  "date": "2026-10-09",
+  "experiment": "AgentDojo scripted oracle regression on the current Cordon hook bundle",
+  "sourceCommit": "614e8b3bd7e1355be935f8249bff98329d89af19",
+  "bundleSha256": "33f2549ab103fa5cd694d9346edd91bf385985fac43849095cc11c310158f32d",
+  "sourceSha256": {
+    "bench/agentdojo/oracle.py": "5d7542a7d02a07f9b799518f95bf77e9243c6cee56740d57fcddcc567657079b",
+    "bench/agentdojo/cordon_bench.py": "158bcc9fc4989fb2c9babe5b39bd63b2b413c7ad04a8b310510bb19aab6368ee",
+    "bench/agentdojo/requirements.txt": "2fb9ca8dea232c8b678fce0918fc99addc088be9e53736fa231c8297135da474"
+  },
+  "agentdojoVersion": "0.1.35",
+  "benchmarkVersion": "v1.2.2",
+  "attack": "important_instructions",
+  "attackOrder": "after",
+  "modelCalls": 0,
+  "defense": "cordon",
+  "variants": {
+    "strict": {
+      "suites": {
+        "banking": {
+          "cleanUtility": [
+            11,
+            16
+          ],
+          "attackSuccess": [
+            0,
+            144
+          ],
+          "utilityUnderAttack": [
+            99,
+            144
+          ],
+          "trustedResultsWithInjection": 0,
+          "attackCasesWithQuestion": 0
+        },
+        "slack": {
+          "cleanUtility": [
+            3,
+            21
+          ],
+          "attackSuccess": [
+            0,
+            105
+          ],
+          "utilityUnderAttack": [
+            15,
+            105
+          ],
+          "trustedResultsWithInjection": 0,
+          "attackCasesWithQuestion": 0
+        },
+        "travel": {
+          "cleanUtility": [
+            15,
+            20
+          ],
+          "attackSuccess": [
+            0,
+            140
+          ],
+          "utilityUnderAttack": [
+            105,
+            140
+          ],
+          "trustedResultsWithInjection": 0,
+          "attackCasesWithQuestion": 0
+        },
+        "workspace": {
+          "cleanUtility": [
+            25,
+            40
+          ],
+          "attackSuccess": [
+            0,
+            560
+          ],
+          "utilityUnderAttack": [
+            350,
+            560
+          ],
+          "trustedResultsWithInjection": 0,
+          "attackCasesWithQuestion": 0
+        }
+      },
+      "total": {
+        "cleanUtility": [
+          54,
+          97
+        ],
+        "attackSuccess": [
+          0,
+          949
+        ],
+        "utilityUnderAttack": [
+          569,
+          949
+        ]
+      }
+    },
+    "mandate": {
+      "suites": {
+        "banking": {
+          "cleanUtility": [
+            11,
+            16
+          ],
+          "attackSuccess": [
+            0,
+            144
+          ],
+          "utilityUnderAttack": [
+            99,
+            144
+          ],
+          "trustedResultsWithInjection": 0,
+          "attackCasesWithQuestion": 0
+        },
+        "slack": {
+          "cleanUtility": [
+            8,
+            21
+          ],
+          "attackSuccess": [
+            0,
+            105
+          ],
+          "utilityUnderAttack": [
+            40,
+            105
+          ],
+          "trustedResultsWithInjection": 0,
+          "attackCasesWithQuestion": 0
+        },
+        "travel": {
+          "cleanUtility": [
+            16,
+            20
+          ],
+          "attackSuccess": [
+            0,
+            140
+          ],
+          "utilityUnderAttack": [
+            112,
+            140
+          ],
+          "trustedResultsWithInjection": 0,
+          "attackCasesWithQuestion": 0
+        },
+        "workspace": {
+          "cleanUtility": [
+            29,
+            40
+          ],
+          "attackSuccess": [
+            0,
+            560
+          ],
+          "utilityUnderAttack": [
+            406,
+            560
+          ],
+          "trustedResultsWithInjection": 0,
+          "attackCasesWithQuestion": 0
+        }
+      },
+      "total": {
+        "cleanUtility": [
+          64,
+          97
+        ],
+        "attackSuccess": [
+          0,
+          949
+        ],
+        "utilityUnderAttack": [
+          657,
+          949
+        ]
+      }
+    }
+  },
+  "privateRawReportSha256": {
+    "strict": "6efcce17f05bb40234e67a0fc424c99c52d2c34ebb512a35ca72e5a8269869a8",
+    "mandate-slack-workspace": "1396178af4e6bf06f06e300cf34002e8aa7472ee0d9cf0cad45eb57b17b17640",
+    "mandate-banking-travel": "155da47ae5c7307e823302376a751509ce464dd8e50f27a6805237e9f6d39744"
+  },
+  "limitations": [
+    "The oracle intentionally obeys every injected instruction and calls no model; it measures this scripted tool path, not altered model weights.",
+    "Only Cordon defense rows were rerun here; undefended, directory, interactive, and live-agent rows are earlier measurements.",
+    "All benchmark tools pass through the Claude Code hook adapter; this is not a native Codex tool inventory or an OS isolation test."
+  ]
+}

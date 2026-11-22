@@ -3,7 +3,7 @@ import { ensureBuiltCli } from './support/built-cli.js'
 import { PinStore } from '../src/session/pins.js'
 import { ApprovalStore, approvalId } from '../src/session/approvals.js'
 import { spawnSync } from 'node:child_process'
-import { chmodSync, readFileSync, writeFileSync, mkdtempSync } from 'node:fs'
+import { chmodSync, mkdirSync, readFileSync, realpathSync, writeFileSync, mkdtempSync } from 'node:fs'
 import { tmpdir, userInfo } from 'node:os'
 import { dirname, join } from 'node:path'
 
@@ -16,8 +16,10 @@ function run(
   args: string[],
   input?: string,
   env?: Record<string, string>,
+  cwd?: string,
 ): { stdout: string; stderr: string; status: number } {
   const result = spawnSync('node', [CLI, ...args], {
+    cwd,
     input: input ?? '',
     encoding: 'utf8',
     env: { ...process.env, ...env },
@@ -169,6 +171,27 @@ describe('cordon mcp approve', () => {
   })
 })
 
+describe('cordon mcp approval wait flag', () => {
+  beforeAll(() => {
+    ensureBuiltCli()
+  }, 60_000)
+
+  it('rejects a zero or malformed wait instead of silently starting the server', () => {
+    for (const value of ['0', '-1', '1.5', 'wrong']) {
+      const home = mkdtempSync(join(tmpdir(), 'cordon-mcp-cli-'))
+      const result = run(['mcp', '--wait-for-approval-ms', value, '--', process.execPath, '-e', ''], '', { CORDON_HOME: home })
+      expect(result.status).toBe(2)
+      expect(result.stderr).toContain('wait-for-approval-ms')
+    }
+  })
+
+  it('rejects unknown gateway flags', () => {
+    const home = mkdtempSync(join(tmpdir(), 'cordon-mcp-cli-'))
+    const result = run(['mcp', '--unknown', '--', process.execPath, '-e', ''], '', { CORDON_HOME: home })
+    expect(result.status).toBe(2)
+  })
+})
+
 describe('cordon audit', () => {
   beforeAll(() => {
     ensureBuiltCli()
@@ -207,6 +230,20 @@ describe('cordon audit', () => {
     expect(sarif.version).toBe('2.1.0')
     expect(sarif.runs[0].tool.driver.name).toBe('cordon')
     expect(sarif.runs[0].results.map((result: { ruleId: string }) => result.ruleId)).toContain('CA201')
+  })
+
+  it('flushes a SARIF result larger than the pipe buffer before exiting', () => {
+    const { root, home } = project()
+    const mcpServers = Object.fromEntries(Array.from({ length: 256 }, (_, index) => [
+      `fs${index}`, { command: 'npx', args: ['server-fs'] },
+    ]))
+    writeFileSync(join(root, '.mcp.json'), JSON.stringify({ mcpServers }))
+    const { stdout, status } = run(['audit', root, '--sarif'], '', { HOME: home })
+    expect(status).toBe(0)
+    expect(stdout.length).toBeGreaterThan(64 * 1024)
+    const sarif = JSON.parse(stdout)
+    expect(sarif.version).toBe('2.1.0')
+    expect(sarif.runs[0].results.length).toBeGreaterThan(100)
   })
 
   it('an unknown severity is a usage error', () => {
@@ -259,6 +296,108 @@ describe('CORDON_HOME with a leading tilde', () => {
     const user = mkdtempSync(join(tmpdir(), 'cordon-tilde-'))
     const { stdout } = run(['doctor'], '', { HOME: user, CORDON_HOME: '~/.cordon-pinned' })
     expect(stdout).toContain(join(user, '.cordon-pinned'))
+  })
+})
+
+describe('cordon doctor --json', () => {
+  beforeAll(() => {
+    ensureBuiltCli()
+  }, 60_000)
+
+  it('reports the effective policy and the scope of the check to CI', () => {
+    const home = mkdtempSync(join(tmpdir(), 'cordon-doctor-'))
+    writeFileSync(join(home, 'policy.yaml'), 'exposure: false\n')
+    const { stdout, status } = run(['doctor', '--json'], '', { CORDON_HOME: home })
+    expect(status).toBe(0)
+    expect(JSON.parse(stdout)).toMatchObject({
+      home, selfCheck: 'ok', hookWiring: 'unchecked', exposure: false,
+      warnings: expect.arrayContaining([expect.stringContaining('exposure')]),
+    })
+  })
+
+  it('keeps a broken policy machine-readable and exits with failure', () => {
+    const home = mkdtempSync(join(tmpdir(), 'cordon-doctor-'))
+    writeFileSync(join(home, 'policy.yaml'), 'mode: [\n')
+    const { stdout, status } = run(['doctor', '--json'], '', { CORDON_HOME: home })
+    expect(status).toBe(1)
+    expect(JSON.parse(stdout)).toMatchObject({
+      selfCheck: 'broken', warnings: expect.arrayContaining([expect.stringContaining('policy')]),
+    })
+  })
+})
+
+describe('cordon probe codex', () => {
+  beforeAll(() => ensureBuiltCli(), 60_000)
+
+  it('requires the refusal for this challenge and an absent marker', () => {
+    const cwd = realpathSync(mkdtempSync(join(tmpdir(), 'cordon-probe-project-')))
+    const home = mkdtempSync(join(tmpdir(), 'cordon-probe-home-'))
+    const env = { CORDON_HOME: home }
+    const cli = (args: string[], input = '') => run(args, input, env, cwd)
+    expect(cli(['init', '--profile', 'coding']).status).toBe(0)
+    const start = () => JSON.parse(cli(['probe', 'codex']).stdout) as { id: string; path: string }
+    const first = start()
+    const other = start()
+    const check = (id: string) => cli(['probe', 'codex', '--check', id])
+    expect(check(first.id).status).toBe(1)
+    const event = {
+      session_id: 'probe-test', hook_event_name: 'PreToolUse', cwd,
+      tool_name: 'apply_patch',
+      tool_input: { command: `*** Begin Patch\n*** Add File: ${first.path}\n+probe\n*** End Patch` },
+    }
+    expect(cli(['hook', '--harness', 'codex'], JSON.stringify(event)).status).toBe(2)
+    expect(check(other.id).status).toBe(1)
+    expect(check(first.id).status).toBe(0)
+    const marker = join(cwd, first.path)
+    mkdirSync(dirname(marker), { recursive: true })
+    writeFileSync(marker, 'probe')
+    expect(check(first.id).status).toBe(1)
+  })
+
+  it.each(['codex', 'claude-code'])('checks both file outcomes for %s', harness => {
+    const cwd = realpathSync(mkdtempSync(join(tmpdir(), 'cordon-pair-project-')))
+    const env = { CORDON_HOME: mkdtempSync(join(tmpdir(), 'cordon-pair-home-')) }
+    const cli = (args: string[], input = '') => run(args, input, env, cwd)
+    expect(cli(['init', '--profile', 'coding']).status).toBe(0)
+    const args = ['probe', harness, '--pair']
+    const start = cli(args)
+    expect(start.status).toBe(0)
+    const { id, allowedPath, deniedPath } = JSON.parse(start.stdout)
+    const check = () => cli([...args, '--check', id, '--host-version', 'test-build'])
+    const send = (path: string) => cli(['hook', '--harness', harness], JSON.stringify({
+      session_id: 'probe', hook_event_name: 'PreToolUse', cwd,
+      tool_name: harness === 'codex' ? 'apply_patch' : 'Write',
+      tool_input: harness === 'codex'
+        ? { command: `*** Begin Patch\n*** Add File: ${path}\n+${id}\n*** End Patch` }
+        : { file_path: path, content: id },
+    }))
+    expect(send(allowedPath).status).toBe(0)
+    expect(send(deniedPath).status).toBe(2)
+    expect(check().status).toBe(1)
+    writeFileSync(allowedPath, 'incorrect marker')
+    expect(check().status).toBe(1)
+    writeFileSync(allowedPath, id + '\n')
+    const passed = check()
+    expect(passed.status).toBe(0)
+    expect(JSON.parse(passed.stdout)).toMatchObject({
+      harness, id, reportedHostVersion: 'test-build', policyAtCheck: expect.any(String), allowedMarker: 'matched', deniedMarker: 'absent', refusalRecorded: true, outcome: 'passed',
+    })
+    const policyFile = join(env.CORDON_HOME, 'policy.yaml')
+    const original = readFileSync(policyFile, 'utf8')
+    writeFileSync(policyFile, original.replace('exposure: true', 'exposure: false'))
+    expect(check().status).toBe(1)
+    writeFileSync(policyFile, original)
+    mkdirSync(dirname(deniedPath), { recursive: true })
+    writeFileSync(deniedPath, id)
+    const failed = check()
+    expect(failed.status).toBe(1)
+    expect(JSON.parse(failed.stdout)).toMatchObject({ deniedMarker: 'present', outcome: 'failed' })
+  })
+
+  it('rejects arbitrary paths in place of a challenge id', () => {
+    const result = run(['probe', 'codex', '--check', '../other-file'])
+    expect(result.status).toBe(2)
+    expect(result.stderr).toContain('usage: cordon probe codex')
   })
 })
 
@@ -394,6 +533,35 @@ describe('cordon approve', () => {
     expect(stdout).toContain('a@example.com')
   })
 
+  it('makes invisible and direction-changing characters visible before owner approval', () => {
+    const home = mkdtempSync(join(tmpdir(), 'cordon-approve-'))
+    const args = {
+      to: 'ops@example.com\u202Eattacker.example',
+      body: 'review\u200Bme\u2066\uFE0F\u{E0100}',
+    }
+    const id = approvalId('s', { tool: 'send_email', args })
+    new ApprovalStore(home).request(id, { tool: 'send_email', reason: 'outside the certificate', args })
+
+    const listed = run(['approve'], '', { CORDON_HOME: home })
+    expect(listed.status).toBe(0)
+    expect(listed.stdout).toContain('\\u202e')
+    expect(listed.stdout).toContain('\\u200b')
+    expect(listed.stdout).toContain('\\u2066')
+    expect(listed.stdout).toContain('\\ufe0f')
+    expect(listed.stdout).toContain('\\u{e0100}')
+    expect(listed.stdout).not.toContain('\u202E')
+    expect(listed.stdout).not.toContain('\u200B')
+    expect(listed.stdout).not.toContain('\u2066')
+    expect(listed.stdout).not.toContain('\uFE0F')
+    expect(listed.stdout).not.toContain('\u{E0100}')
+
+    const approved = run(['approve', id], '', { CORDON_HOME: home })
+    expect(approved.status).toBe(0)
+    expect(approved.stdout).toContain('\\u202e')
+    expect(approved.stdout).not.toContain('\u202E')
+    expect(new ApprovalStore(home).take(id, '').taken).toBe(true)
+  })
+
   it('shows what the session had read when it asked', () => {
     // The owner approves a question, and what the agent had read is half of
     // it: the same call after a page is a different request (Kimi).
@@ -467,6 +635,29 @@ describe('cordon approve', () => {
     expect(new ApprovalStore(home).take(id, '').taken).toBe(true)
   })
 
+  it('shows all long arguments with terminal controls escaped without approving', () => {
+    const home = mkdtempSync(join(tmpdir(), 'cordon-approve-'))
+    const args = { body: 'x'.repeat(5000) + '\u001b[2J', to: 'attacker\u202E@example.com' }
+    const id = approvalId('s', { tool: 'send_email', args })
+    new ApprovalStore(home).request(id, { tool: 'send_email', reason: 'outside the certificate', args })
+
+    const shown = run(['approve', id, '--show'], '', { CORDON_HOME: home })
+    expect(shown.status).toBe(0)
+    expect(shown.stdout).toContain('attacker\\u202e@example.com')
+    expect(shown.stdout).toContain('\\u001b[2J')
+    expect(shown.stdout).not.toContain('\u001b')
+    expect(shown.stdout).not.toContain('\u202E')
+    expect(new ApprovalStore(home).take(id, '').taken).toBe(false)
+
+    const mixed = run(['approve', id, '--show', '--read'], '', { CORDON_HOME: home })
+    expect(mixed.status).toBe(2)
+    expect(new ApprovalStore(home).take(id, '').taken).toBe(false)
+
+    const mistyped = run(['approve', id, '--showw'], '', { CORDON_HOME: home })
+    expect(mistyped.status).toBe(2)
+    expect(new ApprovalStore(home).take(id, '').taken).toBe(false)
+  })
+
   it('a malformed id is a usage error', () => {
     expect(run(['approve', '../policy'], '', { CORDON_HOME: mkdtempSync(join(tmpdir(), 'cordon-approve-')) }).status).toBe(2)
   })
@@ -490,10 +681,27 @@ describe('cordon policy check and explain', () => {
     expect(stdout).toContain('financial is granted')
   })
 
+  it('distinguishes exec reach from a network-egress grant', () => {
+    const { stdout, status } = run(['policy', 'check', file('mode: interactive\nprofile:\n  effects: [read, exec]\n')], '', {})
+    expect(status).toBe(0)
+    expect(stdout).toContain('cannot enforce path or host bounds or prevent network access by withholding network-egress')
+    expect(stdout).not.toContain('the network is granted')
+  })
+
   it('check fails a file the loader would refuse, with the loader\'s words', () => {
     const { stderr, status } = run(['policy', 'check', file('mode: sometimes\n')], '', {})
     expect(status).toBe(1)
     expect(stderr).toContain('mode must be interactive or autonomous')
+  })
+
+  it('does not report a missing explicit draft as the valid default policy', () => {
+    const missing = join(mkdtempSync(join(tmpdir(), 'cordon-policy-')), 'missing.yaml')
+    for (const verb of ['check', 'explain']) {
+      const { stdout, stderr, status } = run(['policy', verb, missing], '', {})
+      expect(status).toBe(1)
+      expect(stderr).toContain('ENOENT')
+      expect(stdout).not.toContain('valid')
+    }
   })
 
   it('check fails on a warning, so a drafted mandate that grants too much does not pass quietly', () => {
@@ -513,6 +721,13 @@ describe('cordon policy check and explain', () => {
     const home = mkdtempSync(join(tmpdir(), 'cordon-home-'))
     writeFileSync(join(home, 'policy.yaml'), 'mode: interactive\n')
     expect(run(['policy', 'explain'], '', { CORDON_HOME: home }).stdout).toContain('Mode: interactive')
+  })
+
+  it('with no file and no active policy, explains the safe default', () => {
+    const home = mkdtempSync(join(tmpdir(), 'cordon-home-'))
+    const { stdout, status } = run(['policy', 'explain'], '', { CORDON_HOME: home })
+    expect(status).toBe(0)
+    expect(stdout).toContain('The agent may: read, summarize.')
   })
 })
 
@@ -678,4 +893,3 @@ describe('records of who allowed what', () => {
     expect(readFileSync(join(home, 'policy.yaml'), 'utf8')).toBe(before)
   })
 })
-

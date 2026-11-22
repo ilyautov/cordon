@@ -10,10 +10,10 @@ import type { Policy } from '../../policy/defaults.js'
 import { viewIsUnknown, type Source, type ToolCall } from '../../core/types.js'
 import type { Finding } from '../../sanitize/types.js'
 import { classifySource } from '../../provenance/trust.js'
-import { extractText, replaceText } from './output.js'
+import { extractText, replaceText } from '../../output/tool-text.js'
 import { renderDecision, silentOnFailure, type HookEvent, type HookOutput } from './protocol.js'
 import { sourceLabel } from '../../core/argument-keys.js'
-import { CLAUDE_CODE, type Dialect } from './dialect.js'
+import { CLAUDE_CODE, policyForDialect, type Dialect } from './dialect.js'
 
 export interface AdapterEnv {
   policy: Policy
@@ -54,11 +54,7 @@ export function handle(event: HookEvent, env: AdapterEnv, dialect: Dialect = CLA
 }
 
 function dispatch(event: HookEvent, given: AdapterEnv, dialect: Dialect): HookOutput {
-  // A harness's own built-in tools lie under the policy's declarations, the
-  // way Gemini's do: the owner's word on a tool wins.
-  const env: AdapterEnv = Object.keys(dialect.builtin).length === 0
-    ? given
-    : { ...given, policy: { ...given.policy, tools: { ...dialect.builtin, ...given.policy.tools } } }
+  const env = { ...given, policy: policyForDialect(given.policy, dialect) }
   if (event.kind === 'ignored') return {}
   if (event.kind === 'unparsable') {
     if (event.silent === true) return {}
@@ -250,6 +246,7 @@ function observe(
   // A bridge that flattens results is not known to have dropped anything, so
   // it only loses the inert exemption.
   cordon.observeLinks(extracted.links, source)
+  if (extracted.opaque) cordon.observeUnseen(source)
   if (extracted.unseen) cordon.markUnredacted()
   else if (dialect.partialResults && !dialect.textless(event.call)) cordon.observeUnseen(source)
   // A lookup the policy declares binds names to values for the gate. The
@@ -378,7 +375,7 @@ function report(
 }
 
 /** Built-in tools that fetch from the web, in every harness this adapter serves. */
-const WEB_TOOLS: ReadonlySet<string> = new Set(['WebFetch', 'WebSearch', 'FetchURL', 'web_fetch', 'web_search'])
+const WEB_TOOLS: ReadonlySet<string> = new Set(['WebFetch', 'WebSearch', 'FetchURL', 'web_fetch', 'web_search', 'webrun'])
 
 /** Built-in tools that read files. */
 const FILE_TOOLS: ReadonlySet<string> = new Set([

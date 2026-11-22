@@ -25,6 +25,8 @@ export const RULES = {
   malformed: { class: 'guard-failure', tier: 'precaution' },
   failure: { class: 'guard-failure', tier: 'precaution' },
   pin: { class: 'tool-rug-pull', tier: 'evidence' },
+  'tool-blocked': { class: 'out-of-scope', tier: 'precaution' },
+  'tool-not-allowed': { class: 'out-of-scope', tier: 'precaution' },
   'self-protection': { class: 'guard-tampering', tier: 'precaution' },
   'agent-config': { class: 'guard-tampering', tier: 'suspicion' },
   unscanned: { class: 'unscanned-content', tier: 'suspicion' },
@@ -40,6 +42,7 @@ export const RULES = {
   'memory-write': { class: 'memory-poisoning', tier: 'evidence' },
   provenance: { class: 'untrusted-payload', tier: 'evidence' },
   budget: { class: 'flooding', tier: 'precaution' },
+  refusals: { class: 'drift', tier: 'precaution' },
 } as const satisfies Record<string, { class: string; tier: Tier }>
 
 export type Tier = 'evidence' | 'suspicion' | 'precaution'

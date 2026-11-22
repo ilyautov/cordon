@@ -1,0 +1,169 @@
+import { spawn } from 'node:child_process'
+import { createServer } from 'node:http'
+import { join } from 'node:path'
+import { afterEach, describe, expect, it } from 'vitest'
+
+const children: Array<ReturnType<typeof spawn>> = []
+
+afterEach(() => {
+  for (const child of children) child.kill('SIGTERM')
+  children.length = 0
+})
+
+describe('benchmark model proxy', () => {
+  it('forwards only Responses calls for the pinned local model', async () => {
+    const received: Array<{ method: string | undefined, path: string | undefined, body: unknown }> = []
+    const upstream = createServer(async (request, response) => {
+      const body = await new Promise<string>((resolve) => {
+        let value = ''
+        request.setEncoding('utf8').on('data', (part) => { value += part })
+        request.on('end', () => resolve(value))
+      })
+      received.push({ method: request.method, path: request.url, body: JSON.parse(body) })
+      response.writeHead(200, { 'content-type': 'text/event-stream' })
+      response.end('data: [DONE]\n\n')
+    })
+    await new Promise<void>((resolve) => upstream.listen(0, '127.0.0.1', resolve))
+    try {
+      const address = upstream.address()
+      if (!address || typeof address === 'string') throw new Error('upstream address missing')
+      let stderr = ''
+      const child = spawn(process.execPath, [join(process.cwd(), 'bench/model-origin/ollama-proxy.mjs')], {
+        env: { ...process.env, CORDON_MODEL_ID: 'qwen2.5:3b',
+          CORDON_MODEL_UPSTREAM: `http://127.0.0.1:${address.port}`,
+          CORDON_MODEL_PORT: '0' },
+        stdio: ['ignore', 'ignore', 'pipe'],
+      })
+      children.push(child)
+      const port = await new Promise<number>((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error('proxy did not start: ' + stderr)), 5000)
+        child.stderr.setEncoding('utf8').on('data', (part) => {
+          stderr += part
+          const match = stderr.match(/CORDON_MODEL_READY=(\d+)/u)
+          if (match) { clearTimeout(timer); resolve(Number(match[1])) }
+        })
+        child.once('exit', (code) => { clearTimeout(timer); reject(new Error('proxy exited: ' + code + ' ' + stderr)) })
+      })
+      const base = `http://127.0.0.1:${port}`
+      const tool = { type: 'function', name: 'mcp__runner__run',
+        description: 'Only a hashed declaration belongs in the proxy log',
+        parameters: { type: 'object', properties: { command: { type: 'string' } } } }
+      const namespace = { type: 'namespace', name: 'mcp__runner',
+        description: 'NESTED_SECRET_DESCRIPTION', tools: [{ type: 'function', name: 'run',
+          parameters: { type: 'object', properties: { command: { type: 'string' } } } }] }
+      const allowed = await fetch(base + '/v1/responses', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ model: 'qwen2.5:3b', input: 'SECRET_CONTENT_MARKER',
+          stream: true, tools: [tool, namespace] }),
+      })
+      expect(allowed.status).toBe(200)
+      expect(await allowed.text()).toBe('data: [DONE]\n\n')
+      for (const [method, path, model] of [
+        ['GET', '/v1/responses', null],
+        ['POST', '/api/generate', 'qwen2.5:3b'],
+        ['POST', '/v1/responses', 'other-model'],
+      ] as const) {
+        const denied = await fetch(base + path, {
+          method, headers: { 'content-type': 'application/json' },
+          ...(method === 'POST' ? { body: JSON.stringify({ model }) } : {}),
+        })
+        expect(denied.status).toBe(403)
+      }
+      expect(received).toEqual([{ method: 'POST', path: '/v1/responses',
+        body: { model: 'qwen2.5:3b', input: 'SECRET_CONTENT_MARKER',
+          stream: true, tools: [tool, namespace] } }])
+      const summaryLine = stderr.split('\n').find((line) => line.startsWith('CORDON_MODEL_TOOLS='))
+      expect(summaryLine).toBeDefined()
+      const summary = JSON.parse(summaryLine!.slice('CORDON_MODEL_TOOLS='.length))
+      expect(summary.count).toBe(2)
+      expect(summary.tools[0].name).toBe('mcp__runner__run')
+      expect(summary.tools[0].parameterKeys).toEqual(['command'])
+      expect(summary.tools[0].declarationKeys).toEqual(['type', 'name', 'description', 'parameters'])
+      expect(summary.tools[0].sha256).toMatch(/^[a-f0-9]{64}$/u)
+      expect(summary.tools[1].members).toMatchObject({ count: 1, truncated: false,
+        tools: [{ type: 'function', name: 'run', parameterKeys: ['command'] }] })
+      expect(summary.tools[1].members.tools[0].sha256).toMatch(/^[a-f0-9]{64}$/u)
+      expect(stderr).not.toContain('SECRET_CONTENT_MARKER')
+      expect(stderr).not.toContain('Only a hashed declaration')
+      expect(stderr).not.toContain('NESTED_SECRET_DESCRIPTION')
+
+      let captureStderr = ''
+      const capture = spawn(process.execPath,
+        [join(process.cwd(), 'bench/model-origin/ollama-proxy.mjs')], {
+          env: { ...process.env, CORDON_MODEL_ID: 'qwen2.5:3b',
+            CORDON_MODEL_UPSTREAM: `http://127.0.0.1:${address.port}`,
+            CORDON_MODEL_PORT: '0', CORDON_MODEL_CAPTURE_TOOLS: '1',
+            CORDON_MODEL_CAPTURE_REQUESTS: '1' },
+          stdio: ['ignore', 'ignore', 'pipe'],
+        })
+      children.push(capture)
+      const capturePort = await new Promise<number>((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error('capture proxy did not start')), 5000)
+        capture.stderr.setEncoding('utf8').on('data', (part) => {
+          captureStderr += part
+          const match = captureStderr.match(/CORDON_MODEL_READY=(\d+)/u)
+          if (match) { clearTimeout(timer); resolve(Number(match[1])) }
+        })
+      })
+      const captured = await fetch(`http://127.0.0.1:${capturePort}/v1/responses`, {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ model: 'qwen2.5:3b', input: 'SECRET_CONTENT_MARKER',
+          stream: true, tools: [tool, namespace] }),
+      })
+      expect(captured.status).toBe(200)
+      await captured.text()
+      const captureLine = captureStderr.split('\n')
+        .find((line) => line.startsWith('CORDON_MODEL_TOOL_DECLARATIONS='))
+      expect(captureLine).toBeDefined()
+      expect(JSON.parse(captureLine!.slice('CORDON_MODEL_TOOL_DECLARATIONS='.length)))
+        .toEqual([tool, namespace])
+      const requestLine = captureStderr.split('\n')
+        .find((line) => line.startsWith('CORDON_MODEL_REQUEST='))
+      expect(requestLine).toBeDefined()
+      expect(JSON.parse(requestLine!.slice('CORDON_MODEL_REQUEST='.length)))
+        .toEqual({ model: 'qwen2.5:3b', input: 'SECRET_CONTENT_MARKER',
+          stream: true, tools: [tool, namespace] })
+
+      let filteredStderr = ''
+      const filtered = spawn(process.execPath,
+        [join(process.cwd(), 'bench/model-origin/ollama-proxy.mjs')], {
+          env: { ...process.env, CORDON_MODEL_ID: 'qwen2.5:3b',
+            CORDON_MODEL_UPSTREAM: `http://127.0.0.1:${address.port}`,
+            CORDON_MODEL_PORT: '0', CORDON_MODEL_TOOL_FILTER: 'runner-only' },
+          stdio: ['ignore', 'ignore', 'pipe'],
+        })
+      children.push(filtered)
+      const filteredPort = await new Promise<number>((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error('filtered proxy did not start')), 5000)
+        filtered.stderr.setEncoding('utf8').on('data', (part) => {
+          filteredStderr += part
+          const match = filteredStderr.match(/CORDON_MODEL_READY=(\d+)/u)
+          if (match) { clearTimeout(timer); resolve(Number(match[1])) }
+        })
+      })
+      const filteredBase = `http://127.0.0.1:${filteredPort}`
+      const result = await fetch(filteredBase + '/v1/responses', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ model: 'qwen2.5:3b', stream: true,
+          input: 'SECRET_CONTENT_MARKER', tools: [tool, namespace] }),
+      })
+      expect(result.status).toBe(200)
+      await result.text()
+      expect(received.at(-1)?.body).toEqual({ model: 'qwen2.5:3b', stream: true,
+        input: 'SECRET_CONTENT_MARKER', tools: [namespace] })
+      expect(filteredStderr).toContain('CORDON_MODEL_SOURCE_TOOL_COUNT=2')
+      const filteredSummary = filteredStderr.split('\n')
+        .find((line) => line.startsWith('CORDON_MODEL_TOOLS='))
+      expect(JSON.parse(filteredSummary!.slice('CORDON_MODEL_TOOLS='.length)).count).toBe(1)
+      const beforeRejected = received.length
+      const rejected = await fetch(filteredBase + '/v1/responses', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ model: 'qwen2.5:3b', tools: [tool] }),
+      })
+      expect(rejected.status).toBe(422)
+      expect(received).toHaveLength(beforeRejected)
+    } finally {
+      upstream.close()
+    }
+  })
+})

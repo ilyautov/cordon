@@ -2,61 +2,46 @@ import { chmodSync, mkdtempSync, readFileSync, readdirSync, symlinkSync, writeFi
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { appendReviewEvent, readReviewEvents, approveHead, approvalFor, consumeApproval } from '../../src/pr-workflow/store.js'
+import { appendReviewEvent, publishReviewReceipt, readReviewEvents, readReviewReceipt } from '../../src/pr-workflow/store.js'
 
 const target = { repo: 'owner/project', number: 12, headSha: 'a'.repeat(40) }
+const diffSha256 = 'b'.repeat(64)
+const receipt = { ...target, kind: 'review-completed' as const, diffSha256,
+  runId: '00000000-0000-4000-8000-000000000001', mergeProposed: true }
 
-describe('owner-only PR records', () => {
-  it('records only structured evidence and refuses a corrupt ledger', () => {
+describe('local PR review records', () => {
+  it('keeps staged evidence separate from completed receipts', () => {
     const root = mkdtempSync(join(tmpdir(), 'cordon-pr-records-'))
     const ledger = join(root, 'reads.jsonl')
-    appendReviewEvent(ledger, { kind: 'diff-read', ...target, diffSha256: 'b'.repeat(64) })
-    expect(readReviewEvents(ledger)).toEqual([{ kind: 'diff-read', ...target, diffSha256: 'b'.repeat(64) }])
-    expect(readFileSync(ledger, 'utf8')).not.toContain('PR title')
-    writeFileSync(ledger, 'not json\n')
-    expect(() => readReviewEvents(ledger)).toThrow(/invalid review ledger/)
+    const event = { kind: 'diff-read' as const, ...target, diffSha256 }
+    appendReviewEvent(ledger, event)
+    expect(readReviewEvents(ledger)).toEqual([event])
+    expect(() => readReviewReceipt(ledger)).toThrow(/invalid completed review receipt/)
+    writeFileSync(ledger, 'partial\n')
+    expect(() => readReviewEvents(ledger)).toThrow(/invalid staged review evidence/)
   })
 
-  it('never follows a ledger symlink, including a dangling one', () => {
+  it('never follows a symlink for the receipt or staging file', () => {
     const root = mkdtempSync(join(tmpdir(), 'cordon-pr-records-'))
     const targetFile = join(root, 'other.txt')
-    writeFileSync(targetFile, 'unchanged')
-    const linked = join(root, 'linked.jsonl')
+    writeFileSync(targetFile, 'unchanged', { mode: 0o600 })
+    const linked = join(root, 'linked.json')
     symlinkSync(targetFile, linked)
-    const event = { kind: 'merge-proposed' as const, ...target }
-    expect(() => appendReviewEvent(linked, event)).toThrow()
+    expect(() => publishReviewReceipt(linked, receipt)).toThrow()
+    expect(() => readReviewReceipt(linked)).toThrow()
+    expect(() => appendReviewEvent(linked, { kind: 'merge-proposed', ...target, diffSha256 })).toThrow()
     expect(readFileSync(targetFile, 'utf8')).toBe('unchanged')
-    const dangling = join(root, 'dangling.jsonl')
-    symlinkSync(join(root, 'missing.txt'), dangling)
-    expect(() => appendReviewEvent(dangling, event)).toThrow()
   })
 
-  it('refuses a ledger or approval file writable by another account', () => {
+  it('publishes a private receipt once and never replaces an existing record', () => {
     const root = mkdtempSync(join(tmpdir(), 'cordon-pr-records-'))
-    const ledger = join(root, 'reads.jsonl')
-    appendReviewEvent(ledger, { kind: 'merge-proposed', ...target })
-    chmodSync(ledger, 0o666)
-    expect(() => readReviewEvents(ledger)).toThrow(/invalid review ledger/)
-    const approvals = join(root, 'approvals')
-    approveHead(approvals, target, 1_000)
-    chmodSync(join(approvals, readdirSync(approvals)[0]!), 0o666)
-    expect(() => approvalFor(approvals, target, 1_001)).toThrow(/invalid approval record/)
-  })
-
-  it('binds approval to one repo, PR and SHA, then spends it once', () => {
-    const root = mkdtempSync(join(tmpdir(), 'cordon-pr-approval-'))
-    approveHead(root, target, 1_000)
-    expect(approvalFor(root, target, 1_001)).toEqual(target)
-    expect(approvalFor(root, { ...target, headSha: 'c'.repeat(40) }, 1_001)).toBeNull()
-    expect(consumeApproval(root, target, 1_001)).toBe(true)
-    expect(consumeApproval(root, target, 1_001)).toBe(false)
-  })
-
-  it('rejects expired approval and duplicate approval for one head', () => {
-    const root = mkdtempSync(join(tmpdir(), 'cordon-pr-approval-'))
-    approveHead(root, target, 1_000)
-    expect(() => approveHead(root, target, 1_001)).toThrow()
-    expect(approvalFor(root, target, 3_601_001)).toBeNull()
-    expect(consumeApproval(root, target, 3_601_001)).toBe(false)
+    const output = join(root, 'receipt.json')
+    publishReviewReceipt(output, receipt)
+    expect(readReviewReceipt(output)).toEqual(receipt)
+    expect(() => publishReviewReceipt(output, { ...receipt, mergeProposed: false })).toThrow()
+    expect(readReviewReceipt(output)).toEqual(receipt)
+    expect(readdirSync(root)).toEqual(['receipt.json'])
+    chmodSync(output, 0o666)
+    expect(() => readReviewReceipt(output)).toThrow(/invalid completed review receipt/)
   })
 })

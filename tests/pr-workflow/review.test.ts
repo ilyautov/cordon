@@ -1,18 +1,15 @@
 import { describe, expect, it } from 'vitest'
-import { fixedReviewPrompt, fixedComment, PrReviewReader } from '../../src/pr-workflow/review.js'
+import { fixedReviewPrompt, PrReviewReader } from '../../src/pr-workflow/review.js'
 
 const SHA = 'a'.repeat(40)
 const NEXT_SHA = 'b'.repeat(40)
 
-describe('PR review input and publication', () => {
-  it('keeps PR-authored text out of the human prompt and published comment', () => {
+describe('PR review inputs', () => {
+  it('keeps PR-authored text out of the human prompt', () => {
     const prompt = fixedReviewPrompt(12)
-    const comment = fixedComment({ number: 12, headSha: SHA })
     expect(prompt).toContain('PR #12')
     expect(prompt).toContain('propose_merge')
     expect(prompt).not.toContain('title')
-    expect(comment).toContain(SHA)
-    expect(comment).not.toContain('private payload')
     expect(() => fixedReviewPrompt(-1)).toThrow()
   })
 

@@ -119,6 +119,17 @@ describe('lint', () => {
     expect(found(policy({ tools: { WebFetch: ['read', 'network-egress', 'export'] } }))).not.toMatch(/warning/)
   })
 
+  it('says that a blocked tool cannot be approved', () => {
+    expect(text(policy({ blockedTools: ['Bash'] }))).toMatch(/Blocked tools: Bash.*no approval lifts/u)
+  })
+
+  it('distinguishes an absent allowlist from an explicit deny-all list', () => {
+    expect(text(policy())).not.toMatch(/Allowed tools:/u)
+    expect(text(policy({ allowedTools: [] }))).toMatch(/Allowed tools: none.*Every tool call is refused/u)
+    expect(text(policy({ allowedTools: ['Read', 'run'] })))
+      .toMatch(/Allowed tools: Read, run.*exact names.*no approval lifts/u)
+  })
+
   it('does not claim every shell command is refused after a read', () => {
     const out = found(policy({ mode: 'autonomous', profile: { effects: ['read', 'exec'], resources: { paths: [], hosts: [] } } }))
     expect(out).toMatch(/warning: .*exec/)
@@ -164,5 +175,11 @@ describe('lint', () => {
 
   it('notes a network grant with no hosts named', () => {
     expect(found(policy({ profile: { effects: ['read', 'network-egress'], resources: { paths: [], hosts: [] } } }))).toMatch(/note: .*any host/)
+  })
+
+  it('does not claim network-egress is granted by an exec-only policy', () => {
+    const out = found(policy({ mode: 'interactive', profile: { effects: ['read', 'exec'], resources: { paths: [], hosts: [] } } }))
+    expect(out).toMatch(/note: exec is granted/)
+    expect(out).not.toMatch(/the network is granted/)
   })
 })

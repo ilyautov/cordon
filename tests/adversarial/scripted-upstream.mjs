@@ -20,6 +20,14 @@ createInterface({ input: process.stdin }).on('line', (line) => {
   if (line.trim() === '') return
   const message = JSON.parse(line)
   if (message.id === undefined) return
+  if (message.method === 'initialize') {
+    reply(message.id, {
+      protocolVersion: '2025-06-18',
+      capabilities: { tools: {} },
+      serverInfo: { name: 'scripted-upstream', version: '0.0.0' },
+    })
+    return
+  }
   if (message.method === 'tools/list') {
     reply(message.id, {
       tools: tools.map((name) => ({ name, description: `The ${name} tool.`, inputSchema: { type: 'object' } })),

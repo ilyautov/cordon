@@ -1,0 +1,86 @@
+{
+  "date": "2026-10-09",
+  "experiment": "Codex CLI interactive native shell hook and disabled-tool routing coverage",
+  "codexVersion": "codex-cli 0.161.0",
+  "modelIdForToolContract": "cordon-poison-qwen:1.5b",
+  "modelWeightsInvoked": false,
+  "provider": "local deterministic loopback Responses server",
+  "harnessSha256": "c78b3f5061de9ab1295a04119196e143e67d1cae12371816f1746d8f771f1947",
+  "hookTapSha256": "871aad8d144f7ed8d842edab5b4bec68ec56878f506e8a18cba41d8b4efaa1ae",
+  "bundleSha256": "a62d5d98942fb704d965cd03a755e5e8d91759d4bdeafd6f6a86809fa8bc4c19",
+  "discoverySha256": "c8548aa75dc503a5462f877b9e86787f0c66d01ec3562624c2dbc92260d5a19b",
+  "rawTraceSha256": {
+    "baseline": "8560ecfa59df08ffa21c7d92e6b6d1205870a2d876b91aa642b6771bfab80f9b",
+    "observed": "441054506350f4b210fc9daaa29c0af9b8e37b42278d0a6d1ae0ec1f02842219",
+    "restricted": "27e7dc7d031502afb1ac1d30a72ca6b625af2dae7dc8b1175704b5ec9231aa40",
+    "restricted-write": "03f7e0026dde92fb7d9f1c87652d54b7874ec234a8b60d4969a22f1df21efcd4",
+    "protected": "9d5511a8a8b98420daaf6dd95f2ec203312c19b3d520731845239cb3d6f1eb15"
+  },
+  "results": {
+    "baseline": {
+      "markerWritten": true,
+      "execCompleted": true,
+      "writeStdinReturned": true
+    },
+    "observed": {
+      "markerWritten": true,
+      "execPreToolUseSeen": true,
+      "writeStdinPreToolUseSeen": false,
+      "writeStdinReturned": true,
+      "preHooksBeforeWrite": 1,
+      "preHooksAfterWrite": 1,
+      "hookEvents": [
+        {
+          "kind": "UserPromptSubmit",
+          "tool": null,
+          "status": 0,
+          "decision": null
+        },
+        {
+          "kind": "PreToolUse",
+          "tool": "Bash",
+          "status": 0,
+          "decision": null
+        },
+        {
+          "kind": "PostToolUse",
+          "tool": "Bash",
+          "status": 0,
+          "decision": null
+        }
+      ]
+    },
+    "restricted": {
+      "shellDeclared": false,
+      "markerWritten": false,
+      "nativeCommandEvents": 0,
+      "execRejected": true,
+      "routerReply": "unsupported call: exec_command"
+    },
+    "restrictedWrite": {
+      "markerWritten": false,
+      "nativeCommandEvents": 0,
+      "writeStdinRejected": true,
+      "routerReply": "unsupported call: write_stdin"
+    },
+    "protected": {
+      "markerWritten": false,
+      "execBlocked": true,
+      "writeStdinReturned": false,
+      "hookEvents": [
+        {
+          "kind": "UserPromptSubmit",
+          "tool": null,
+          "status": 0,
+          "decision": null
+        },
+        {
+          "kind": "PreToolUse",
+          "tool": "Bash",
+          "status": 2,
+          "decision": "deny"
+        }
+      ]
+    }
+  }
+}
