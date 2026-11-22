@@ -5,9 +5,10 @@ import type { Finding, FindingKind } from '../sanitize/types.js'
  *
  * Only they mean the text had a layer hidden from the human, and only they
  * are talked about with the human. The kinds that merely mark —
- * `annotation`, `mixed-script`, `encoded` — occur on honest pages and in
- * honest files all the time: an image's alt text, a Latin letter inside a
- * Cyrillic word, base64 in a document's body. Speaking up about those would
+ * `annotation`, `mixed-script`, `encoded`, `padding` — occur on honest pages
+ * and in honest files all the time: an image's alt text, a Latin letter
+ * inside a Cyrillic word, base64 in a document's body, a long gap in a
+ * generated page. Speaking up about those would
  * train the human not to read our messages, and a false positive on
  * legitimate text is worse than a miss.
  */

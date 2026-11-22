@@ -40,6 +40,7 @@ export const RULES = {
   'memory-write': { class: 'memory-poisoning', tier: 'evidence' },
   provenance: { class: 'untrusted-payload', tier: 'evidence' },
   budget: { class: 'flooding', tier: 'precaution' },
+  refusals: { class: 'drift', tier: 'precaution' },
 } as const satisfies Record<string, { class: string; tier: Tier }>
 
 export type Tier = 'evidence' | 'suspicion' | 'precaution'
