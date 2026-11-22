@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { constants, closeSync, fstatSync, fsyncSync, linkSync, lstatSync, openSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 
-export type PrTarget = { repo: string; number: number; headSha: string }
+export type PrTarget = { repo: string; number: number; headSha: string; baseRef: string; baseSha: string }
 export type ReviewEvent = PrTarget & { kind: 'diff-read' | 'merge-proposed'; diffSha256: string }
 export type ReviewReceipt = PrTarget & {
   kind: 'review-completed'
@@ -16,11 +16,29 @@ const shaPattern = /^[a-f0-9]{40}$/u
 const digestPattern = /^[a-f0-9]{64}$/u
 const repoPattern = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/u
 
+export function validatePrSelection(repo: string, number: number): void {
+  if (typeof repo !== 'string' || !repoPattern.test(repo) || !Number.isSafeInteger(number) || number < 1 ||
+    repo.split('/').some((part) => part === '.' || part === '..')) throw new Error('invalid PR target')
+}
+
+function validBaseRef(ref: unknown): ref is string {
+  return typeof ref === 'string' && ref.length > 0 && ref.length <= 255 &&
+    !ref.startsWith('-') && ref !== '@' && !ref.endsWith('.') && !ref.includes('..') && !ref.includes('@{') &&
+    !Array.from(ref).some((char) => char.charCodeAt(0) <= 32 || char.charCodeAt(0) === 127 ||
+      '~^:?*[\\'.includes(char)) &&
+    ref.split('/').every((part) => part.length > 0 && !part.startsWith('.') && !part.endsWith('.lock'))
+}
+
 export function validateTarget(target: PrTarget): void {
-  const parts = typeof target.repo === 'string' ? target.repo.split('/') : []
-  if (!repoPattern.test(target.repo) || !Number.isSafeInteger(target.number) ||
-    target.number < 1 || !shaPattern.test(target.headSha) ||
-    parts.some((part) => part === '.' || part === '..')) throw new Error('invalid PR target')
+  validatePrSelection(target.repo, target.number)
+  if (typeof target.headSha !== 'string' || !shaPattern.test(target.headSha) ||
+    typeof target.baseSha !== 'string' || !shaPattern.test(target.baseSha) ||
+    !validBaseRef(target.baseRef)) throw new Error('invalid PR snapshot')
+}
+
+export function sameSnapshot(left: PrTarget, right: PrTarget): boolean {
+  return left.repo.toLowerCase() === right.repo.toLowerCase() && left.number === right.number &&
+    left.headSha === right.headSha && left.baseRef === right.baseRef && left.baseSha === right.baseSha
 }
 
 function validEvent(value: unknown): value is ReviewEvent {
@@ -29,7 +47,7 @@ function validEvent(value: unknown): value is ReviewEvent {
   try { validateTarget(event as PrTarget) } catch { return false }
   return (event.kind === 'diff-read' || event.kind === 'merge-proposed') &&
     typeof event.diffSha256 === 'string' && digestPattern.test(event.diffSha256) &&
-    Object.keys(event).length === 5
+    Object.keys(event).length === 7
 }
 
 export function appendReviewEvent(path: string, event: ReviewEvent): void {
@@ -73,7 +91,7 @@ function validReceipt(value: unknown): value is ReviewReceipt {
   if (typeof value !== 'object' || value === null) return false
   const receipt = value as Partial<ReviewReceipt>
   try { validateTarget(receipt as PrTarget) } catch { return false }
-  return receipt.kind === 'review-completed' && Object.keys(receipt).length === 7 &&
+  return receipt.kind === 'review-completed' && Object.keys(receipt).length === 9 &&
     typeof receipt.runId === 'string' && runIdPattern.test(receipt.runId) &&
     typeof receipt.diffSha256 === 'string' && digestPattern.test(receipt.diffSha256) &&
     typeof receipt.mergeProposed === 'boolean'

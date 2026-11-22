@@ -1,16 +1,22 @@
+import { createHash } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
 import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { fixedComment, runOwnerCommand } from '../../src/pr-workflow/owner-cli.js'
-import { approveReceipt, approvalForReceipt, consumeReceiptApproval } from '../../src/pr-workflow/owner-approvals.js'
 import type { ReviewReceipt } from '../../src/pr-workflow/store.js'
 import { ensureBuiltCli } from '../support/built-cli.js'
 
+const diff = 'diff --git a/notes b/notes\n+ready\n'
 const receipt: ReviewReceipt = { kind: 'review-completed', repo: 'owner/project', number: 12, headSha: 'a'.repeat(40),
-  runId: '599845b6-4408-4eae-9b35-036d78362b44', diffSha256: '1'.repeat(64), mergeProposed: true }
+  baseRef: 'main', baseSha: 'b'.repeat(40), runId: '599845b6-4408-4eae-9b35-036d78362b44',
+  diffSha256: createHash('sha256').update(diff).digest('hex'), mergeProposed: true }
+const ci = { workflowId: 123, workflowSha: 'c'.repeat(40), runId: 42, runAttempt: 1, artifactId: 100,
+  artifactDigest: 'sha256:' + 'e'.repeat(64) }
+const env = { CORDON_PR_TRUSTED_WORKFLOW_ID: String(ci.workflowId), CORDON_PR_TRUSTED_WORKFLOW_SHA: ci.workflowSha,
+  CORDON_PR_TRUSTED_WORKFLOW_REF: 'main' }
 const roots: string[] = []
 
 function scratch(): string {
@@ -51,44 +57,63 @@ describe('draft owner CLI', () => {
     expect(result.stderr).toContain('owner actions are disabled')
   })
 
-  it.each(['approve', 'comment', 'merge'])('refuses %s before opening a receipt or approval store', (command) => {
+  it.each(['comment', 'merge'])('refuses %s before opening a receipt or approval store', (command) => {
     expect(() => runOwnerCommand([command, '/missing-review-receipt'])).toThrow('owner actions are disabled')
   })
 
-  it('only reports a finalized local receipt and keeps the decision closed', () => {
-    const path = join(scratch(), 'review.json')
+  function ownerFixture() {
+    const root = scratch()
+    const path = join(root, 'review.json')
     writeFileSync(path, JSON.stringify(receipt), { mode: 0o600 })
-    expect(runOwnerCommand(['check', path])).toEqual({ allow: false, reason: 'owner-actions-draft', receipt })
-  })
+    const owner = join(root, 'approvals')
+    const access = {
+      getPullSnapshot: vi.fn(() => ({ ...receipt, title: '', body: '' })),
+      getPinnedDiff: vi.fn(() => diff),
+      readTrustedCi: vi.fn(() => ci),
+    }
+    const run = (command: 'check' | 'approve') => runOwnerCommand([command, path, owner, '42', '1'], env, access)
+    return { path, run, access }
+  }
 
-  it('refuses an incomplete review record', () => {
-    const path = join(scratch(), 'review.json')
-    writeFileSync(path, JSON.stringify({ ...receipt, kind: 'diff-read' }), { mode: 0o600 })
-    expect(() => runOwnerCommand(['check', path])).toThrow()
-  })
-})
-
-describe('draft owner approval storage', () => {
-  it('spends approval only once and only for the exact completed receipt', () => {
-    const root = scratch()
-    approveReceipt(root, receipt, 1_000)
-    const otherRun = { ...receipt, runId: '89566ef7-b0ad-4ada-923f-595988ea5209' }
-    const otherDiff = { ...receipt, diffSha256: '2'.repeat(64) }
-    expect(approvalForReceipt(root, receipt, 1_001)).toEqual({
-      repo: receipt.repo, number: receipt.number, headSha: receipt.headSha,
-      runId: receipt.runId, diffSha256: receipt.diffSha256,
+  it('checks and issues approval only for the exact current candidate and authenticated CI', () => {
+    const { run, access } = ownerFixture()
+    expect(run('check')).toMatchObject({ allow: false, reason: 'owner-approval-missing' })
+    expect(run('approve')).toMatchObject({ allow: true, reason: 'approval-issued' })
+    expect(run('check')).toMatchObject({ allow: true, reason: 'approved' })
+    expect(access.readTrustedCi).toHaveBeenCalledWith(receipt, 42, {
+      workflowId: 123, workflowSha: ci.workflowSha, workflowRef: 'main', runAttempt: 1,
     })
-    expect(consumeReceiptApproval(root, otherRun, 1_001)).toBe(false)
-    expect(consumeReceiptApproval(root, otherDiff, 1_001)).toBe(false)
-    expect(consumeReceiptApproval(root, receipt, 1_001)).toBe(true)
-    expect(consumeReceiptApproval(root, receipt, 1_001)).toBe(false)
   })
 
-  it('rejects duplicate and expired approvals with the existing one-use store semantics', () => {
-    const root = scratch()
-    approveReceipt(root, receipt, 1_000)
-    expect(() => approveReceipt(root, receipt, 1_001)).toThrow()
-    expect(approvalForReceipt(root, receipt, 3_601_001)).toBeNull()
-    expect(consumeReceiptApproval(root, receipt, 3_601_001)).toBe(false)
+  it('refuses the same head after a base retarget', () => {
+    const { run, access } = ownerFixture()
+    run('approve')
+    access.getPullSnapshot.mockReturnValue({ ...receipt, baseRef: 'release', title: '', body: '' })
+    expect(run('check')).toMatchObject({ allow: false, reason: 'snapshot-changed' })
+    expect(access.readTrustedCi).toHaveBeenCalledTimes(1)
+  })
+
+  it('rechecks the base after verifying CI before issuing an approval', () => {
+    const { run, access } = ownerFixture()
+    access.getPullSnapshot.mockReturnValueOnce({ ...receipt, title: '', body: '' })
+      .mockReturnValueOnce({ ...receipt, baseSha: '7'.repeat(40), title: '', body: '' })
+    expect(run('approve')).toMatchObject({ allow: false, reason: 'snapshot-changed' })
+    expect(run('check')).toMatchObject({ allow: false, reason: 'owner-approval-missing' })
+  })
+
+  it('refuses a different diff without reading CI', () => {
+    const { run, access } = ownerFixture()
+    access.getPinnedDiff.mockReturnValueOnce(diff + 'different content')
+    expect(run('approve')).toMatchObject({ allow: false, reason: 'diff-changed' })
+    expect(access.readTrustedCi).not.toHaveBeenCalled()
+  })
+
+  it('refuses a receipt without completed evidence or without a pinned base', () => {
+    const { path, run, access } = ownerFixture()
+    writeFileSync(path, JSON.stringify({ ...receipt, kind: 'diff-read' }))
+    expect(() => run('check')).toThrow('invalid completed review receipt')
+    writeFileSync(path, JSON.stringify({ ...receipt, baseRef: undefined, baseSha: undefined }))
+    expect(() => run('check')).toThrow('invalid completed review receipt')
+    expect(access.getPullSnapshot).not.toHaveBeenCalled()
   })
 })

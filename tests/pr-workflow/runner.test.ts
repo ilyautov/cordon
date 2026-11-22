@@ -8,7 +8,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { ensureBuiltCli } from '../support/built-cli.js'
 
 const runner = fileURLToPath(new URL('../../scripts/pr-review-local.mjs', import.meta.url))
-const target = { repo: 'example/repo', number: 12, headSha: 'a'.repeat(40) }
+const target = { repo: 'example/repo', number: 12, headSha: 'a'.repeat(40), baseRef: 'main', baseSha: 'b'.repeat(40) }
 const diff = 'diff --git a/notes.txt b/notes.txt\n+Updated the spelling.\n'
 const diffSha256 = createHash('sha256').update(diff).digest('hex')
 const temporaryRoots: string[] = []
@@ -27,6 +27,18 @@ function setup() {
   // Keep PATH limited to the local stub and its interpreter. Neither Codex
   // nor provider clients should run during this test.
   symlinkSync(process.execPath, join(root, 'node'))
+  const pull = { number: target.number, state: 'open', title: 'Copy edit', body: '',
+    head: { sha: target.headSha }, base: { ref: target.baseRef, sha: target.baseSha, repo: { full_name: target.repo } } }
+  writeFileSync(join(root, 'gh'), `#!/usr/bin/env node
+const responses = ${JSON.stringify({
+    'repos/example/repo/pulls/12': pull,
+    'repos/example/repo/git/ref/heads/main': { ref: 'refs/heads/main', object: { type: 'commit', sha: target.baseSha } },
+    'repos/example/repo/git/ref/pull/12/head': { ref: 'refs/pull/12/head', object: { type: 'commit', sha: target.headSha } },
+  })}
+const response = responses[process.argv.at(-1)]
+if (response === undefined) process.exit(2)
+console.log(JSON.stringify(response))
+`, { mode: 0o700 })
   writeFileSync(join(root, 'codex'), `#!/usr/bin/env node
 const { createHash } = require('node:crypto')
 const { readFileSync, writeFileSync } = require('node:fs')

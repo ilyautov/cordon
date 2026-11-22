@@ -1,0 +1,56 @@
+# Disposable lab example. Install as .github/workflows/quality-gate.yml.
+name: PR quality gate
+on:
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Existing lab PR number
+        required: true
+        type: string
+      head_sha:
+        description: Reviewed head commit
+        required: true
+        type: string
+      base_ref:
+        description: Reviewed base branch
+        required: true
+        type: string
+      base_sha:
+        description: Reviewed base commit
+        required: true
+        type: string
+      diff_sha256:
+        description: SHA-256 of the exact reviewed diff
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out the trusted workflow commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+      - name: Check the selected PR as read-only data
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ inputs.pr_number }}
+          PR_HEAD_SHA: ${{ inputs.head_sha }}
+          PR_BASE_REF: ${{ inputs.base_ref }}
+          PR_BASE_SHA: ${{ inputs.base_sha }}
+          PR_DIFF_SHA256: ${{ inputs.diff_sha256 }}
+        run: node .github/scripts/cordon-pr41/quality-attestation.mjs
+      - name: Upload evidence for this run attempt
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: cordon-pr-quality-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/quality-evidence.json
+          if-no-files-found: error
+          retention-days: 2
