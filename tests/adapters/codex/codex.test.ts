@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs'
+import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -150,6 +150,42 @@ describe('codex: apply_patch', () => {
   it('a patch with no file in it is refused', () => {
     const out = run(home('read, create, update'), pre('apply_patch', { command: 'garbage' }))
     expect(out.hookSpecificOutput.permissionDecision).toBe('deny')
+  })
+})
+
+describe('codex: listed patch destinations under exposure', () => {
+  const cwd = '/w/checkout123'
+  const ordinary = 'notes.txt'
+  const protectedPath = '.config/cordon/marker.txt'
+
+  function afterSpawn() {
+    const dir = home('read, create, update', 'autonomous')
+    appendFileSync(join(dir, 'policy.yaml'), `\ndestinations:\n  - ${cwd}/${ordinary}\n  - ${cwd}/${protectedPath}\n`)
+    run(dir, { hook_event_name: 'UserPromptSubmit', prompt: 'Ask a child to write the notes.' })
+    run(dir, {
+      hook_event_name: 'PostToolUse', tool_name: 'collaborationspawn_agent', tool_input: {},
+      tool_response: '{"task_name":"/root/child"}',
+    })
+    return (...lines: string[]) => run(dir, { ...pre('apply_patch', patch(...lines)), cwd })
+  }
+
+  it('treats an exact listed path as one destination after spawning a child', () => {
+    expect(afterSpawn()(`*** Add File: ${ordinary}`, '+hello')).toEqual({})
+  })
+
+  it('still holds a patch that also writes to an unlisted path', () => {
+    const out = afterSpawn()(`*** Add File: ${ordinary}`, '+hello', '*** Add File: other.txt', '+hello')
+    expect(out.hookSpecificOutput?.permissionDecisionReason).toMatch(/read untrusted content/)
+  })
+
+  it('still checks the patch contents for unnamed identifiers', () => {
+    const out = afterSpawn()(`*** Add File: ${ordinary}`, '+customer1234')
+    expect(out.hookSpecificOutput?.permissionDecisionReason).toMatch(/read untrusted content/)
+  })
+
+  it('still refuses a protected path listed in the policy', () => {
+    const out = afterSpawn()(`*** Add File: ${protectedPath}`, '+hello')
+    expect(out.hookSpecificOutput?.permissionDecisionReason).toMatch(/^self-protection/)
   })
 })
 

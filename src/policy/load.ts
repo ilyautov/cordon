@@ -131,6 +131,14 @@ function validate(parsed: unknown, path: string): Policy {
     policy.budgets = asBudgets(input['budgets'], `${path}: budgets`)
   }
 
+  if (Object.hasOwn(input, 'refusals')) {
+    const refusals = input['refusals']
+    if (typeof refusals !== 'number' || !Number.isInteger(refusals) || refusals < 0) {
+      throw new Error(`${path}: refusals must be a whole number, 0 to turn the hold off`)
+    }
+    policy.refusals = refusals
+  }
+
   if ('destinations' in input) {
     // Stored the way the gate reads it, so the checks below and lint see
     // the pattern the gate will match: a fullwidth asterisk is a bare one
@@ -253,7 +261,7 @@ function journalPath(value: unknown, path: string): string | null {
 
 const TOP_LEVEL = [
   'mode', 'profile', 'tools', 'blockedTools', 'allowedTools', 'trustedSources', 'toolsReturn', 'arguments', 'destinations', 'lookups', 'budgets',
-  'notify', 'exposure', 'task', 'memory', 'mcp', 'output',
+  'refusals', 'notify', 'exposure', 'task', 'memory', 'mcp', 'output',
 ]
 
 /**

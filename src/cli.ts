@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-import { accessSync, appendFileSync, constants, existsSync, mkdtempSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { accessSync, appendFileSync, constants, existsSync, lstatSync, mkdtempSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { randomBytes } from 'node:crypto'
 import { homedir, tmpdir, userInfo } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -25,9 +26,11 @@ import { PROFILES, renderPolicy } from './policy/templates.js'
 import { sanitize } from './sanitize/index.js'
 import { APPROVAL_TTL_MS, ApprovalStore, MAX_SHOWN_ARGS, type ShownRequest } from './session/approvals.js'
 import { MemoryLedger } from './session/memory.js'
+import { CLAUDE_CODE, CODEX, policyForDialect } from './adapters/claude-code/dialect.js'
+import { pairedProbe, recordedRefusal } from './diagnostics/probe.js'
 
 const USAGE =
-  'usage: cordon scan <file|-> [--json] | cordon hook [--harness claude-code|gemini|codex|kimi|deepseek] | cordon mcp [--wait-for-approval-ms N] -- <server command...> | cordon mcp serve --socket PATH [--wait-for-approval-ms N] -- <server command...> | cordon mcp connect --socket PATH --owner-uid UID | cordon mcp approve -- <server command...> | cordon doctor | cordon init [--profile locked|research|documents|coding|service] [--force] | cordon log [--last N] [--json] | cordon approve [id [--show|--read] [--as name]] | cordon policy check|explain [file] | cordon policy apply <file> [--accept-warnings] [--as name] | cordon audit [dir] [--json|--sarif] [--fail-on high|medium|low]'
+  'usage: cordon scan <file|-> [--json] | cordon hook [--harness claude-code|gemini|codex|kimi|deepseek] | cordon mcp [--wait-for-approval-ms N] -- <server command...> | cordon mcp serve --socket PATH [--wait-for-approval-ms N] -- <server command...> | cordon mcp connect --socket PATH --owner-uid UID | cordon mcp approve -- <server command...> | cordon doctor [--json] | cordon probe codex [--check ID] | cordon probe codex|claude-code --pair [--check ID [--host-version VERSION]] | cordon init [--profile locked|research|documents|coding|service] [--force] | cordon log [--last N] [--json] | cordon approve [id [--show|--read] [--as name]] | cordon policy check|explain [file] | cordon policy apply <file> [--accept-warnings] [--as name] | cordon audit [dir] [--json|--sarif] [--fail-on high|medium|low]'
 
 /**
  * Event parsing depends on the harness, so the harness is named explicitly.
@@ -63,7 +66,9 @@ export function main(argv: string[]): number | Promise<number> {
 
   if (command === 'mcp') return mcp(rest)
 
-  if (command === 'doctor') return printDoctor(cordonHome())
+  if (command === 'doctor') return printDoctor(cordonHome(), rest.includes('--json'))
+
+  if (command === 'probe') return probe(rest)
 
   if (command === 'audit') return runAudit(rest)
 
@@ -543,9 +548,17 @@ function writable(dir: string): boolean {
   }
 }
 
-/** Printing the report for the human. Non-zero exit only on a breakage. */
-function printDoctor(home: string): number {
+function printDoctor(home: string, asJson: boolean): number {
   const report = doctor(home)
+  if (asJson) {
+    process.stdout.write(JSON.stringify({ home, ...report, hookWiring: 'unchecked' }) + '\n')
+  } else {
+    printDoctorText(home, report)
+  }
+  return report.selfCheck === 'ok' ? 0 : 1
+}
+
+function printDoctorText(home: string, report: DoctorReport): void {
   process.stdout.write(`home directory: ${home}\n`)
   process.stdout.write(`policy: ${report.policySource}\n`)
   process.stdout.write(`presence mode: ${report.mode}\n`)
@@ -599,7 +612,6 @@ function printDoctor(home: string): number {
   } else {
     for (const warning of report.warnings) process.stdout.write(`warning: ${warning}\n`)
   }
-  return report.selfCheck === 'ok' ? 0 : 1
 }
 
 /**
@@ -1229,31 +1241,21 @@ function shortened(args: string, path: string): string {
   return `${args.slice(0, MAX_SHOWN_ARGS)}… (${args.length} characters in all, every one of them in ${path})`
 }
 
-function showLog(args: string[]): number {
-  const asJson = args.includes('--json')
-  const at = args.indexOf('--last')
-  let last = Infinity
-  if (at >= 0) {
-    last = Number(args[at + 1])
-    if (!Number.isInteger(last) || last < 1) {
-      process.stderr.write('cordon log: --last takes a positive whole number\n')
-      return 2
-    }
-  }
-
+function readJournal(command: string): { policy: Policy; file: string; events: Array<Record<string, unknown>>; unreadable: number } | null {
   const home = cordonHome()
-  let file: string | null
+  let policy: Policy
   try {
-    file = loadPolicy(home).notify.file
+    policy = loadPolicy(home)
   } catch (error) {
-    process.stderr.write(`cordon log: ${(error as Error).message}\n`)
-    return 1
+    process.stderr.write(`${command}: ${(error as Error).message}\n`)
+    return null
   }
+  const file = policy.notify.file
   if (file === null) {
     process.stderr.write(
-      `cordon log: no journal is configured; set notify.file in ${join(home, 'policy.yaml')} (cordon init writes one)\n`,
+      `${command}: no journal is configured; set notify.file in ${join(home, 'policy.yaml')} (cordon init writes one)\n`,
     )
-    return 1
+    return null
   }
 
   let text = ''
@@ -1261,8 +1263,8 @@ function showLog(args: string[]): number {
     text = readFileSync(file, 'utf8')
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
-      process.stderr.write(`cordon log: could not read ${file}: ${(error as Error).message}\n`)
-      return 1
+      process.stderr.write(`${command}: could not read ${file}: ${(error as Error).message}\n`)
+      return null
     }
   }
 
@@ -1279,6 +1281,77 @@ function showLog(args: string[]): number {
       unreadable++
     }
   }
+  return { policy, file, events, unreadable }
+}
+
+/** The owner runs both phases. Only the harmless patch prompt goes to the agent. */
+function probe(args: string[]): number {
+  const [harness, ...rest] = args
+  const pair = rest[0] === '--pair'
+  const options = pair ? rest.slice(1) : rest
+  const [flag, supplied, versionFlag, hostVersion] = options
+  const start = options.length === 0
+  const versioned = pair && options.length === 4 && versionFlag === '--host-version'
+    && typeof hostVersion === 'string' && /^[a-zA-Z0-9][a-zA-Z0-9.+ _()-]{0,79}$/u.test(hostVersion)
+  const check = (options.length === 2 || versioned) && flag === '--check' && /^[a-f0-9]{32}$/u.test(supplied ?? '')
+  if ((harness !== 'codex' && !(pair && harness === 'claude-code')) || (!start && !check)) {
+    process.stderr.write('usage: cordon probe codex [--check ID] | cordon probe codex|claude-code --pair [--check ID [--host-version VERSION]]\n')
+    return 2
+  }
+  const journal = readJournal('cordon probe')
+  if (journal === null) return 1
+  const id = supplied ?? randomBytes(16).toString('hex')
+  if (pair) {
+    const effective = policyForDialect(journal.policy, harness === 'codex' ? CODEX : CLAUDE_CODE)
+    return pairedProbe(harness, id, start, journal.events, policyHash(effective), hostVersion ?? null)
+  }
+  const path = join(`cordon-probe-${id}`, '.codex', 'marker.txt')
+  const target = join(process.cwd(), path)
+  if (start) {
+    process.stdout.write(JSON.stringify({
+      id, path,
+      prompt: `Use the native apply_patch tool once to add the file ${path} containing the word probe. Stop after the tool responds.`,
+      check: `cordon probe codex --check ${id}`,
+    }, null, 2) + '\n')
+    return 0
+  }
+
+  // A refusal from another run, or a refusal followed by a write, proves nothing
+  // about this patch. A dangling symlink also counts as a marker on disk.
+  const refusal = recordedRefusal(journal.events, 'apply_patch', target)
+  try {
+    if (lstatSync(target, { throwIfNoEntry: false }) !== undefined) {
+      process.stderr.write('cordon probe: marker exists in the project\n')
+      return 1
+    }
+  } catch (error) {
+    // An unreadable marker must never be mistaken for an absent one.
+    process.stderr.write(`cordon probe: could not check the marker: ${visible((error as Error).message)}\n`)
+    return 1
+  }
+  if (!refusal) {
+    process.stderr.write('cordon probe: no matching apply_patch refusal in the current journal\n')
+    return 1
+  }
+  process.stdout.write('Matching apply_patch refusal recorded. Marker absent.\n')
+  return 0
+}
+
+function showLog(args: string[]): number {
+  const asJson = args.includes('--json')
+  const at = args.indexOf('--last')
+  let last = Infinity
+  if (at >= 0) {
+    last = Number(args[at + 1])
+    if (!Number.isInteger(last) || last < 1) {
+      process.stderr.write('cordon log: --last takes a positive whole number\n')
+      return 2
+    }
+  }
+
+  const journal = readJournal('cordon log')
+  if (journal === null) return 1
+  const { events, unreadable, file } = journal
   const shown = events.slice(Math.max(0, events.length - last))
 
   if (asJson) {
