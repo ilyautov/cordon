@@ -308,6 +308,9 @@ describe('adversarial: ways to get an action past the gate', () => {
     for (const command of [
       'cordon approve 0123456789abcdef',
       'npx @ilyautov/cordon mcp approve -- node server.js',
+      'cordon mcp approve-change abc',
+      'npx @ilyautov/cordon mcp changes',
+      'node plugin/dist/cli.js mcp changes',
       'node plugin/dist/cli.js approve 0123456789abcdef',
     ]) {
       const decision = gate({ tool: 'Bash', args: { command } }, wide())

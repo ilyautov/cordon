@@ -7368,7 +7368,7 @@ var require_dist = __commonJS({
 
 // src/cli.ts
 import { accessSync as accessSync4, appendFileSync as appendFileSync2, constants as constants6, existsSync as existsSync2, lstatSync as lstatSync4, mkdtempSync, readdirSync as readdirSync8, readFileSync as readFileSync7, realpathSync as realpathSync4, renameSync as renameSync6, rmSync as rmSync6, writeFileSync as writeFileSync7 } from "node:fs";
-import { randomBytes as randomBytes6 } from "node:crypto";
+import { randomBytes as randomBytes7 } from "node:crypto";
 import { homedir as homedir6, tmpdir, userInfo } from "node:os";
 import { dirname as dirname5, join as join17 } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -7650,8 +7650,8 @@ var TOP_LEVEL = [
   "mcp",
   "output"
 ];
-function onlyKnown(object, known, path, prefix) {
-  for (const key of Object.keys(object)) {
+function onlyKnown(object2, known, path, prefix) {
+  for (const key of Object.keys(object2)) {
     if (prefix === "notify." && key === "webhook") continue;
     if (!known.includes(key)) {
       throw new Error(`${path}: unknown key ${prefix}${key}; the keys here are ${known.join(", ")}`);
@@ -8291,9 +8291,9 @@ function readLookup(tool, lookup, args, text, turn) {
   if (parsed === "unreadable") return parsed;
   const records = Array.isArray(parsed) ? parsed : [parsed];
   const out = [];
-  for (const record of records) {
-    if (typeof record !== "object" || record === null || Array.isArray(record)) continue;
-    const fields2 = record;
+  for (const record2 of records) {
+    if (typeof record2 !== "object" || record2 === null || Array.isArray(record2)) continue;
+    const fields2 = record2;
     if (!Object.hasOwn(fields2, lookup.key)) continue;
     const name = plain(fields2[lookup.key]);
     if (name === null) return "unreadable";
@@ -8318,10 +8318,10 @@ function parseRecords(text) {
     if (tagged) return "unreadable";
     const top = document.contents;
     const records = (0, import_yaml2.isSeq)(top) ? top.items : [top];
-    for (const record of records) {
-      if (!(0, import_yaml2.isMap)(record)) continue;
+    for (const record2 of records) {
+      if (!(0, import_yaml2.isMap)(record2)) continue;
       const seen = /* @__PURE__ */ new Set();
-      for (const pair of record.items) {
+      for (const pair of record2.items) {
         if (!(0, import_yaml2.isScalar)(pair.key) || pair.key.value === null || pair.key.value === void 0) return "unreadable";
         const key = String(pair.key.value);
         if (seen.has(key)) return "unreadable";
@@ -8754,7 +8754,7 @@ function decide(call, ctx) {
     return {
       kind: "deny",
       rule: "pin",
-      reason: `the MCP tool ${call.tool} ${held2.why === "new" ? "appeared" : "changed"} after the server was approved (${held2.server}); review the server, then run "cordon mcp approve -- ${held2.server}"`
+      reason: `the MCP tool ${call.tool} ${held2.why === "new" ? "appeared" : "changed"} after the server was approved (${held2.server}); the owner can inspect "cordon mcp changes" and select one version with "cordon mcp approve-change <id>"`
     };
   }
   const blockedTools = ctx.policy.blockedTools;
@@ -8890,7 +8890,7 @@ function selfProtection(parts, ctx) {
     }
     if (COMMAND_KEYS.has(folded) && typeof value === "string") {
       if (APPROVES.test(value.replace(/["'\\]/gu, ""))) {
-        return { kind: "deny", rule: "self-protection", reason: "self-protection: the command approves, writes a policy or speaks as the harness, which only the owner may do" };
+        return { kind: "deny", rule: "self-protection", reason: "self-protection: only the owner may inspect pending reviews, approve changes, write policy or speak as the harness" };
       }
       const windows = sep3 === "\\";
       const command = foldCommand(value.toLowerCase(), windows);
@@ -8964,7 +8964,7 @@ function asPaths(value) {
   }
   return null;
 }
-var APPROVES = /(?:\bcordon(?:@[\w.^~-]+)?|\bcli\.m?js)\s+(?:(?:mcp\s+)?approve|init|policy\s+apply|hook)\b/iu;
+var APPROVES = /(?:\bcordon(?:@[\w.^~-]+)?|\bcli\.m?js)\s+(?:approve|mcp\s+(?:approve(?:-change)?|changes)|init|policy\s+apply|hook)\b/iu;
 function foldCommand(command, windows) {
   const out = [];
   let segment = 0;
@@ -9291,8 +9291,19 @@ function hostAllowed(raw, hosts) {
 
 // src/gate/pins.ts
 import { createHash } from "node:crypto";
+function uniqueToolNames(tools, earlier) {
+  const names2 = /* @__PURE__ */ new Set();
+  for (const { name } of tools) {
+    if (earlier.has(name) || names2.has(name)) return false;
+    names2.add(name);
+  }
+  return true;
+}
 function fingerprint(tool) {
-  const canonical2 = stable({
+  return createHash("sha256").update(stable(pinnedDeclaration(tool)), "utf8").digest("hex");
+}
+function pinnedDeclaration(tool) {
+  return {
     name: tool.name,
     description: tool.description ?? null,
     inputSchema: tool.inputSchema ?? null,
@@ -9304,8 +9315,7 @@ function fingerprint(tool) {
     ...tool.icons === void 0 ? {} : { icons: tool.icons },
     ...tool._meta === void 0 ? {} : { _meta: tool._meta },
     ...tool.execution === void 0 ? {} : { execution: tool.execution }
-  });
-  return createHash("sha256").update(canonical2, "utf8").digest("hex");
+  };
 }
 function comparePins(pinned2, listed) {
   if (pinned2 === null) {
@@ -11878,13 +11888,13 @@ function normalizeColor(raw) {
   return null;
 }
 function parseDeclarations(style) {
-  const declarations = /* @__PURE__ */ new Map();
+  const declarations2 = /* @__PURE__ */ new Map();
   for (const chunk of style.split(";")) {
     const colon = chunk.indexOf(":");
     if (colon === -1) continue;
-    declarations.set(chunk.slice(0, colon).trim().toLowerCase(), chunk.slice(colon + 1).trim());
+    declarations2.set(chunk.slice(0, colon).trim().toLowerCase(), chunk.slice(colon + 1).trim());
   }
-  return declarations;
+  return declarations2;
 }
 function colorFromShorthand(value) {
   if (!value) return null;
@@ -11897,11 +11907,11 @@ function colorFromShorthand(value) {
   return null;
 }
 function isInvisibleByColor(style, pageHasBackground) {
-  const declarations = parseDeclarations(style);
-  const color = normalizeColor(declarations.get("color"));
+  const declarations2 = parseDeclarations(style);
+  const color = normalizeColor(declarations2.get("color"));
   if (!color) return false;
   if (color === "transparent") return true;
-  const background = normalizeColor(declarations.get("background-color")) ?? colorFromShorthand(declarations.get("background"));
+  const background = normalizeColor(declarations2.get("background-color")) ?? colorFromShorthand(declarations2.get("background"));
   if (background !== null) return background === color;
   return !pageHasBackground && isNearWhite(color);
 }
@@ -12726,26 +12736,134 @@ function checked(id) {
 }
 
 // src/session/pins.ts
-import { createHash as createHash4 } from "node:crypto";
-import { readdirSync as readdirSync3, readFileSync as readFileSync4, renameSync as renameSync4, rmSync as rmSync3, writeFileSync as writeFileSync3 } from "node:fs";
+import { createHash as createHash4, randomBytes as randomBytes3 } from "node:crypto";
+import { mkdirSync as mkdirSync2, readdirSync as readdirSync3, readFileSync as readFileSync4, renameSync as renameSync4, rmdirSync, rmSync as rmSync3, writeFileSync as writeFileSync3 } from "node:fs";
 import { join as join5 } from "node:path";
 function serverId(command) {
   return createHash4("sha256").update(JSON.stringify(command), "utf8").digest("hex").slice(0, 24);
+}
+function dictionary(values) {
+  return Object.assign(/* @__PURE__ */ Object.create(null), values);
+}
+function record(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+function declarations(value) {
+  return record(value) && Object.entries(value).every(([name, tool]) => record(tool) && tool.name === name);
+}
+function change(file, candidate) {
+  const beforeHash = file.tools[candidate.name] ?? null;
+  const id = createHash4("sha256").update(JSON.stringify([
+    file.command,
+    candidate.name,
+    beforeHash,
+    fingerprint(candidate)
+  ])).digest("hex");
+  return { id, command: file.command, beforeHash, before: file.definitions[candidate.name], after: candidate };
 }
 var PinStore = class {
   dir;
   constructor(cordonHome2) {
     this.dir = join5(cordonHome2, "mcp-pins");
   }
-  /**
-   * The pins for a server, or null if it was never seen.
-   *
-   * Null means first sight, and first sight pins whatever the server lists as
-   * approved. So a damaged file must not read as absent: that would approve a
-   * rug pull with nobody told. It throws, and the gateway stops loudly.
-   */
   load(command) {
-    const path = this.path(command);
+    return this.read(serverId(command))?.tools ?? null;
+  }
+  /** Accept hash-only pins from earlier releases. Only a matching observation can fill in their old text. */
+  save(command, pins) {
+    this.locked(() => this.write({ command, tools: pins, definitions: dictionary(), pending: dictionary() }));
+  }
+  forget(command) {
+    return this.locked(() => {
+      const id = serverId(command);
+      try {
+        rmSync3(join5(this.dir, id + ".json"));
+        return true;
+      } catch (error) {
+        if (error.code === "ENOENT") return false;
+        throw error;
+      }
+    });
+  }
+  observe(command, listed, complete, earlierNames) {
+    return this.locked(() => {
+      const previous = this.read(serverId(command));
+      const result = comparePins(previous?.tools ?? null, listed);
+      const file = previous ?? { command, tools: result.pins, definitions: dictionary(), pending: dictionary() };
+      const imitations = shadows(listed, this.others(command));
+      const shadowServers = new Map(imitations.map((tool) => [tool.name, tool.server]));
+      const drift = result.held.filter((tool) => !shadowServers.has(tool.name));
+      const pending = new Set(drift.map((tool) => tool.name));
+      let dirty = !previous;
+      for (const tool of listed) {
+        const name = tool.name;
+        if (pending.has(name)) {
+          const waiting = file.pending[name];
+          if (!waiting || fingerprint(waiting) !== fingerprint(tool)) {
+            file.pending[name] = pinnedDeclaration(tool);
+            dirty = true;
+          }
+        } else if (!file.definitions[name] && file.tools[name] === fingerprint(tool)) {
+          file.definitions[name] = pinnedDeclaration(tool);
+          dirty = true;
+        }
+      }
+      const seen = new Set(listed.map((tool) => tool.name));
+      for (const name of Object.keys(file.pending)) {
+        if (!pending.has(name) && (seen.has(name) || complete && !earlierNames.has(name))) {
+          delete file.pending[name];
+          dirty = true;
+        }
+      }
+      if (dirty) this.write(file);
+      const held2 = [...imitations.map((tool) => ({ name: tool.name, why: "shadow", imitates: tool.imitates })), ...drift];
+      return { held: held2, shadowServers };
+    });
+  }
+  changes() {
+    return this.files().flatMap((id) => {
+      const file = this.read(id);
+      if (!file || !Object.keys(file.pending).length) return [];
+      const candidates2 = Object.values(file.pending);
+      const held2 = new Set(shadows(candidates2, this.others(file.command)).map((tool) => tool.name));
+      return candidates2.filter((tool) => !held2.has(tool.name)).map((tool) => change(file, tool));
+    });
+  }
+  approveChange(id) {
+    return this.locked(() => {
+      for (const key of this.files()) {
+        const file = this.read(key);
+        if (!file) continue;
+        for (const tool of Object.values(file.pending)) {
+          const proposed = change(file, tool);
+          if (proposed.id !== id) continue;
+          if (shadows([tool], this.others(file.command)).length) return null;
+          file.tools[tool.name] = fingerprint(tool);
+          file.definitions[tool.name] = tool;
+          delete file.pending[tool.name];
+          this.write(file);
+          return proposed;
+        }
+      }
+      return null;
+    });
+  }
+  others(command) {
+    return this.files().filter((id) => id !== serverId(command)).flatMap((id) => {
+      const file = this.read(id);
+      return file ? [{ server: file.command.join(" "), names: Object.keys(file.tools) }] : [];
+    });
+  }
+  files() {
+    try {
+      return readdirSync3(this.dir).filter((name) => name.endsWith(".json")).sort().map((name) => name.slice(0, -5));
+    } catch (error) {
+      if (error.code === "ENOENT") return [];
+      throw error;
+    }
+  }
+  read(id) {
+    const path = join5(this.dir, id + ".json");
     let raw;
     try {
       raw = readFileSync4(path, "utf8");
@@ -12753,81 +12871,57 @@ var PinStore = class {
       if (error.code === "ENOENT") return null;
       throw new Error(`the MCP pins are unreadable (${path}): ${error.message}`);
     }
-    let parsed;
+    let file;
     try {
-      parsed = JSON.parse(raw);
-    } catch (error) {
-      throw new Error(`the MCP pins are corrupted (${path}): ${error.message}`);
+      file = JSON.parse(raw);
+    } catch {
+      throw new Error(`the MCP pins are corrupted (${path})`);
     }
-    const tools = typeof parsed === "object" && parsed !== null && Object.hasOwn(parsed, "tools") ? parsed["tools"] : void 0;
-    if (typeof tools !== "object" || tools === null || Array.isArray(tools) || Object.values(tools).some((value) => typeof value !== "string")) {
+    if (!record(file) || !Array.isArray(file.command) || !file.command.every((arg) => typeof arg === "string") || serverId(file.command) !== id || !record(file.tools) || !Object.values(file.tools).every((hash2) => typeof hash2 === "string")) {
       throw new Error(`the MCP pins are incompatible (${path})`);
     }
-    const pins = /* @__PURE__ */ Object.create(null);
-    for (const [name, hash2] of Object.entries(tools)) pins[name] = hash2;
-    return pins;
+    const tools = dictionary(file.tools);
+    if (file.version === 1) return { command: file.command, tools, definitions: dictionary(), pending: dictionary() };
+    if (file.version !== 2 || !declarations(file.definitions) || !declarations(file.pending) || Object.entries(file.definitions).some(([name, tool]) => tools[name] !== fingerprint(tool))) {
+      throw new Error(`the MCP pins are incompatible (${path})`);
+    }
+    return { command: file.command, tools, definitions: dictionary(file.definitions), pending: dictionary(file.pending) };
   }
-  save(command, pins) {
+  write(file) {
+    const path = join5(this.dir, serverId(file.command) + ".json");
+    const temp = path + "." + randomBytes3(12).toString("hex") + ".tmp";
+    try {
+      writeFileSync3(temp, JSON.stringify({ version: 2, ...file }), { encoding: "utf8", mode: 384, flag: "wx" });
+      renameSync4(temp, path);
+    } finally {
+      rmSync3(temp, { force: true });
+    }
+  }
+  /** A listing, reset and owner decision must never overwrite each other's snapshot. */
+  locked(update) {
     makeDirectory(this.dir);
-    const path = this.path(command);
-    const temp = `${path}.${process.pid}.tmp`;
-    writeFileSync3(temp, JSON.stringify({ version: 1, command, tools: pins }), { encoding: "utf8", mode: 384 });
-    renameSync4(temp, path);
-  }
-  /** Drops a server's pins. Returns whether there were any. */
-  forget(command) {
-    const path = this.path(command);
-    try {
-      readFileSync4(path);
-    } catch {
-      return false;
-    }
-    rmSync3(path, { force: true });
-    return true;
-  }
-  /**
-   * The tool names every other server was pinned with, for the shadow check.
-   *
-   * A file that cannot be read throws, as `load` does: skipping it would
-   * leave that server's names out of the comparison, and an imitation of
-   * exactly those names would pass with nobody told.
-   */
-  others(command) {
-    let files;
-    try {
-      files = readdirSync3(this.dir).filter((name) => name.endsWith(".json"));
-    } catch (error) {
-      if (error.code === "ENOENT") return [];
-      throw new Error(`the MCP pins directory is unreadable (${this.dir}): ${error.message}`);
-    }
-    const own2 = `${serverId(command)}.json`;
-    const result = [];
-    for (const file of files) {
-      if (file === own2) continue;
-      const path = join5(this.dir, file);
-      let parsed;
+    const lock = join5(this.dir, ".writer-lock");
+    const wait = new Int32Array(new SharedArrayBuffer(4));
+    for (let retry = 0; ; retry++) {
       try {
-        parsed = JSON.parse(readFileSync4(path, "utf8"));
+        mkdirSync2(lock, { mode: 448 });
+        break;
       } catch (error) {
-        throw new Error(`the MCP pins are unreadable (${path}): ${error.message}`);
+        if (error.code !== "EEXIST") throw error;
+        if (retry >= 40) throw new Error(`MCP pins are busy (${lock}). Retry after the writer finishes. For an abandoned lock, see docs/install-mcp.md#recover-an-interrupted-pin-write.`);
+        Atomics.wait(wait, 0, 0, 10);
       }
-      const record = typeof parsed === "object" && parsed !== null ? parsed : {};
-      const tools = Object.hasOwn(record, "tools") ? record["tools"] : void 0;
-      const server2 = Object.hasOwn(record, "command") && Array.isArray(record["command"]) ? record["command"].map(String).join(" ") : file;
-      if (typeof tools !== "object" || tools === null || Array.isArray(tools)) {
-        throw new Error(`the MCP pins are incompatible (${path})`);
-      }
-      result.push({ server: server2, names: Object.keys(tools) });
     }
-    return result;
-  }
-  path(command) {
-    return join5(this.dir, `${serverId(command)}.json`);
+    try {
+      return update();
+    } finally {
+      rmdirSync(lock);
+    }
   }
 };
 
 // src/session/budgets.ts
-import { randomBytes as randomBytes3 } from "node:crypto";
+import { randomBytes as randomBytes4 } from "node:crypto";
 import { readdirSync as readdirSync4, unlinkSync as unlinkSync2, writeFileSync as writeFileSync4 } from "node:fs";
 import { join as join6 } from "node:path";
 var WINDOW_MS = {
@@ -12847,7 +12941,7 @@ var BudgetStore = class {
   reserve(budget, now = Date.now()) {
     const dir = join6(this.dir, this.keyFor(budget));
     makeDirectory(dir, 448);
-    const own2 = `${now.toString(36).padStart(10, "0")}-${randomBytes3(6).toString("hex")}`;
+    const own2 = `${now.toString(36).padStart(10, "0")}-${randomBytes4(6).toString("hex")}`;
     writeFileSync4(join6(dir, own2), "", { mode: 384, flag: "wx" });
     const since = now - WINDOW_MS[budget.per];
     let counted = 0;
@@ -12876,7 +12970,7 @@ var BudgetStore = class {
 };
 
 // src/session/store.ts
-import { createHash as createHash5, randomBytes as randomBytes4 } from "node:crypto";
+import { createHash as createHash5, randomBytes as randomBytes5 } from "node:crypto";
 import { readFileSync as readFileSync5, readdirSync as readdirSync5, renameSync as renameSync5, rmSync as rmSync4, writeFileSync as writeFileSync5 } from "node:fs";
 import { join as join7 } from "node:path";
 
@@ -13347,7 +13441,7 @@ var SessionStore = class {
    * without starting processes: two stores in one test behave exactly like
    * two hooks on a harness.
    */
-  piece = randomBytes4(8).toString("hex");
+  piece = randomBytes5(8).toString("hex");
   /**
    * The session's state, assembled from every piece of it on disk.
    *
@@ -13681,11 +13775,11 @@ function mergeDirectives(a, b) {
 }
 function noteRead(ids) {
   const newest = ids.reduce((max, id2) => Math.max(max, parseInt(id2.split("-")[0] ?? "", 36) || 0), 0);
-  const id = `${Math.max(Date.now(), newest + 1).toString(36)}-${randomBytes4(6).toString("hex")}`;
+  const id = `${Math.max(Date.now(), newest + 1).toString(36)}-${randomBytes5(6).toString("hex")}`;
   return [...ids, id].sort().slice(-MAX_READ_IDS);
 }
 function refusalId(turn) {
-  return `${turn}-${randomBytes4(6).toString("hex")}`;
+  return `${turn}-${randomBytes5(6).toString("hex")}`;
 }
 function refusalsIn(ids, turn) {
   const prefix = `${turn}-`;
@@ -13794,6 +13888,8 @@ var Cordon = class {
    * the state, and every start of the gateway compares against them afresh.
    */
   heldTools = /* @__PURE__ */ new Map();
+  listedServer = null;
+  listedPins = /* @__PURE__ */ new Map();
   /** The state key on disk. It comes from the harness, that is, from outside. */
   sessionId;
   policyFile;
@@ -13919,6 +14015,26 @@ var Cordon = class {
     this.persist();
     return { text: clean, source, findings, substitute };
   }
+  invalidateToolList(command) {
+    this.listedServer = serverId(command);
+    this.heldTools.clear();
+    this.listedPins.clear();
+  }
+  /** A host can cache a tools/list reply beyond a gateway restart or another owner's pin decision. */
+  gateMcpTool(command, call) {
+    if (this.policy.mcp?.pin === false) return this.gateUnattended(call);
+    const sameServer = this.listedServer === serverId(command);
+    if (!sameServer || !this.heldTools.has(call.tool)) {
+      const pins = new PinStore(this.cordonHome).load(command);
+      const seen = sameServer ? this.listedPins.get(call.tool) : void 0;
+      if ((pins !== null || this.listedServer !== null) && (seen === void 0 || pins?.[call.tool] !== seen)) {
+        const reason = "Refresh tools/list in this gateway before calling this MCP tool under its current pin.";
+        this.notifier.notify({ at: (/* @__PURE__ */ new Date()).toISOString(), decision: "deny", tool: call.tool, reason, source: null, ...labelled("pin") });
+        return this.counted({ kind: "deny", reason, rule: "pin" });
+      }
+    }
+    return this.gateUnattended(call);
+  }
   /**
    * An MCP server's tool list, against the tools its owner approved. Returns
    * the tools to hold back from the model; calls to them are refused.
@@ -13926,26 +14042,35 @@ var Cordon = class {
    * The first listing of a server is pinned as it is. A damaged pin file
    * throws: read as empty, it would approve whatever the server lists now.
    */
-  admitTools(command, listed) {
+  admitTools(command, listed, complete = true, earlierNames = /* @__PURE__ */ new Set()) {
     if (this.policy.mcp?.pin === false) return [];
     const store = new PinStore(this.cordonHome);
-    const result = comparePins(store.load(command), listed);
-    if (result.firstSight) store.save(command, result.pins);
-    const imitations = shadows(listed, store.others(command));
-    const shadowed = new Set(imitations.map((shadow) => shadow.name));
-    const held2 = [
-      ...imitations.map((shadow) => ({ name: shadow.name, why: "shadow", imitates: shadow.imitates })),
-      ...result.held.filter((tool) => !shadowed.has(tool.name))
-    ];
+    if (!uniqueToolNames(listed, earlierNames)) {
+      this.invalidateToolList(command);
+      throw new Error("duplicate MCP tool name in one catalog");
+    }
+    if (serverId(command) !== this.listedServer) this.invalidateToolList(command);
+    const { held: held2, shadowServers } = store.observe(command, listed, complete, earlierNames);
+    if (complete) {
+      for (const name of this.listedPins.keys()) {
+        if (!earlierNames.has(name)) {
+          this.listedPins.delete(name);
+          this.heldTools.delete(name);
+        }
+      }
+    }
     const server2 = command.join(" ");
-    this.heldTools = new Map(held2.map((tool) => [tool.name, { why: tool.why, server: server2, ...tool.imitates === void 0 ? {} : { imitates: tool.imitates } }]));
+    for (const tool of listed) {
+      this.heldTools.delete(tool.name);
+      this.listedPins.set(tool.name, fingerprint(tool));
+    }
     for (const tool of held2) {
-      const other = imitations.find((shadow) => shadow.name === tool.name);
+      this.heldTools.set(tool.name, { why: tool.why, server: server2, imitates: tool.imitates });
       this.notifier.notify({
         at: (/* @__PURE__ */ new Date()).toISOString(),
         decision: "mcp-drift",
         tool: tool.name,
-        reason: other !== void 0 ? `the tool on ${server2} imitates ${other.imitates} of ${other.server} with lookalike characters; it is hidden from the model and refused, and approving the server does not release it` : `the tool ${tool.why === "new" ? "appeared" : "changed"} after ${server2} was approved; it is hidden from the model and refused until "cordon mcp approve"`,
+        reason: tool.why === "shadow" ? `the tool on ${server2} imitates ${tool.imitates} of ${shadowServers.get(tool.name)} with lookalike characters; it is hidden from the model and refused, and approving the server does not release it` : `the tool ${tool.why === "new" ? "appeared" : "changed"} after ${server2} was approved; it is hidden from the model and refused until the owner reviews "cordon mcp changes" and uses "cordon mcp approve-change"`,
         source: null,
         ...labelled("pin")
       });
@@ -15790,7 +15915,7 @@ function runHook5(stdin, home = cordonHome()) {
 
 // src/adapters/mcp/gateway.ts
 import { spawn } from "node:child_process";
-import { createHash as createHash7, randomBytes as randomBytes5 } from "node:crypto";
+import { createHash as createHash7, randomBytes as randomBytes6 } from "node:crypto";
 import { accessSync as accessSync3, constants as constants4 } from "node:fs";
 import { join as join12 } from "node:path";
 import { createInterface } from "node:readline";
@@ -15870,6 +15995,15 @@ function runGateway(options) {
   const hostOut = options.hostOut ?? process.stdout;
   return new Promise((resolve4) => {
     let settled = false;
+    let catalogGeneration = 0;
+    let nextCatalogCursor;
+    const catalogNames = /* @__PURE__ */ new Set();
+    const restartCatalog = () => {
+      catalogGeneration++;
+      nextCatalogCursor = void 0;
+      catalogNames.clear();
+      cordon.invalidateToolList(options.command);
+    };
     let upstream = null;
     let closeReaders;
     const reviewTimers = /* @__PURE__ */ new Map();
@@ -15910,7 +16044,7 @@ function runGateway(options) {
     }
     let cordon;
     try {
-      const sessionId = `mcp-${createHash7("sha256").update(options.command.join(" "), "utf8").digest("hex").slice(0, 12)}-${randomBytes5(16).toString("hex")}`;
+      const sessionId = `mcp-${createHash7("sha256").update(options.command.join(" "), "utf8").digest("hex").slice(0, 12)}-${randomBytes6(16).toString("hex")}`;
       cordon = new Cordon({
         policy: options.policy,
         cordonHome: options.cordonHome,
@@ -16009,6 +16143,7 @@ function runGateway(options) {
         gateCall(
           message,
           cordon,
+          options.command,
           options.policy,
           forwardRequest,
           sendToHost,
@@ -16061,6 +16196,16 @@ function runGateway(options) {
       if (forwarded === null) return;
       const entry = { method: message.method };
       const params = asRecord(forwarded["params"]);
+      if (message.method === "tools/list") {
+        const cursor = params?.["cursor"];
+        if (cursor === void 0) restartCatalog();
+        else if (cursor !== nextCatalogCursor) {
+          sendToHost({ jsonrpc: "2.0", id: message.id, error: { code: -32602, message: "Refresh tools/list to obtain the current cursor." } });
+          return;
+        }
+        nextCatalogCursor = void 0;
+        entry.catalogGeneration = catalogGeneration;
+      }
       if (message.method === "resources/read" && typeof params?.["uri"] === "string") {
         entry.label = params["uri"];
       }
@@ -16091,6 +16236,7 @@ function runGateway(options) {
         return;
       }
       if (message.type === "notification") {
+        if (message.method === "notifications/tools/list_changed") restartCatalog();
         const observed = observeServerNotification(message.value, message.method, cordon, options.policy, activeProgress);
         if (observed === null) log("unsupported server notification was withheld");
         else sendToHost(observed);
@@ -16137,7 +16283,14 @@ function runGateway(options) {
         return;
       }
       if (entry.method === "tools/list") {
-        sendToHost(observeToolList(message.value, cordon, options.policy, options.command));
+        if (entry.catalogGeneration !== catalogGeneration) {
+          sendToHost({ jsonrpc: "2.0", id: message.id, error: { code: -32e3, message: "The tool list changed during discovery. Refresh tools/list." } });
+          return;
+        }
+        const response = observeToolList(message.value, cordon, options.policy, options.command, catalogNames);
+        if (Object.hasOwn(response, "error")) restartCatalog();
+        else nextCatalogCursor = asRecord(response["result"])?.["nextCursor"];
+        sendToHost(response);
         return;
       }
       if (entry.method === "initialize") {
@@ -16248,7 +16401,7 @@ function validHostMethodParams(method, params) {
   if (method === "logging/setLevel") return typeof params["level"] === "string";
   return typeof params["uri"] === "string" && params["uri"] !== "";
 }
-function gateCall(message, cordon, policy, forwardRequest, sendToHost, waitForApproval) {
+function gateCall(message, cordon, command, policy, forwardRequest, sendToHost, waitForApproval) {
   const params = asRecord(message.params);
   const meta = asRecord(params?.["_meta"]);
   if (message.value["jsonrpc"] !== "2.0" || Object.keys(message.value).some((key) => !["jsonrpc", "id", "method", "params"].includes(key)) || params === null || Object.keys(params).some((key) => !["name", "arguments", "_meta"].includes(key)) || typeof params["name"] !== "string" || params["name"].trim() === "" || params["arguments"] !== void 0 && asRecord(params["arguments"]) === null) {
@@ -16272,7 +16425,7 @@ function gateCall(message, cordon, policy, forwardRequest, sendToHost, waitForAp
       ...typeof progressToken === "string" || typeof progressToken === "number" ? { _meta: { progressToken } } : {}
     }
   });
-  const decision = cordon.gateUnattended(call);
+  const decision = cordon.gateMcpTool(command, call);
   if (decision.kind === "deny" || decision.kind === "ask") {
     if (decision.kind === "deny" && decision.approvalId !== void 0 && waitForApproval !== void 0) {
       waitForApproval(decision.approvalId, decision.reason);
@@ -16287,11 +16440,11 @@ function gateCall(message, cordon, policy, forwardRequest, sendToHost, waitForAp
   }
   forwardRequest(message.id, { method: message.method, call }, forwarded(call.args));
 }
-function observeToolList(value, cordon, policy, command) {
+function observeToolList(value, cordon, policy, command, catalogNames) {
   const result = asRecord(value["result"]);
   const listed = result?.["tools"];
   const source = classifySource({ kind: "mcp-description", label: "tools/list" }, policy);
-  if (result === null || !Array.isArray(listed) || Object.keys(value).some((key) => !RESPONSE_KEYS.has(key)) || Object.keys(result).some((key) => !TOOL_LIST_KEYS.has(key)) || result["resultType"] !== void 0 && result["resultType"] !== "complete" || result["nextCursor"] !== void 0 && typeof result["nextCursor"] !== "string" || result["ttlMs"] !== void 0 && (!Number.isSafeInteger(result["ttlMs"]) || result["ttlMs"] < 0) || result["cacheScope"] !== void 0 && result["cacheScope"] !== "public" && result["cacheScope"] !== "private" || listed.some((tool) => !readableListedTool(tool))) {
+  if (result === null || !Array.isArray(listed) || Object.keys(value).some((key) => !RESPONSE_KEYS.has(key)) || Object.keys(result).some((key) => !TOOL_LIST_KEYS.has(key)) || result["resultType"] !== void 0 && result["resultType"] !== "complete" || result["nextCursor"] !== void 0 && typeof result["nextCursor"] !== "string" || result["ttlMs"] !== void 0 && (!Number.isSafeInteger(result["ttlMs"]) || result["ttlMs"] < 0) || result["cacheScope"] !== void 0 && result["cacheScope"] !== "public" && result["cacheScope"] !== "private" || listed.some((tool) => !readableListedTool(tool)) || !uniqueToolNames(listed, catalogNames)) {
     return withholdUnreadableResponse(value, "tools/list", source, cordon);
   }
   if (result["_meta"] !== void 0) {
@@ -16311,7 +16464,7 @@ function observeToolList(value, cordon, policy, command) {
     _meta: tool["_meta"],
     execution: tool["execution"]
   }));
-  const held2 = new Set(cordon.admitTools(command, named2).map((tool) => tool.name));
+  const held2 = new Set(cordon.admitTools(command, named2, result["nextCursor"] === void 0, catalogNames).map((tool) => tool.name));
   const tools = eligible.filter((tool) => !held2.has(String(asRecord(tool)?.["name"])));
   value = { ...value, result: { ...result, tools } };
   for (const tool of tools) {
@@ -16351,6 +16504,7 @@ function observeToolList(value, cordon, policy, command) {
       if (cordon.observe(text, source2).text !== text) return withholdUnreadableResponse(value, "tools/list", source2, cordon);
     }
   }
+  for (const tool of listed) catalogNames.add(tool.name);
   return value;
 }
 var MAX_SCHEMA_DEPTH = 16;
@@ -16386,9 +16540,9 @@ function readableIcons(value) {
 function readableSchemaText(node, depth) {
   if (depth > MAX_SCHEMA_DEPTH) return true;
   if (Array.isArray(node)) return node.every((item) => readableSchemaText(item, depth + 1));
-  const record = asRecord(node);
-  if (record === null) return true;
-  return Object.entries(record).every(([key, value]) => {
+  const record2 = asRecord(node);
+  if (record2 === null) return true;
+  return Object.entries(record2).every(([key, value]) => {
     if ((key === "description" || key === "title") && typeof value !== "string") return false;
     return readableSchemaText(value, depth + 1);
   });
@@ -16423,8 +16577,8 @@ function observeSchemaValue(value, depth, budget) {
   if (depth > MAX_SCHEMA_DEPTH || ++budget.nodes > MAX_SCHEMA_NODES) return false;
   if (typeof value === "string") return sanitize(value).clean === value;
   if (Array.isArray(value)) return value.every((item) => observeSchemaValue(item, depth + 1, budget));
-  const record = asRecord(value);
-  if (record !== null) return Object.entries(record).every(([key, item]) => sanitize(key).clean === key && observeSchemaValue(item, depth + 1, budget));
+  const record2 = asRecord(value);
+  if (record2 !== null) return Object.entries(record2).every(([key, item]) => sanitize(key).clean === key && observeSchemaValue(item, depth + 1, budget));
   return true;
 }
 function observeDescription(entry, key, tool, source, cordon) {
@@ -16459,8 +16613,8 @@ function observeServerNotification(value, method, cordon, policy, activeProgress
   if (SERVER_LIST_NOTIFICATIONS.has(method)) {
     const params2 = value["params"];
     if (params2 !== void 0) {
-      const record = asRecord(params2);
-      if (record === null || Object.keys(record).length > 0) return null;
+      const record2 = asRecord(params2);
+      if (record2 === null || Object.keys(record2).length > 0) return null;
     }
     return { jsonrpc: "2.0", method, ...params2 === void 0 ? {} : { params: params2 } };
   }
@@ -17627,6 +17781,36 @@ notify:
 `;
 }
 
+// src/output/pin-change.ts
+function object(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+function renderPinChange(change2, visible2) {
+  const quoted = (value) => visible2(canonical(value));
+  const kind = change2.beforeHash === null ? "new" : "changed";
+  const lines = [
+    `${change2.id} ${kind} ${quoted(change2.after.name)}`,
+    `    server argv: ${quoted(change2.command)}`
+  ];
+  if (!change2.before && change2.beforeHash !== null) {
+    lines.push(`    previous declaration unavailable (SHA-256 ${visible2(change2.beforeHash)})`);
+  }
+  function diff(path, before, after) {
+    if (object(before) && object(after)) {
+      for (const key of [.../* @__PURE__ */ new Set([...Object.keys(before), ...Object.keys(after)])].sort()) {
+        const child = path + "/" + key.replaceAll("~", "~0").replaceAll("/", "~1");
+        diff(child, Object.hasOwn(before, key) ? before[key] : void 0, Object.hasOwn(after, key) ? after[key] : void 0);
+      }
+      return;
+    }
+    if (canonical(before) === canonical(after)) return;
+    if (before !== void 0) lines.push(`    - ${quoted(path)} ${quoted(before)}`);
+    if (after !== void 0) lines.push(`    + ${quoted(path)} ${quoted(after)}`);
+  }
+  diff("", change2.before, change2.after);
+  return lines.join("\n");
+}
+
 // src/diagnostics/probe.ts
 import { closeSync as closeSync2, constants as constants5, fstatSync as fstatSync2, lstatSync as lstatSync3, openSync as openSync2, readSync } from "node:fs";
 import { join as join16 } from "node:path";
@@ -17696,7 +17880,7 @@ function pairedProbe(harness, id, start, events, policyAtCheck, reportedHostVers
 }
 
 // src/cli.ts
-var USAGE = "usage: cordon scan <file|-> [--json] | cordon hook [--harness claude-code|gemini|codex|kimi|deepseek] | cordon mcp [--wait-for-approval-ms N] -- <server command...> | cordon mcp serve --socket PATH [--wait-for-approval-ms N] -- <server command...> | cordon mcp connect --socket PATH --owner-uid UID | cordon mcp approve -- <server command...> | cordon doctor [--json] | cordon probe codex [--check ID] | cordon probe codex|claude-code --pair [--check ID [--host-version VERSION]] | cordon init [--profile locked|research|documents|coding|service] [--force] | cordon log [--last N] [--json] | cordon approve [id [--show|--read] [--as name]] | cordon policy check|explain [file] | cordon policy apply <file> [--accept-warnings] [--as name] | cordon audit [dir] [--json|--sarif] [--fail-on high|medium|low]";
+var USAGE = "usage: cordon scan <file|-> [--json] | cordon hook [--harness claude-code|gemini|codex|kimi|deepseek] | cordon mcp [--wait-for-approval-ms N] -- <server command...> | cordon mcp serve --socket PATH [--wait-for-approval-ms N] -- <server command...> | cordon mcp connect --socket PATH --owner-uid UID | cordon mcp changes | cordon mcp approve-change <id> | cordon mcp approve -- <server command...> | cordon doctor [--json] | cordon probe codex [--check ID] | cordon probe codex|claude-code --pair [--check ID [--host-version VERSION]] | cordon init [--profile locked|research|documents|coding|service] [--force] | cordon log [--last N] [--json] | cordon approve [id [--show|--read] [--as name]] | cordon policy check|explain [file] | cordon policy apply <file> [--accept-warnings] [--as name] | cordon audit [dir] [--json|--sarif] [--fail-on high|medium|low]";
 var HARNESSES = /* @__PURE__ */ new Map([
   ["claude-code", runHook],
   ["gemini", runHook2],
@@ -18076,6 +18260,7 @@ function printDoctorText(home, report2) {
   }
 }
 function mcp(args) {
+  if (args[0] === "changes" || args[0] === "approve-change") return pinReview(args);
   if (args[0] === "approve") return approve(args.slice(1));
   if (args[0] === "serve") return mcpServe(args.slice(1));
   if (args[0] === "connect") return mcpConnect(args.slice(1));
@@ -18274,6 +18459,35 @@ function sarif(findings) {
       }))
     }]
   };
+}
+function pinReview(args) {
+  const [action, id] = args;
+  const list = action === "changes";
+  if (list ? args.length !== 1 : args.length !== 2 || !/^[0-9a-f]{64}$/u.test(id ?? "")) {
+    process.stderr.write("usage: cordon mcp changes | cordon mcp approve-change <id>\n");
+    return 2;
+  }
+  const store = new PinStore(cordonHome());
+  try {
+    if (list) {
+      const changes = store.changes();
+      for (const change2 of changes) process.stdout.write(renderPinChange(change2, visible) + "\n");
+      if (!changes.length) process.stdout.write("No pending MCP tool changes.\n");
+      return 0;
+    }
+    const approved = store.approveChange(id);
+    if (approved === null) {
+      process.stderr.write("No matching approvable change. Run cordon mcp changes for the current declarations.\n");
+      return 1;
+    }
+    process.stdout.write(`Approved ${visible(JSON.stringify(approved.after.name))} (${approved.id}). Refresh the tool list.
+`);
+    return 0;
+  } catch (error) {
+    process.stderr.write(`cordon mcp ${action}: ${visible(error.message)}
+`);
+    return 1;
+  }
 }
 function approve(args) {
   const command = args[0] === "--" ? args.slice(1) : [];
@@ -18657,7 +18871,7 @@ function probe(args) {
   }
   const journal = readJournal("cordon probe");
   if (journal === null) return 1;
-  const id = supplied ?? randomBytes6(16).toString("hex");
+  const id = supplied ?? randomBytes7(16).toString("hex");
   if (pair) {
     const effective = policyForDialect(journal.policy, harness === "codex" ? CODEX : CLAUDE_CODE);
     return pairedProbe(harness, id, start, journal.events, policyHash(effective), hostVersion ?? null);
@@ -18758,7 +18972,7 @@ ${shown2.length} event${shown2.length === 1 ? "" : "s"}: ${summary}
 function visible(value) {
   const text = typeof value === "string" ? value : JSON.stringify(value) ?? "";
   return text.replace(
-    /[\u0000-\u001f\u007f-\u009f\u2028\u2029\p{Default_Ignorable_Code_Point}]/gu,
+    /[\u0000-\u001f\u007f-\u009f\u2028\u2029\u2800\uFFF9-\uFFFB\p{Default_Ignorable_Code_Point}]/gu,
     (char) => {
       const point = char.codePointAt(0);
       return point <= 65535 ? `\\u${point.toString(16).padStart(4, "0")}` : `\\u{${point.toString(16)}}`;

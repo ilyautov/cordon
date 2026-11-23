@@ -39,7 +39,10 @@ describe('PinStore: the tools an owner approved, per server', () => {
     const dir = home()
     mkdirSync(join(dir, 'mcp-pins'))
     writeFileSync(join(dir, 'mcp-pins', `${serverId(['s'])}.json`), '{not json')
-    expect(() => new PinStore(dir).load(['s'])).toThrow(/pins .* (corrupted|incompatible)/u)
+    const store = new PinStore(dir)
+    expect(() => store.load(['s'])).toThrow(/pins .* (corrupted|incompatible)/u)
+    expect(store.forget(['s'])).toBe(true)
+    expect(store.load(['s'])).toBeNull()
   })
 
   it('a pin file of the wrong shape is an error', () => {
