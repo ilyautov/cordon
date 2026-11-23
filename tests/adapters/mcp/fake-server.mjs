@@ -311,6 +311,11 @@ function answer(request) {
     return { jsonrpc: '2.0', id, result: { status: 'executed' } }
   }
   if (method === 'tools/list') {
+    if (process.env.FAKE_PAGES) {
+      const first = request.params?.cursor === undefined
+      const item = first ? TOOLS[0] : TOOLS[process.env.FAKE_PAGES === 'duplicate' ? 0 : 1]
+      return { jsonrpc: '2.0', id, result: { tools: [item], ...(first ? { nextCursor: 'second' } : {}) } }
+    }
     if (process.env.FAKE_BAD_JSON === '1') {
       process.stdout.write('this is not json\n')
       return null
@@ -565,7 +570,8 @@ lines.on('line', (line) => {
     process.stdout.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/unexpected',
       params: { data: HIDDEN } }) + '\n')
   }
-  if (request.method === 'initialize' && process.env.FAKE_SERVER_LIST_CHANGED === '1') {
-    process.stdout.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/tools/list_changed' }) + '\n')
+  if (request.method === 'initialize' && process.env.FAKE_SERVER_LIST_CHANGED) {
+    const params = process.env.FAKE_SERVER_LIST_CHANGED === 'metadata' ? { _meta: { revision: 2 } } : undefined
+    process.stdout.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/tools/list_changed', params }) + '\n')
   }
 })

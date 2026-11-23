@@ -1,0 +1,65 @@
+{
+  "date": "2026-11-23",
+  "host": "codex-cli 0.166.0",
+  "model": "gpt-6-luna",
+  "transport": "stdio",
+  "testedCommit": "1bdbe278e80a7138d7ae1efdaaeab93885c464fe",
+  "bundleSha256": "157fd95d765e9edbab73989e92600017415f056be0edb5e6b6d7538b3824391c",
+  "setup": "Isolated local fixture. All three tools are read-only. A scripted listing pinned the baseline before two declarations changed. A separate owner CLI approved the invoice schema while the first Codex process waited for check_status.",
+  "baseline": [
+    "check_status",
+    "preview_invoice",
+    "preview_receipt"
+  ],
+  "reviewedChanges": {
+    "preview_invoice": "Added optional string property memo to inputSchema.",
+    "preview_receipt": "Changed the tool description."
+  },
+  "approved": "preview_invoice",
+  "sameCodexProcess": {
+    "advertisedTools": [
+      [
+        "check_status"
+      ]
+    ],
+    "forwardedCatalogChangeSignals": 1,
+    "codexCompletedCalls": [
+      {
+        "tool": "check_status",
+        "arguments": {},
+        "status": "completed"
+      }
+    ],
+    "turnCompleted": true
+  },
+  "freshCodexProcess": {
+    "advertisedTools": [
+      [
+        "check_status",
+        "preview_invoice"
+      ]
+    ],
+    "forwardedCatalogChangeSignals": 0,
+    "codexCompletedCalls": [
+      {
+        "tool": "preview_invoice",
+        "arguments": {
+          "memo": "live-check"
+        },
+        "status": "completed"
+      }
+    ],
+    "turnCompleted": true
+  },
+  "upstreamCallCounts": {
+    "check_status": 1,
+    "preview_invoice": 1,
+    "preview_receipt": 0
+  },
+  "directNegativeControl": {
+    "client": "scripted JSON-RPC client through the same Cordon bundle and pin store",
+    "requested": "preview_receipt",
+    "isError": true,
+    "journalRule": "pin"
+  }
+}

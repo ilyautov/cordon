@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import { humanSeesRendered, type Certificate, type ExposureMark, type Decision, type EffectClass, type Source, type ToolCall } from './core/types.js'
 import { gate as decide } from './gate/gate.js'
 import { memoryTarget } from './gate/memory.js'
-import { comparePins, shadows, type HeldTool, type ListedTool } from './gate/pins.js'
+import { fingerprint, uniqueToolNames, type HeldTool, type ListedTool } from './gate/pins.js'
 import { pastedSecrets } from './gate/secrets.js'
 import { FileNotifier, SILENT, labelled, stamped, type Notifier } from './notify/notifier.js'
 import { policyHash } from './policy/hash.js'
@@ -18,7 +18,7 @@ import type { Finding } from './sanitize/types.js'
 import { issue, narrow, parseDirective, parseTrustMemory } from './scope/certificate.js'
 import { MemoryLedger, type MemoryEntry } from './session/memory.js'
 import { ApprovalStore, approvalId, canonical, type ApprovalContext } from './session/approvals.js'
-import { PinStore } from './session/pins.js'
+import { PinStore, serverId } from './session/pins.js'
 import { BudgetStore } from './session/budgets.js'
 import { classify } from './scope/effects.js'
 import { MAX_LOOKUPS, MAX_READ_IDS, MAX_REFUSAL_IDS, MAX_USER_ATOMS, SessionStore, noteRead, refusalId, refusalsIn, type SessionState, type TurnNames } from './session/store.js'
@@ -152,7 +152,10 @@ export class Cordon {
    * MCP tools held back in this process. Not persisted: the pins on disk are
    * the state, and every start of the gateway compares against them afresh.
    */
-  private heldTools = new Map<string, { why: HeldTool['why']; server: string; imitates?: string }>()
+  private readonly heldTools = new Map<string, { why: HeldTool['why']; server: string; imitates?: string }>()
+
+  private listedServer: string | null = null
+  private readonly listedPins = new Map<string, string>()
 
   /** The state key on disk. It comes from the harness, that is, from outside. */
   readonly sessionId: string
@@ -348,6 +351,28 @@ export class Cordon {
     return { text: clean, source, findings, substitute }
   }
 
+  invalidateToolList(command: readonly string[]): void {
+    this.listedServer = serverId(command)
+    this.heldTools.clear()
+    this.listedPins.clear()
+  }
+
+  /** A host can cache a tools/list reply beyond a gateway restart or another owner's pin decision. */
+  gateMcpTool(command: readonly string[], call: ToolCall): Decision {
+    if (this.policy.mcp?.pin === false) return this.gateUnattended(call)
+    const sameServer = this.listedServer === serverId(command)
+    if (!sameServer || !this.heldTools.has(call.tool)) {
+      const pins = new PinStore(this.cordonHome).load(command)
+      const seen = sameServer ? this.listedPins.get(call.tool) : undefined
+      if ((pins !== null || this.listedServer !== null) && (seen === undefined || pins?.[call.tool] !== seen)) {
+        const reason = 'Refresh tools/list in this gateway before calling this MCP tool under its current pin.'
+        this.notifier.notify({ at: new Date().toISOString(), decision: 'deny', tool: call.tool, reason, source: null, ...labelled('pin') })
+        return this.counted({ kind: 'deny', reason, rule: 'pin' })
+      }
+    }
+    return this.gateUnattended(call)
+  }
+
   /**
    * An MCP server's tool list, against the tools its owner approved. Returns
    * the tools to hold back from the model; calls to them are refused.
@@ -355,36 +380,41 @@ export class Cordon {
    * The first listing of a server is pinned as it is. A damaged pin file
    * throws: read as empty, it would approve whatever the server lists now.
    */
-  admitTools(command: readonly string[], listed: readonly ListedTool[]): HeldTool[] {
+  admitTools(command: readonly string[], listed: readonly ListedTool[], complete = true, earlierNames: ReadonlySet<string> = new Set()): HeldTool[] {
     if (this.policy.mcp?.pin === false) return []
     const store = new PinStore(this.cordonHome)
-    const result = comparePins(store.load(command), listed)
-    if (result.firstSight) store.save(command, result.pins)
-
-    // A shadow is held whatever the pins say, on every start: approving the
-    // server does not make its name a different name. It is checked against
-    // the other servers' pins, which is the only place one gateway can see
-    // the others from.
-    const imitations = shadows(listed, store.others(command))
-    const shadowed = new Set(imitations.map((shadow) => shadow.name))
-    const held: HeldTool[] = [
-      ...imitations.map((shadow) => ({ name: shadow.name, why: 'shadow' as const, imitates: shadow.imitates })),
-      ...result.held.filter((tool) => !shadowed.has(tool.name)),
-    ]
-
+    if (!uniqueToolNames(listed, earlierNames)) {
+      this.invalidateToolList(command)
+      throw new Error('duplicate MCP tool name in one catalog')
+    }
+    if (serverId(command) !== this.listedServer) this.invalidateToolList(command)
+    const { held, shadowServers } = store.observe(command, listed, complete, earlierNames)
+    if (complete) {
+      // Current-page declarations are added below. Retain only prior pages of this catalog.
+      for (const name of this.listedPins.keys()) {
+        if (!earlierNames.has(name)) {
+          this.listedPins.delete(name)
+          this.heldTools.delete(name)
+        }
+      }
+    }
     const server = command.join(' ')
-    this.heldTools = new Map(held.map((tool) => [tool.name, { why: tool.why, server, ...(tool.imitates === undefined ? {} : { imitates: tool.imitates }) }]))
+    // Another discovery page cannot release a tool held on an earlier page.
+    for (const tool of listed) {
+      this.heldTools.delete(tool.name)
+      this.listedPins.set(tool.name, fingerprint(tool))
+    }
     for (const tool of held) {
-      const other = imitations.find((shadow) => shadow.name === tool.name)
+      this.heldTools.set(tool.name, { why: tool.why, server, imitates: tool.imitates })
       this.notifier.notify({
         at: new Date().toISOString(),
         decision: 'mcp-drift',
         tool: tool.name,
-        reason: other !== undefined
-          ? `the tool on ${server} imitates ${other.imitates} of ${other.server} with lookalike characters; ` +
+        reason: tool.why === 'shadow'
+          ? `the tool on ${server} imitates ${tool.imitates} of ${shadowServers.get(tool.name)} with lookalike characters; ` +
             'it is hidden from the model and refused, and approving the server does not release it'
           : `the tool ${tool.why === 'new' ? 'appeared' : 'changed'} after ${server} was approved; ` +
-            'it is hidden from the model and refused until "cordon mcp approve"',
+            'it is hidden from the model and refused until the owner reviews "cordon mcp changes" and uses "cordon mcp approve-change"',
         source: null,
         ...labelled('pin'),
       })

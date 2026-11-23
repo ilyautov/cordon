@@ -68,19 +68,29 @@ Action decisions come from the same core the hooks use. The gateway handles MCP 
 
 A server you connected and trusted can change a tool's description on any later start. This is the rug pull. The model reads descriptions as instruction, and you never see them. Whether the new wording is malicious is a question about meaning, which Cordon does not ask. That the wording changed is a fact, so the gateway acts on the fact.
 
-On a server's first start the gateway pins every tool: its name, raw description, input schema and, when present, title, annotations, output schema and icons, hashed. The pins are stored in `~/.cordon/mcp-pins/`, one file per server command. On every later `tools/list`, a tool whose fingerprint differs from its pin is **held**, and so is a tool that was not there when the server was pinned. Existing pins for tools without these optional fields remain valid; an already pinned tool that has them is held once until the owner approves its expanded fingerprint:
+The first listing pins each tool's name, raw description, input schema and supplied optional fields (title, annotations, output schema, icons, `_meta` and execution). Cordon keeps these records in owner-private files under `~/.cordon/mcp-pins/`, keyed by the server's exact command and arguments. On later listings the gateway hides new or changed declarations, refuses their calls and records an `mcp-drift` event.
 
-- it is removed from the list the host receives, so the model never reads the changed text;
-- a call to it is refused by name, and the refusal says which server to review;
-- the journal gets an `mcp-drift` event naming the tool and the server.
+### Review a tool change
 
-After you have looked at the server, approve it:
+Run `cordon mcp changes` in the owner's terminal. Each entry shows a change ID, tool name, server command as a JSON array, and the changed fields. For example, an optional invoice memo adds one line to the review.
 
-```bash
-cordon mcp approve -- npx -y @modelcontextprotocol/server-everything
+```text
+    + "/inputSchema/properties/memo" {"type":"string"}
 ```
 
-Spell the command exactly as the host starts it, because the pins are keyed by it. The next start pins the tools afresh. `cordon doctor` shows whether pinning is on and how many servers are pinned. A legitimate server upgrade also changes descriptions, and it is held the same way: the cost is one approve per upgrade. `mcp: {pin: false}` in the policy switches pinning off.
+Read the lines for that entry and pass its ID to `cordon mcp approve-change <id>`. Refresh the host's tool list or reconnect the host. Cordon releases the reviewed declaration when the server lists it again. A changed sibling still needs its own approval, and the usual call policy applies to every invocation. A later declaration with different bytes in the fingerprinted fields requires a new review. A changed implementation behind an identical declaration is outside this check.
+
+With Codex CLI 0.166.0, start a fresh `codex exec` if the approved tool is still missing. In one live run the gateway forwarded a tool-list change notification during the turn. Codex next requested the catalog in a fresh process, which called the approved version once. [Live run record](evidence/codex-mcp-pin-refresh-2026-11-23.json)
+
+New tools are shown in full. Pins from older releases contain only a hash. When the old declaration is unavailable, the CLI shows its SHA-256 and the complete candidate. Seeing the old declaration again with its matching hash enables future comparisons. Cordon escapes terminal controls in the review text.
+
+The owner CLI reads local state. A gateway must have observed the change for it to appear. A restarted gateway with existing pins, or a gateway that receives a tool-list change notification, needs fresh discovery before using a cached tool. Finish all pages of a paginated listing to retire proposals for tools the server stopped listing. Restart older gateway processes when upgrading so all writers use the current pin store.
+
+The existing `cordon mcp approve -- <server command...>` resets **all** pins and pending changes for that exact command. The first response to the next listing establishes a fresh baseline. If discovery spans multiple pages, new tools on later pages require individual approval. Use this when you intend to reset the server's baseline. `cordon doctor` reports whether pinning is enabled and how many servers have pins.
+
+### Recover an interrupted pin write
+
+Gateways and owner commands sharing a Cordon home serialize updates with the empty `mcp-pins/.writer-lock` directory. A busy writer normally releases it as soon as its update finishes. If the busy error persists after a writer was killed, stop **all** gateways and owner commands using that home. With every writer stopped, run `rmdir ~/.cordon/mcp-pins/.writer-lock` (substitute your configured Cordon home), then restart the gateways. The JSON files contain the last atomically published state.
 
 ### A tool that imitates another server's tool
 
@@ -137,7 +147,7 @@ This is opt-in; without the flag the gateway returns the refusal above. In wait 
 
 Set the MCP host's tool timeout **longer** than Cordon's wait; the retry is a separate tool call. The measured Codex CLI run used a 30-second Cordon wait and a 45-second MCP tool timeout. A host can time out without sending cancellation: in a live control with a one-second host timeout, an earlier design that forwarded the held call after approval sent an email even though Codex reported failure. The implemented wait mode only sends a retry instruction, so that same delayed approval sent no email. An agent that does not retry cannot complete the task. The wait holds one live process; it does not make an old approval valid after a restart. On `codex exec resume`, the new gateway asks under a new ID; the owner can review and approve that new request while the resumed process waits. A live synthetic-review control sent one email after the model retried under the new approval. The owner must have a separate channel to see the request and run `cordon approve`, and the agent must not have access to that channel or CLI.
 
-The approval is the owner's word, and an agent with a shell could try to say it for them. The gate refuses a command that runs `cordon approve`, `cordon mcp approve`, `cordon init`, `cordon policy apply` or `cordon hook`, quotes and backslashes removed first, and an exec after an untrusted read escalates anyway. The check is still crude, the same as self-protection's: a command assembled from variables, or `node -e` calling Cordon's code directly, gets past it before any untrusted read. The boundary that holds is the operating system's: an agent that runs as the same OS user as the owner, with `exec`, can write whatever the owner can. Where that matters, run the agent as a different user, or grant it no shell; where the agent has no shell, it has no way to approve at all.
+The approval is the owner's word, and an agent with a shell could try to say it for them. The gate refuses a command that runs `cordon approve`, `cordon mcp changes`, `cordon mcp approve-change`, `cordon mcp approve`, `cordon init`, `cordon policy apply` or `cordon hook`, quotes and backslashes removed first, and an exec after an untrusted read escalates anyway. The check is still crude, the same as self-protection's: a command assembled from variables, or `node -e` calling Cordon's code directly, gets past it before any untrusted read. The boundary that holds is the operating system's: an agent that runs as the same OS user as the owner, with `exec`, can write whatever the owner can. Where that matters, run the agent as a different user, or grant it no shell; where the agent has no shell, it has no way to approve at all.
 
 `toolsReturn` works as everywhere else: an MCP tool's result is treated as source by default (the hidden layer is not stripped, the finding is named in the journal), and `toolsReturn: <tool>: rendered` switches stripping on for the tools whose output the human sees rendered.
 

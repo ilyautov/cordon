@@ -1,3 +1,5 @@
+import { spawnSync } from 'node:child_process'
+import { ensureBuiltCli, BUILT_CLI } from '../../support/built-cli.js'
 import { existsSync, mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -6,6 +8,7 @@ import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { runGateway } from '../../../src/adapters/mcp/gateway.js'
 import { DEFAULT_POLICY, type Policy } from '../../../src/policy/defaults.js'
+import { PinStore } from '../../../src/session/pins.js'
 import { ApprovalStore } from '../../../src/session/approvals.js'
 
 const FAKE_SERVER = fileURLToPath(new URL('./fake-server.mjs', import.meta.url))
@@ -1955,6 +1958,96 @@ describe('MCP gateway: tools pinned on first sight', () => {
     await later.stop()
     // A refused call never reaches the upstream.
     expect(existsSync(log) ? readFileSync(log, 'utf8') : '').not.toContain('update_price')
+  })
+
+  it('admits only the reviewed version after rediscovery across running and restarted gateways', async () => {
+    ensureBuiltCli()
+    const home = mkdtempSync(join(tmpdir(), 'cordon-reviewed-tools-'))
+    const policy = basePolicy()
+    policy.tools.update_price = ['read']
+    policy.tools.export_all = ['read']
+    const first = start(policy, {}, home)
+    const list = { jsonrpc: '2.0', id: 1, method: 'tools/list' }
+    const call = (name: string) => ({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name, arguments: {} } })
+    const owner = (...args: string[]) => spawnSync(process.execPath, [BUILT_CLI, 'mcp', ...args], {
+      encoding: 'utf8', env: { ...process.env, CORDON_HOME: home },
+    })
+    first.send(list)
+    await first.next()
+    const env = { FAKE_PULL: '1', ...withCallLog() }
+    const later = start(policy, env, home)
+    try {
+      later.send(list)
+      expect(names(await later.next())).not.toContain('update_price')
+      const id = owner('changes').stdout.match(/^(\S+) changed "update_price"$/mu)?.[1]
+      expect(id).toBeTruthy()
+      expect(owner('approve-change', id!).status).toBe(0)
+      later.send(list)
+      expect(names(await later.next())).toEqual(['poisoned_page', 'update_price', 'mystery_box'])
+      later.send(call('update_price'))
+      expect((await later.next()).result).not.toHaveProperty('isError', true)
+      later.send(call('export_all'))
+      expect((await later.next()).result).toHaveProperty('isError', true)
+      expect(callLog(env).filter(name => name === 'update_price')).toHaveLength(1)
+      expect(callLog(env)).not.toContain('export_all')
+
+      first.send(call('update_price'))
+      expect((await first.next()).result).toHaveProperty('isError', true)
+      const restarted = start(policy, { FAKE_SERVER_LIST_CHANGED: 'metadata' }, home)
+      try {
+        restarted.send(call('update_price'))
+        expect((await restarted.next()).result).toHaveProperty('isError', true)
+        restarted.send(list)
+        expect(names(await restarted.next())).not.toContain('update_price')
+        restarted.send(call('poisoned_page'))
+        expect((await restarted.next()).result).not.toHaveProperty('isError', true)
+        restarted.send({ jsonrpc: '2.0', id: 3, method: 'initialize' })
+        await restarted.next()
+        restarted.send({ jsonrpc: '2.0', id: 4, method: 'ping' })
+        expect(await restarted.next()).toHaveProperty('id', 4)
+        restarted.send(call('poisoned_page'))
+        expect((await restarted.next()).result).toHaveProperty('isError', true)
+      } finally {
+        await restarted.stop()
+      }
+    } finally {
+      await later.stop()
+      await first.stop()
+    }
+  })
+
+  it('retires missing changes only at the end of a complete cursor chain', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'cordon-catalog-pages-'))
+    const list = { jsonrpc: '2.0', id: 1, method: 'tools/list' }
+    const store = new PinStore(home)
+    for (const env of [{}, { FAKE_PULL: '1' }]) {
+      const gateway = start(basePolicy(), env as Record<string, string>, home)
+      gateway.send(list)
+      await gateway.next()
+      await gateway.stop()
+    }
+    const pending = () => store.changes().map(item => item.after.name).sort()
+    const paged = start(basePolicy(), { FAKE_PAGES: 'two', FAKE_PULL: '1' }, home)
+    try {
+      paged.send(list)
+      expect(names(await paged.next())).toEqual(['poisoned_page'])
+      expect(pending()).toEqual(['export_all', 'update_price'])
+      paged.send({ ...list, params: { cursor: 'second' } })
+      expect(names(await paged.next())).toEqual([])
+      expect(pending()).toEqual(['update_price'])
+    } finally {
+      await paged.stop()
+    }
+    const duplicate = start(basePolicy(), { FAKE_PAGES: 'duplicate' }, home)
+    try {
+      duplicate.send(list)
+      await duplicate.next()
+      duplicate.send({ ...list, params: { cursor: 'second' } })
+      expect(await duplicate.next()).toHaveProperty('error')
+      expect(pending()).toEqual(['update_price'])
+    } finally {
+      await duplicate.stop()
+    }
   })
 
   it('an unchanged server keeps every tool', async () => {

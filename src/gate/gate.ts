@@ -161,7 +161,7 @@ function decide(call: ToolCall, ctx: GateContext): Decision {
       kind: 'deny',
       rule: 'pin',
       reason: `the MCP tool ${call.tool} ${held.why === 'new' ? 'appeared' : 'changed'} after the server was approved ` +
-        `(${held.server}); review the server, then run "cordon mcp approve -- ${held.server}"`,
+        `(${held.server}); the owner can inspect "cordon mcp changes" and select one version with "cordon mcp approve-change <id>"`,
     }
   }
 
@@ -421,7 +421,7 @@ function selfProtection(parts: readonly Field[], ctx: GateContext): Decision | n
       // a pending call approved, a changed MCP server re-pinned. The same
       // substring crudeness as below, and the same answer to its limit.
       if (APPROVES.test(value.replace(/["'\\]/gu, ''))) {
-        return { kind: 'deny', rule: 'self-protection', reason: 'self-protection: the command approves, writes a policy or speaks as the harness, which only the owner may do' }
+        return { kind: 'deny', rule: 'self-protection', reason: 'self-protection: only the owner may inspect pending reviews, approve changes, write policy or speak as the harness' }
       }
       // Case-folded: macOS and Windows open .CODEX as .codex, and a check
       // that compared exactly let the capitals through (Codex, reviewing
@@ -528,7 +528,7 @@ function asPaths(value: unknown): string[] | null {
  * stdin, and run by the agent it is a forged user turn; the harness runs the
  * hook itself, never through the agent's shell.
  */
-const APPROVES = /(?:\bcordon(?:@[\w.^~-]+)?|\bcli\.m?js)\s+(?:(?:mcp\s+)?approve|init|policy\s+apply|hook)\b/iu
+const APPROVES = /(?:\bcordon(?:@[\w.^~-]+)?|\bcli\.m?js)\s+(?:approve|mcp\s+(?:approve(?:-change)?|changes)|init|policy\s+apply|hook)\b/iu
 
 /**
  * A command's paths spelled the way the platform the harness runs on reads

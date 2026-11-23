@@ -1,8 +1,12 @@
 import { describe, it, expect, beforeAll } from 'vitest'
 import { ensureBuiltCli } from './support/built-cli.js'
-import { PinStore } from '../src/session/pins.js'
+import { Cordon } from '../src/cordon.js'
+import { DEFAULT_POLICY } from '../src/policy/defaults.js'
+import { fingerprint } from '../src/gate/pins.js'
+import { PinStore, serverId } from '../src/session/pins.js'
 import { ApprovalStore, approvalId } from '../src/session/approvals.js'
-import { spawnSync } from 'node:child_process'
+import { promisify } from 'node:util'
+import { execFile, spawnSync } from 'node:child_process'
 import { chmodSync, mkdirSync, readFileSync, realpathSync, writeFileSync, mkdtempSync } from 'node:fs'
 import { tmpdir, userInfo } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -152,6 +156,82 @@ describe('cordon mcp approve', () => {
   beforeAll(() => {
     ensureBuiltCli()
   }, 60_000)
+
+  it('reviews individual schema and description changes, then releases only the selected declaration', () => {
+    const home = mkdtempSync(join(tmpdir(), 'cordon-review-changes-'))
+    const command = ['invoice-server']
+    const cordon = new Cordon({ cordonHome: home, policy: {
+      ...DEFAULT_POLICY, tools: { create_invoice: ['read'], send_invoice: ['read'] },
+    } })
+    const cli = (...args: string[]) => run(['mcp', ...args], '', { CORDON_HOME: home })
+    const initial = [
+      { name: 'create_invoice', inputSchema: { properties: {} } },
+      { name: 'send_invoice', description: 'Send invoice' },
+    ]
+    const changed = [
+      { name: 'create_invoice', inputSchema: { properties: { memo: { type: 'string' } } } },
+      { name: 'send_invoice', description: 'Send\u202einvoice\u2800\ufff9' },
+    ]
+    cordon.admitTools(command, initial)
+    expect(cordon.admitTools(command, changed)).toHaveLength(2)
+    const review = cli('changes')
+    expect(review.status).toBe(0)
+    expect(review.stdout).toContain('/inputSchema/properties/memo')
+    expect(review.stdout).toContain('Send invoice')
+    expect(review.stdout).toContain('Send\\u202einvoice\\u2800\\ufff9')
+    expect(review.stdout).not.toContain('\u202e')
+    const id = review.stdout.match(/^(\S+) changed "create_invoice"$/mu)?.[1]
+    expect(id).toBeTruthy()
+    expect(cli('approve-change', id!).status).toBe(0)
+    expect(cli('approve-change', id!).status).toBe(1)
+    expect(cordon.admitTools(command, changed)).toEqual([{ name: 'send_invoice', why: 'changed' }])
+    expect(cordon.gate({ tool: 'create_invoice', args: {} }).kind).toBe('allow')
+    expect(cordon.gate({ tool: 'send_invoice', args: {} }).kind).toBe('deny')
+    expect(cordon.admitTools(command, initial)).toEqual([{ name: 'create_invoice', why: 'changed' }])
+    expect(cordon.gate({ tool: 'create_invoice', args: {} }).kind).toBe('deny')
+  })
+
+  it('invalidates a superseded review and shows the full candidate for a legacy hash-only pin', () => {
+    const home = mkdtempSync(join(tmpdir(), 'cordon-legacy-review-'))
+    const command = ['server']
+    const cli = (...args: string[]) => run(['mcp', ...args], '', { CORDON_HOME: home })
+    const original = { name: 'a', description: 'First' }
+    const store = new PinStore(home)
+    mkdirSync(join(home, 'mcp-pins'))
+    writeFileSync(join(home, 'mcp-pins', serverId(command) + '.json'),
+      JSON.stringify({ version: 1, command, tools: { a: fingerprint(original) } }))
+    const cordon = new Cordon({ cordonHome: home, policy: DEFAULT_POLICY })
+    cordon.admitTools(command, [{ ...original, description: 'Second' }])
+    const first = cli('changes').stdout
+    expect(first).toContain('previous declaration unavailable')
+    expect(first).toContain(fingerprint(original))
+    expect(first).toContain('Second')
+    const id = first.match(/^(\S+) changed "a"$/mu)?.[1]
+    expect(id).toBeTruthy()
+    cordon.admitTools(command, [{ ...original, description: 'Third' }])
+    expect(cli('approve-change', id!).status).toBe(1)
+    expect(store.load(command)?.a).toEqual(fingerprint(original))
+    expect(cli('changes').stdout).toContain('Third')
+  })
+
+  it('preserves both distinct approvals issued by concurrent owner processes', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'cordon-pin-writers-'))
+    const command = ['catalog']
+    const cordon = new Cordon({ cordonHome: home, policy: DEFAULT_POLICY })
+    cordon.admitTools(command, [])
+    const tools = [{ name: '__proto__', title: 'First tool' }, { name: 'constructor', title: 'Second tool' }]
+    expect(cordon.admitTools(command, tools)).toHaveLength(2)
+    const store = new PinStore(home)
+    const changes = store.changes()
+    expect(changes).toHaveLength(2)
+    await Promise.all(changes.map(change => promisify(execFile)(process.execPath, [CLI, 'mcp', 'approve-change', change.id], {
+      env: { ...process.env, CORDON_HOME: home },
+    })))
+    expect(store.changes()).toEqual([])
+    expect(cordon.admitTools(command, tools)).toEqual([])
+    expect(run(['mcp', 'changes'], '', { CORDON_HOME: home }).stdout).toContain('No pending')
+    expect(run(['mcp', 'approve-change', '../'], '', { CORDON_HOME: home }).status).toBe(2)
+  })
 
   it('forgets the pins of the named server', () => {
     const home = mkdtempSync(join(tmpdir(), 'cordon-approve-'))

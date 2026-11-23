@@ -4,6 +4,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versions follo
 
 ## [Unreleased]
 
+The MCP gateway records changes to individual tool declarations. Owners can inspect the changed fields with `cordon mcp changes`, approve one exact declaration with `cordon mcp approve-change <id>`, and refresh the host's list. Existing hash-only pins still apply. See [reviewing a tool change](docs/install-mcp.md#review-a-tool-change).
+
 ## [0.13.0] - 2026-11-23
 
 `cordon probe` can pair an ordinary write with a protected write and record the hook and file evidence. The live Codex CLI 0.166.0 checks cover hooks on subagent calls and refusal of protected or unlisted writes. A listed exact patch destination works under the exposure rule. The [compatibility matrix](docs/compatibility.md) records the tested host, policy and effect.

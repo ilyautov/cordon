@@ -25,12 +25,14 @@ import { RULES, type Rule } from './gate/rules.js'
 import { PROFILES, renderPolicy } from './policy/templates.js'
 import { sanitize } from './sanitize/index.js'
 import { APPROVAL_TTL_MS, ApprovalStore, MAX_SHOWN_ARGS, type ShownRequest } from './session/approvals.js'
+import { PinStore } from './session/pins.js'
+import { renderPinChange } from './output/pin-change.js'
 import { MemoryLedger } from './session/memory.js'
 import { CLAUDE_CODE, CODEX, policyForDialect } from './adapters/claude-code/dialect.js'
 import { pairedProbe, recordedRefusal } from './diagnostics/probe.js'
 
 const USAGE =
-  'usage: cordon scan <file|-> [--json] | cordon hook [--harness claude-code|gemini|codex|kimi|deepseek] | cordon mcp [--wait-for-approval-ms N] -- <server command...> | cordon mcp serve --socket PATH [--wait-for-approval-ms N] -- <server command...> | cordon mcp connect --socket PATH --owner-uid UID | cordon mcp approve -- <server command...> | cordon doctor [--json] | cordon probe codex [--check ID] | cordon probe codex|claude-code --pair [--check ID [--host-version VERSION]] | cordon init [--profile locked|research|documents|coding|service] [--force] | cordon log [--last N] [--json] | cordon approve [id [--show|--read] [--as name]] | cordon policy check|explain [file] | cordon policy apply <file> [--accept-warnings] [--as name] | cordon audit [dir] [--json|--sarif] [--fail-on high|medium|low]'
+  'usage: cordon scan <file|-> [--json] | cordon hook [--harness claude-code|gemini|codex|kimi|deepseek] | cordon mcp [--wait-for-approval-ms N] -- <server command...> | cordon mcp serve --socket PATH [--wait-for-approval-ms N] -- <server command...> | cordon mcp connect --socket PATH --owner-uid UID | cordon mcp changes | cordon mcp approve-change <id> | cordon mcp approve -- <server command...> | cordon doctor [--json] | cordon probe codex [--check ID] | cordon probe codex|claude-code --pair [--check ID [--host-version VERSION]] | cordon init [--profile locked|research|documents|coding|service] [--force] | cordon log [--last N] [--json] | cordon approve [id [--show|--read] [--as name]] | cordon policy check|explain [file] | cordon policy apply <file> [--accept-warnings] [--as name] | cordon audit [dir] [--json|--sarif] [--fail-on high|medium|low]'
 
 /**
  * Event parsing depends on the harness, so the harness is named explicitly.
@@ -629,6 +631,7 @@ function printDoctorText(home: string, report: DoctorReport): void {
  * built on.
  */
 function mcp(args: string[]): Promise<number> | number {
+  if (args[0] === 'changes' || args[0] === 'approve-change') return pinReview(args)
   if (args[0] === 'approve') return approve(args.slice(1))
   if (args[0] === 'serve') return mcpServe(args.slice(1))
   if (args[0] === 'connect') return mcpConnect(args.slice(1))
@@ -814,6 +817,34 @@ function sarif(findings: AuditFinding[]): Record<string, unknown> {
         locations: [{ physicalLocation: { artifactLocation: { uri: finding.file } } }],
       })),
     }],
+  }
+}
+
+function pinReview(args: string[]): number {
+  const [action, id] = args
+  const list = action === 'changes'
+  if (list ? args.length !== 1 : args.length !== 2 || !/^[0-9a-f]{64}$/u.test(id ?? '')) {
+    process.stderr.write('usage: cordon mcp changes | cordon mcp approve-change <id>\n')
+    return 2
+  }
+  const store = new PinStore(cordonHome())
+  try {
+    if (list) {
+      const changes = store.changes()
+      for (const change of changes) process.stdout.write(renderPinChange(change, visible) + '\n')
+      if (!changes.length) process.stdout.write('No pending MCP tool changes.\n')
+      return 0
+    }
+    const approved = store.approveChange(id!)
+    if (approved === null) {
+      process.stderr.write('No matching approvable change. Run cordon mcp changes for the current declarations.\n')
+      return 1
+    }
+    process.stdout.write(`Approved ${visible(JSON.stringify(approved.after.name))} (${approved.id}). Refresh the tool list.\n`)
+    return 0
+  } catch (error) {
+    process.stderr.write(`cordon mcp ${action}: ${visible((error as Error).message)}\n`)
+    return 1
   }
 }
 
@@ -1405,7 +1436,7 @@ function visible(value: unknown): string {
   const text = typeof value === 'string' ? value : JSON.stringify(value) ?? ''
   // Bidi controls can make a recipient look different from the call being approved.
   return text.replace(
-    /[\u0000-\u001f\u007f-\u009f\u2028\u2029\p{Default_Ignorable_Code_Point}]/gu,
+    /[\u0000-\u001f\u007f-\u009f\u2028\u2029\u2800\uFFF9-\uFFFB\p{Default_Ignorable_Code_Point}]/gu,
     (char) => {
       const point = char.codePointAt(0)!
       return point <= 0xffff

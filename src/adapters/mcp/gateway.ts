@@ -9,6 +9,7 @@ import { sourceLabel } from '../../core/argument-keys.js'
 import { makeDirectory } from '../../core/mkdir.js'
 import { rewriteNotice } from '../../core/rewrite-notice.js'
 import type { Source, ToolCall } from '../../core/types.js'
+import { uniqueToolNames } from '../../gate/pins.js'
 import type { Policy } from '../../policy/defaults.js'
 import { homeProblem, projectDir } from '../../policy/home.js'
 import { classifySource } from '../../provenance/trust.js'
@@ -46,6 +47,7 @@ interface ProgressState {
 }
 
 interface Pending {
+  catalogGeneration?: number
   method: string
   progress?: ProgressState
   /** The gated call, kept for a tools/call: the result's source is named by it. */
@@ -109,6 +111,15 @@ export function runGateway(options: GatewayOptions): Promise<number> {
 
   return new Promise((resolve) => {
     let settled = false
+    let catalogGeneration = 0
+    let nextCatalogCursor: string | undefined
+    const catalogNames = new Set<string>()
+    const restartCatalog = (): void => {
+      catalogGeneration++
+      nextCatalogCursor = undefined
+      catalogNames.clear()
+      cordon.invalidateToolList(options.command)
+    }
     let upstream: ChildProcess | null = null
     let closeReaders: (() => void) | undefined
     const reviewTimers = new Map<string, {
@@ -297,7 +308,7 @@ export function runGateway(options: GatewayOptions): Promise<number> {
       }
 
       if (message.method === 'tools/call') {
-        gateCall(message, cordon, options.policy, forwardRequest, sendToHost,
+        gateCall(message, cordon, options.command, options.policy, forwardRequest, sendToHost,
           approvalWaitMs === 0 ? undefined : (approvalId, reason) => {
             const approvals = new ApprovalStore(options.cordonHome)
             const question = approvals.waiting(approvalId)
@@ -359,6 +370,16 @@ export function runGateway(options: GatewayOptions): Promise<number> {
 
       const entry: Pending = { method: message.method }
       const params = asRecord(forwarded['params'])
+      if (message.method === 'tools/list') {
+        const cursor = params?.['cursor']
+        if (cursor === undefined) restartCatalog()
+        else if (cursor !== nextCatalogCursor) {
+          sendToHost({ jsonrpc: '2.0', id: message.id, error: { code: -32602, message: 'Refresh tools/list to obtain the current cursor.' } })
+          return
+        }
+        nextCatalogCursor = undefined
+        entry.catalogGeneration = catalogGeneration
+      }
       if (message.method === 'resources/read' && typeof params?.['uri'] === 'string') {
         entry.label = params['uri']
       }
@@ -401,6 +422,8 @@ export function runGateway(options: GatewayOptions): Promise<number> {
         return
       }
       if (message.type === 'notification') {
+        // Even a signal whose metadata must be withheld makes the cached list stale.
+        if (message.method === 'notifications/tools/list_changed') restartCatalog()
         const observed = observeServerNotification(message.value, message.method, cordon, options.policy, activeProgress)
         if (observed === null) log('unsupported server notification was withheld')
         else sendToHost(observed)
@@ -465,7 +488,14 @@ export function runGateway(options: GatewayOptions): Promise<number> {
       }
 
       if (entry.method === 'tools/list') {
-        sendToHost(observeToolList(message.value, cordon, options.policy, options.command))
+        if (entry.catalogGeneration !== catalogGeneration) {
+          sendToHost({ jsonrpc: '2.0', id: message.id, error: { code: -32000, message: 'The tool list changed during discovery. Refresh tools/list.' } })
+          return
+        }
+        const response = observeToolList(message.value, cordon, options.policy, options.command, catalogNames)
+        if (Object.hasOwn(response, 'error')) restartCatalog()
+        else nextCatalogCursor = asRecord(response['result'])?.['nextCursor'] as string | undefined
+        sendToHost(response)
         return
       }
       if (entry.method === 'initialize') {
@@ -623,6 +653,7 @@ type ForwardRequest = (id: JsonRpcId, entry: Pending, request: Record<string, un
 function gateCall(
   message: Extract<Message, { type: 'request' }>,
   cordon: Cordon,
+  command: readonly string[],
   policy: Policy,
   forwardRequest: ForwardRequest,
   sendToHost: (message: Record<string, unknown>) => void,
@@ -658,7 +689,7 @@ function gateCall(
     },
   })
 
-  const decision = cordon.gateUnattended(call)
+  const decision = cordon.gateMcpTool(command, call)
   if (decision.kind === 'deny' || decision.kind === 'ask') {
     if (decision.kind === 'deny' && decision.approvalId !== undefined && waitForApproval !== undefined) {
       waitForApproval(decision.approvalId, decision.reason)
@@ -688,6 +719,7 @@ function observeToolList(
   cordon: Cordon,
   policy: Policy,
   command: readonly string[],
+  catalogNames: Set<string>,
 ): Record<string, unknown> {
   const result = asRecord(value['result'])
   const listed = result?.['tools']
@@ -701,7 +733,8 @@ function observeToolList(
       (result['ttlMs'] as number) < 0)) ||
     (result['cacheScope'] !== undefined && result['cacheScope'] !== 'public' &&
       result['cacheScope'] !== 'private') ||
-    listed.some((tool) => !readableListedTool(tool))) {
+    listed.some((tool) => !readableListedTool(tool)) ||
+    !uniqueToolNames(listed, catalogNames)) {
     return withholdUnreadableResponse(value, 'tools/list', source, cordon)
   }
   if (result['_meta'] !== undefined) {
@@ -721,7 +754,7 @@ function observeToolList(
     .map((tool) => ({ name: tool['name'] as string, description: tool['description'], inputSchema: tool['inputSchema'],
       title: tool['title'], annotations: tool['annotations'], outputSchema: tool['outputSchema'], icons: tool['icons'],
       _meta: tool['_meta'], execution: tool['execution'] }))
-  const held = new Set(cordon.admitTools(command, named).map((tool) => tool.name))
+  const held = new Set(cordon.admitTools(command, named, result['nextCursor'] === undefined, catalogNames).map((tool) => tool.name))
   const tools = eligible.filter((tool) => !held.has(String(asRecord(tool)?.['name'])))
   value = { ...value, result: { ...result, tools } }
 
@@ -769,6 +802,7 @@ function observeToolList(
       if (cordon.observe(text, source).text !== text) return withholdUnreadableResponse(value, 'tools/list', source, cordon)
     }
   }
+  for (const tool of listed) catalogNames.add(tool.name)
   return value
 }
 

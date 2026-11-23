@@ -13,6 +13,16 @@ export interface ListedTool {
   execution?: unknown
 }
 
+/** A call names one tool. A repeated declaration on this or an earlier page is ambiguous. */
+export function uniqueToolNames(tools: readonly ListedTool[], earlier: ReadonlySet<string>): boolean {
+  const names = new Set<string>()
+  for (const { name } of tools) {
+    if (earlier.has(name) || names.has(name)) return false
+    names.add(name)
+  }
+  return true
+}
+
 /** Tool name → fingerprint, as approved. */
 export type Pins = Record<string, string>
 
@@ -45,7 +55,12 @@ export interface PinComparison {
  * to approve without looking.
  */
 export function fingerprint(tool: ListedTool): string {
-  const canonical = stable({ name: tool.name, description: tool.description ?? null, inputSchema: tool.inputSchema ?? null,
+  return createHash('sha256').update(stable(pinnedDeclaration(tool)), 'utf8').digest('hex')
+}
+
+/** The owner reviews the same raw fields that the gateway fingerprints. */
+export function pinnedDeclaration(tool: ListedTool): ListedTool {
+  return { name: tool.name, description: tool.description ?? null, inputSchema: tool.inputSchema ?? null,
     // Keep old pins valid when these optional MCP fields are absent. A field
     // newly added to an already pinned tool still changes its fingerprint.
     ...(tool.title === undefined ? {} : { title: tool.title }),
@@ -54,8 +69,7 @@ export function fingerprint(tool: ListedTool): string {
     ...(tool.icons === undefined ? {} : { icons: tool.icons }),
     ...(tool._meta === undefined ? {} : { _meta: tool._meta }),
     ...(tool.execution === undefined ? {} : { execution: tool.execution }),
-  })
-  return createHash('sha256').update(canonical, 'utf8').digest('hex')
+  }
 }
 
 /**

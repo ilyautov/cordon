@@ -150,7 +150,7 @@ export interface Policy {
      * Whether the MCP gateway pins each server's tools on first sight and
      * holds back a tool that changed or appeared since. On by default: the
      * rug pull it answers needs no mistake from the owner at all. A server
-     * whose tools legitimately change is approved with `cordon mcp approve`.
+     * whose tools change needs owner review via `cordon mcp changes`.
      */
     pin: boolean
   }
