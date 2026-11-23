@@ -22,10 +22,11 @@ import type { Policy } from './policy/defaults.js'
 import { policyHash } from './policy/hash.js'
 import { labelled, type NotifyEvent } from './notify/notifier.js'
 import { RULES, type Rule } from './gate/rules.js'
+import { fingerprint } from './gate/pins.js'
 import { PROFILES, renderPolicy } from './policy/templates.js'
 import { sanitize } from './sanitize/index.js'
 import { APPROVAL_TTL_MS, ApprovalStore, MAX_SHOWN_ARGS, type ShownRequest } from './session/approvals.js'
-import { PinStore } from './session/pins.js'
+import { PinStore, type PinChange } from './session/pins.js'
 import { renderPinChange } from './output/pin-change.js'
 import { MemoryLedger } from './session/memory.js'
 import { CLAUDE_CODE, CODEX, policyForDialect } from './adapters/claude-code/dialect.js'
@@ -820,6 +821,23 @@ function sarif(findings: AuditFinding[]): Record<string, unknown> {
   }
 }
 
+/** What the owner is about to release, in the words the journal keeps. */
+function pinApprovalEvent(change: PinChange): NotifyEvent {
+  return {
+    at: new Date().toISOString(),
+    decision: 'pin-approval-given',
+    tool: change.after.name,
+    reason: `the owner approved the ${change.beforeHash === null ? 'new' : 'changed'} declaration of ${JSON.stringify(change.after.name)} ` +
+      `on server ${JSON.stringify(change.command)}`,
+    source: null,
+    // The id names the whole transition; the binding is the declaration it
+    // releases, to compare with the pin file.
+    id: change.id,
+    binding: fingerprint(change.after),
+    ...labelled('pin'),
+  }
+}
+
 function pinReview(args: string[]): number {
   const [action, id] = args
   const list = action === 'changes'
@@ -835,9 +853,35 @@ function pinReview(args: string[]): number {
       if (!changes.length) process.stdout.write('No pending MCP tool changes.\n')
       return 0
     }
-    const approved = store.approveChange(id!)
-    if (approved === null) {
+    // Read first what the owner is about to release, so the record names it.
+    // An id that matches nothing is no owner's act, so nothing is written.
+    const proposed = store.changes().find((change) => change.id === id) ?? null
+    if (proposed === null) {
       process.stderr.write('No matching approvable change. Run cordon mcp changes for the current declarations.\n')
+      return 1
+    }
+    // No record, no approval, as for `cordon approve`: the line goes down
+    // before the pin, so no tool is released on a decision the journal does
+    // not hold. A pin that cannot then be written gets a second line.
+    const event = pinApprovalEvent(proposed)
+    const recorded = ownerRecord(event)
+    if (recorded !== null) {
+      process.stderr.write(`cordon mcp approve-change: the journal could not record the approval, so it is not given: ${visible(recorded)}\n`)
+      return 1
+    }
+    let approved: PinChange | null
+    let failure = 'the change was replaced, withdrawn or held again while it was being approved'
+    try {
+      approved = store.approveChange(id!)
+    } catch (error) {
+      // The line above already says "given": the one below must follow it
+      // whatever stopped the approval, a busy pin store included.
+      approved = null
+      failure = `the pin could not be written (${(error as Error).message})`
+    }
+    if (approved === null) {
+      const corrected = ownerRecord({ ...event, at: new Date().toISOString(), decision: 'pin-approval-lapsed', reason: `${failure}; nothing was approved` })
+      process.stderr.write(`cordon mcp approve-change: ${visible(failure)}; nothing was approved${corrected === null ? '' : `, and the journal could not say so: ${visible(corrected)}`}\n`)
       return 1
     }
     process.stdout.write(`Approved ${visible(JSON.stringify(approved.after.name))} (${approved.id}). Refresh the tool list.\n`)
@@ -857,6 +901,10 @@ function pinReview(args: string[]): number {
  * runs it, and an agent that could run it through a shell is under the
  * exposure rule like any other exec, and the gate refuses a command that
  * names it outright.
+ *
+ * The reset is an owner's act, so it is written to the journal before the
+ * pins go, as `pins-reset`; a journal that cannot take the line means the
+ * reset is not made.
  */
 function approve(args: string[]): number {
   const command = args[0] === '--' ? args.slice(1) : []
@@ -865,8 +913,49 @@ function approve(args: string[]): number {
     return 2
   }
   const server = command.join(' ')
-  if (!Cordon.approveServer(cordonHome(), command)) {
+  const store = new PinStore(cordonHome())
+  // A server that was never pinned is no owner's act, so nothing is written.
+  // A pin store that cannot be read is reported: it is not called empty.
+  let pinned: boolean
+  try {
+    pinned = store.has(command)
+  } catch (error) {
+    process.stderr.write(`cordon mcp approve: ${visible((error as Error).message)}\n`)
+    return 1
+  }
+  if (!pinned) {
     process.stdout.write(`no pins for ${server}; spell the command exactly as the host starts it\n`)
+    return 1
+  }
+  // No record, no reset, as for `cordon approve`: every pin of the server
+  // goes, so the line goes down first. A reset that cannot then be made
+  // gets a second line.
+  const event: NotifyEvent = {
+    at: new Date().toISOString(),
+    decision: 'pins-reset',
+    tool: '(mcp pins)',
+    reason: `the owner discarded every pin and pending change of the MCP server ${JSON.stringify(command)}; ` +
+      'its next listing pins its tools afresh',
+    source: null,
+    ...labelled('pin'),
+  }
+  const recorded = ownerRecord(event)
+  if (recorded !== null) {
+    process.stderr.write(`cordon mcp approve: the journal could not record the reset, so it is not made: ${visible(recorded)}\n`)
+    return 1
+  }
+  let reset = false
+  let failure = 'another writer removed the pins while they were being reset'
+  try {
+    reset = store.forget(command)
+  } catch (error) {
+    // A busy or unwritable pin store is reported, not thrown: this is the
+    // owner's terminal, and nothing was reset.
+    failure = `the pins could not be removed (${(error as Error).message})`
+  }
+  if (!reset) {
+    const corrected = ownerRecord({ ...event, at: new Date().toISOString(), decision: 'pins-reset-failed', reason: `${failure}; the pins were not reset` })
+    process.stderr.write(`cordon mcp approve: ${visible(failure)}; the pins were not reset${corrected === null ? '' : `, and the journal could not say so: ${visible(corrected)}`}\n`)
     return 1
   }
   process.stdout.write(`approved: ${server} will pin its tools afresh on its next start\n`)

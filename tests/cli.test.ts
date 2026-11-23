@@ -3,11 +3,11 @@ import { ensureBuiltCli } from './support/built-cli.js'
 import { Cordon } from '../src/cordon.js'
 import { DEFAULT_POLICY } from '../src/policy/defaults.js'
 import { fingerprint } from '../src/gate/pins.js'
-import { PinStore, serverId } from '../src/session/pins.js'
+import { PinStore, serverId, type PinChange } from '../src/session/pins.js'
 import { ApprovalStore, approvalId } from '../src/session/approvals.js'
 import { promisify } from 'node:util'
 import { execFile, spawnSync } from 'node:child_process'
-import { chmodSync, mkdirSync, readFileSync, realpathSync, writeFileSync, mkdtempSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, rmdirSync, writeFileSync, mkdtempSync } from 'node:fs'
 import { tmpdir, userInfo } from 'node:os'
 import { dirname, join } from 'node:path'
 
@@ -29,6 +29,33 @@ function run(
     env: { ...process.env, ...env },
   })
   return { stdout: result.stdout ?? '', stderr: result.stderr ?? '', status: result.status ?? 1 }
+}
+
+/** A server whose one tool changed after it was pinned, so a change waits for the owner. */
+function pendingChange(home: string): PinChange {
+  const command = ['server']
+  const cordon = new Cordon({ cordonHome: home, policy: DEFAULT_POLICY })
+  cordon.admitTools(command, [{ name: 'a', description: 'First' }])
+  expect(cordon.admitTools(command, [{ name: 'a', description: 'Second' }])).toHaveLength(1)
+  const [change] = new PinStore(home).changes()
+  expect(change?.after.name).toBe('a')
+  return change!
+}
+
+/**
+ * The owner's command in a child process, started and not awaited: it meets
+ * the pin lock where a real terminal would, and the test holds that lock.
+ */
+function approveChangeInBackground(home: string, id: string): { exited: () => boolean; ended: Promise<{ status: number; stderr: string }> } {
+  const child = execFile(process.execPath, [CLI, 'mcp', 'approve-change', id], { env: { ...process.env, CORDON_HOME: home } })
+  let stderr = ''
+  let exited = false
+  child.stderr?.on('data', (chunk: Buffer) => { stderr += chunk.toString('utf8') })
+  const ended = new Promise<{ status: number; stderr: string }>((resolve) => child.on('close', (status) => {
+    exited = true
+    resolve({ status: status ?? 1, stderr })
+  }))
+  return { exited: () => exited, ended }
 }
 
 describe('cordon scan', () => {
@@ -249,6 +276,30 @@ describe('cordon mcp approve', () => {
     expect(status).toBe(1)
     expect(stdout).toContain('no pins')
   })
+
+  it('a pin store that cannot be read is reported, not called empty', () => {
+    const home = mkdtempSync(join(tmpdir(), 'cordon-approve-'))
+    writeFileSync(join(home, 'mcp-pins'), 'not a directory')
+    const { stdout, stderr, status } = run(['mcp', 'approve', '--', 'npx', 'server-x'], '', { CORDON_HOME: home })
+    expect(status).toBe(1)
+    expect(stderr).toContain('cordon mcp approve:')
+    expect(stdout).not.toContain('no pins')
+  })
+
+  it('waits for a writer that holds the pin lock instead of failing', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'cordon-pin-lock-'))
+    const change = pendingChange(home)
+    const lock = join(home, 'mcp-pins', '.writer-lock')
+    mkdirSync(lock)                                   // the test stands in for a slow writer
+    const owner = approveChangeInBackground(home, change.id)
+    await new Promise((resolve) => setTimeout(resolve, 300))
+    expect(owner.exited()).toBe(false)
+    expect(new PinStore(home).changes().map((item) => item.id)).toEqual([change.id])
+    rmdirSync(lock)
+    expect(await owner.ended).toMatchObject({ status: 0 })
+    expect(new PinStore(home).changes()).toEqual([])
+    expect(existsSync(lock)).toBe(false)
+  }, 10_000)
 })
 
 describe('cordon mcp approval wait flag', () => {
@@ -971,5 +1022,111 @@ describe('records of who allowed what', () => {
     writeFileSync(drafted, 'mode: sometimes\n')
     expect(run(['policy', 'apply', drafted], '', { CORDON_HOME: home }).status).toBe(1)
     expect(readFileSync(join(home, 'policy.yaml'), 'utf8')).toBe(before)
+  })
+
+  it('an MCP tool approval is journaled before it takes effect, with the declaration it releases', () => {
+    const { home, journal } = homeWithJournal()
+    const change = pendingChange(home)
+    expect(run(['mcp', 'approve-change', change.id], '', { CORDON_HOME: home }).status).toBe(0)
+    const events = lines(journal)
+    expect(events.map((line) => line.decision)).toEqual(['pin-approval-given'])
+    expect(events[0]).toMatchObject({
+      tool: 'a', id: change.id, binding: fingerprint(change.after), source: null, approver: userInfo().username,
+    })
+    expect(events[0]?.reason).toContain('["server"]')
+    expect(new PinStore(home).load(['server'])?.a).toBe(fingerprint(change.after))
+  })
+
+  it('an MCP tool approval the journal cannot hold is not given', () => {
+    const home = mkdtempSync(join(tmpdir(), 'cordon-home-'))
+    const blocker = join(home, 'not-a-dir')
+    writeFileSync(blocker, '')
+    writeFileSync(join(home, 'policy.yaml'), `mode: interactive\nnotify:\n  file: ${join(blocker, 'events.jsonl')}\n`)
+    const change = pendingChange(home)
+    const { status, stderr } = run(['mcp', 'approve-change', change.id], '', { CORDON_HOME: home })
+    expect(status).toBe(1)
+    expect(stderr).toContain('not given')
+    expect(new PinStore(home).changes().map((item) => item.id)).toEqual([change.id])
+  })
+
+  it('an MCP tool approval that cannot be written is recorded as lapsed', () => {
+    const { home, journal } = homeWithJournal()
+    const change = pendingChange(home)
+    const dir = join(home, 'mcp-pins')
+    chmodSync(dir, 0o500)
+    try {
+      expect(run(['mcp', 'approve-change', change.id], '', { CORDON_HOME: home }).status).toBe(1)
+    } finally {
+      chmodSync(dir, 0o700)
+    }
+    expect(lines(journal).map((line) => line.decision)).toEqual(['pin-approval-given', 'pin-approval-lapsed'])
+    expect(new PinStore(home).changes().map((item) => item.id)).toEqual([change.id])
+  })
+
+  it('an MCP tool approval that finds another writer on the pins refuses, and is recorded as lapsed', async () => {
+    const { home, journal } = homeWithJournal()
+    const change = pendingChange(home)
+    const lock = join(home, 'mcp-pins', '.writer-lock')
+    mkdirSync(lock)                                   // the test stands in for a writer that never finishes
+    const outcome = await approveChangeInBackground(home, change.id).ended
+    expect(outcome.status).toBe(1)
+    expect(outcome.stderr).toContain('MCP pins are busy')
+    expect(outcome.stderr).toContain('nothing was approved')
+    expect(existsSync(lock)).toBe(true)               // a waiting writer never steals the lock
+    expect(new PinStore(home).changes().map((item) => item.id)).toEqual([change.id])
+    expect(lines(journal).map((line) => line.decision)).toEqual(['pin-approval-given', 'pin-approval-lapsed'])
+  }, 10_000)
+
+  it('an MCP change id that matches nothing is refused and leaves no record', () => {
+    const { home, journal } = homeWithJournal()
+    pendingChange(home)
+    const { status, stderr } = run(['mcp', 'approve-change', '00'.repeat(32)], '', { CORDON_HOME: home })
+    expect(status).toBe(1)
+    expect(stderr).toContain('No matching approvable change')
+    expect(existsSync(journal)).toBe(false)
+  })
+
+  it('resetting the pins of a server is journaled before the pins go', () => {
+    const { home, journal } = homeWithJournal()
+    new PinStore(home).save(['npx', 'server-x'], { a: 'h' })
+    expect(run(['mcp', 'approve', '--', 'npx', 'server-x'], '', { CORDON_HOME: home }).status).toBe(0)
+    const events = lines(journal)
+    expect(events.map((line) => line.decision)).toEqual(['pins-reset'])
+    expect(events[0]).toMatchObject({ source: null, approver: userInfo().username })
+    expect(events[0]?.reason).toContain('["npx","server-x"]')
+    expect(new PinStore(home).load(['npx', 'server-x'])).toBeNull()
+  })
+
+  it('a reset the journal cannot hold is not made', () => {
+    const home = mkdtempSync(join(tmpdir(), 'cordon-home-'))
+    const blocker = join(home, 'not-a-dir')
+    writeFileSync(blocker, '')
+    writeFileSync(join(home, 'policy.yaml'), `mode: interactive\nnotify:\n  file: ${join(blocker, 'events.jsonl')}\n`)
+    new PinStore(home).save(['npx', 'server-x'], { a: 'h' })
+    const { status, stderr } = run(['mcp', 'approve', '--', 'npx', 'server-x'], '', { CORDON_HOME: home })
+    expect(status).toBe(1)
+    expect(stderr).toContain('not made')
+    expect(new PinStore(home).load(['npx', 'server-x'])).toEqual({ a: 'h' })
+  })
+
+  it('a reset the pins directory refuses is recorded as failed', () => {
+    const { home, journal } = homeWithJournal()
+    new PinStore(home).save(['npx', 'server-x'], { a: 'h' })
+    const dir = join(home, 'mcp-pins')
+    chmodSync(dir, 0o500)
+    try {
+      expect(run(['mcp', 'approve', '--', 'npx', 'server-x'], '', { CORDON_HOME: home }).status).toBe(1)
+    } finally {
+      chmodSync(dir, 0o700)
+    }
+    expect(lines(journal).map((line) => line.decision)).toEqual(['pins-reset', 'pins-reset-failed'])
+    expect(new PinStore(home).load(['npx', 'server-x'])).toEqual({ a: 'h' })
+  })
+
+  it('a server without pins is not reset, and no record says it was', () => {
+    const { home, journal } = homeWithJournal()
+    const { status } = run(['mcp', 'approve', '--', 'npx', 'nothing'], '', { CORDON_HOME: home })
+    expect(status).toBe(1)
+    expect(existsSync(journal)).toBe(false)
   })
 })
