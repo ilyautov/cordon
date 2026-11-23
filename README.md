@@ -40,7 +40,7 @@ Web pages, emails, issues, documents, tool results and MCP tool descriptions can
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Version](https://img.shields.io/badge/version-0.13.0-blueviolet)](CHANGELOG.md)
 [![Finding kinds](https://img.shields.io/badge/finding%20kinds-5-1F6F5C)](#what-gets-stripped)
-[![Attack vectors](https://img.shields.io/badge/attack%20vectors-25-1F6F5C)](#development)
+[![Attack vectors](https://img.shields.io/badge/attack%20vectors-26-1F6F5C)](#development)
 [![node 22+](https://img.shields.io/badge/node-22%2B-1F6F5C)](package.json)
 [![Stars](https://img.shields.io/github/stars/ilyautov/cordon?style=social)](https://github.com/ilyautov/cordon/stargazers)
 
@@ -52,7 +52,7 @@ Judging such lines by meaning is hopeless. A maliciousness detector loses to an 
 
 **Control.** A certificate lists the effect classes this conversation permits, from `read` to `financial` and `exec`. It starts from the policy's profile, and the user can narrow it with a `cordon: scope` line. A call outside it does not go through, however convincing the instruction. The certificate only narrows, and the module that issues it never sees untrusted text.
 
-**Data.** Everything read from an untrusted source is remembered, and later call arguments are checked against it. An irreversible action (money, deletion, sending out) answers to any match. A reversible one answers only to a match on its target: an address, a path, an identifier. The axis also answers the fact of reading. After an untrusted read, a consequential call escalates unless the user named its destination. This catches what string matching cannot: a paraphrase, an encoding, a clean `curl`. On the adversarial battery it cuts attack success from 56% to 6% ([report](docs/adversarial-report.md)). The price is friction, and `exposure: false` turns it off.
+**Data.** Everything read from an untrusted source is remembered, and later call arguments are checked against it. An irreversible action (money, deletion, sending out) answers to any match. A reversible one answers only to a match on its target: an address, a path, an identifier. The axis also answers the fact of reading. After an untrusted read, a consequential call escalates unless the user named its destination. This catches what string matching cannot: a paraphrase, an encoding, a clean `curl`. On the adversarial battery it cuts attack success from 56% to 10% ([report](docs/adversarial-report.md)). The price is friction, and `exposure: false` turns it off.
 
 **Output.** Some attacks cause no action and only poison the recommendation. The third axis blocks nothing. It shows which sources the answer matched verbatim.
 
@@ -183,7 +183,7 @@ npm run build
 
 **The loyalty corpus** (`tests/fixtures/loyalty/`) must stay silent. A false positive on it is a defect in the module, never a reason to drop the sample.
 
-**The attack corpus** (`tests/fixtures/attacks.ts`) pins 25 vectors that once got through. Invisible characters are written as escapes, so a reviewer can see them.
+**The attack corpus** (`tests/fixtures/attacks.ts`) pins 26 vectors that once got through. Invisible characters are written as escapes, so a reviewer can see them.
 
 The method builds on published work: Task Shield (arXiv:2412.16682), CaMeL (arXiv:2503.18813), IGAC (arXiv:2606.22916), MELON (arXiv:2502.05174), ActPlane (arXiv:2606.25189).
 
