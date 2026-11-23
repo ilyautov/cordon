@@ -80,6 +80,8 @@ Run `cordon mcp changes` in the owner's terminal. Each entry shows a change ID, 
 
 Read the lines for that entry and pass its ID to `cordon mcp approve-change <id>`. Refresh the host's tool list or reconnect the host. Cordon releases the reviewed declaration when the server lists it again. A changed sibling still needs its own approval, and the usual call policy applies to every invocation. A later declaration with different bytes in the fingerprinted fields requires a new review. A changed implementation behind an identical declaration is outside this check.
 
+With Codex CLI 0.166.0, start a fresh `codex exec` if the approved tool is still missing. In one live run the gateway forwarded a tool-list change notification during the turn. Codex next requested the catalog in a fresh process, which called the approved version once. [Live run record](evidence/codex-mcp-pin-refresh-2026-11-23.json)
+
 New tools are shown in full. Pins from older releases contain only a hash. When the old declaration is unavailable, the CLI shows its SHA-256 and the complete candidate. Seeing the old declaration again with its matching hash enables future comparisons. Cordon escapes terminal controls in the review text.
 
 The owner CLI reads local state. A gateway must have observed the change for it to appear. A restarted gateway with existing pins, or a gateway that receives a tool-list change notification, needs fresh discovery before using a cached tool. Finish all pages of a paginated listing to retire proposals for tools the server stopped listing. Restart older gateway processes when upgrading so all writers use the current pin store.
