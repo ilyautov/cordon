@@ -37,7 +37,7 @@ We read the source of these projects in September 2026. What follows is their de
 | Rug pull (a tool description changes after approval) | pinned on first sight, held until approved | n/a | Snyk: server-side, not in the open client | Deconvolute: pinned; Docker and Lasso gateways: not pinned |
 | Hidden layer (invisible characters, hidden HTML) | stripped before the model reads it | model-dependent | flagged in descriptions and skills | some |
 | Account required | no | usually | Snyk: yes | varies |
-| Harnesses | Claude Code, Gemini CLI, any MCP host, LangChain | API-level | config files of many hosts | MCP hosts |
+| Harnesses | Claude Code, Codex CLI, Kimi Code, DeepSeek Harness, Gemini CLI, any MCP host, LangChain | API-level | config files of many hosts | MCP hosts |
 
 ## What Cordon does not do, and who does
 
