@@ -1,6 +1,6 @@
-import { spawnSync } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import { ensureBuiltCli, BUILT_CLI } from '../../support/built-cli.js'
-import { existsSync, mkdtempSync, readFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { PassThrough } from 'node:stream'
@@ -2079,6 +2079,37 @@ describe('MCP gateway: tools pinned on first sight', () => {
     } finally {
       await later.stop()
     }
+  })
+
+  it('a listing ends the gateway with the busy reason while another writer holds the pin lock', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'cordon-mcp-pin-lock-'))
+    const lock = join(home, 'mcp-pins', '.writer-lock')
+    mkdirSync(join(home, 'mcp-pins'))
+    mkdirSync(lock)                                   // the test stands in for a writer that never finishes
+    const gateway = start(basePolicy(), {}, home)
+    gateway.send({ jsonrpc: '2.0', id: 1, method: 'tools/list' })
+    expect(await gateway.done).toBe(1)
+    expect(gateway.logs.join('\n')).toContain('MCP pins are busy')
+    expect(gateway.queued()).toBe(0)
+    expect(existsSync(lock)).toBe(true)               // a waiting writer never steals the lock
+  })
+
+  it('a listing waits for a writer that releases the pin lock', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'cordon-mcp-pin-lock-'))
+    const lock = join(home, 'mcp-pins', '.writer-lock')
+    mkdirSync(join(home, 'mcp-pins'))
+    mkdirSync(lock)
+    // The gateway waits on this process's own event loop, so the writer that
+    // finishes has to be another process.
+    const writer = spawn(process.execPath, ['-e',
+      "setTimeout(() => import('node:fs').then((fs) => fs.rmdirSync(process.argv[1])), 200)", lock])
+    const released = new Promise<void>((resolve) => writer.once('exit', () => resolve()))
+    const gateway = start(basePolicy(), {}, home)
+    gateway.send({ jsonrpc: '2.0', id: 1, method: 'tools/list' })
+    expect(names(await gateway.next())).toEqual(['poisoned_page', 'update_price', 'mystery_box'])
+    await gateway.stop()
+    await released
+    expect(existsSync(lock)).toBe(false)
   })
 })
 

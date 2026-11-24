@@ -80,17 +80,19 @@ Run `cordon mcp changes` in the owner's terminal. Each entry shows a change ID, 
 
 Read the lines for that entry and pass its ID to `cordon mcp approve-change <id>`. Refresh the host's tool list or reconnect the host. Cordon releases the reviewed declaration when the server lists it again. A changed sibling still needs its own approval, and the usual call policy applies to every invocation. A later declaration with different bytes in the fingerprinted fields requires a new review. A changed implementation behind an identical declaration is outside this check.
 
+The approval is an owner's act, so it is written to the journal (`notify.file`) before the pin changes, as `pin-approval-given`. A journal that cannot take the line means the approval is not given. When the pin cannot then be written, because another writer holds the pin store or the directory refuses, a second line, `pin-approval-lapsed`, says nothing was approved. See [audit logs](enterprise.md#audit-logs).
+
 With Codex CLI 0.166.0, start a fresh `codex exec` if the approved tool is still missing. In one live run the gateway forwarded a tool-list change notification during the turn. Codex next requested the catalog in a fresh process, which called the approved version once. [Live run record](evidence/codex-mcp-pin-refresh-2026-11-23.json)
 
 New tools are shown in full. Pins from older releases contain only a hash. When the old declaration is unavailable, the CLI shows its SHA-256 and the complete candidate. Seeing the old declaration again with its matching hash enables future comparisons. Cordon escapes terminal controls in the review text.
 
 The owner CLI reads local state. A gateway must have observed the change for it to appear. A restarted gateway with existing pins, or a gateway that receives a tool-list change notification, needs fresh discovery before using a cached tool. Finish all pages of a paginated listing to retire proposals for tools the server stopped listing. Restart older gateway processes when upgrading so all writers use the current pin store.
 
-The existing `cordon mcp approve -- <server command...>` resets **all** pins and pending changes for that exact command. The first response to the next listing establishes a fresh baseline. If discovery spans multiple pages, new tools on later pages require individual approval. Use this when you intend to reset the server's baseline. `cordon doctor` reports whether pinning is enabled and how many servers have pins.
+The existing `cordon mcp approve -- <server command...>` resets **all** pins and pending changes for that exact command. The first response to the next listing establishes a fresh baseline. If discovery spans multiple pages, new tools on later pages require individual approval. Use this when you intend to reset the server's baseline. The reset is journaled the same way: `pins-reset` before the pins go, and `pins-reset-failed` when they could not be removed. `cordon doctor` reports whether pinning is enabled and how many servers have pins.
 
 ### Recover an interrupted pin write
 
-Gateways and owner commands sharing a Cordon home serialize updates with the empty `mcp-pins/.writer-lock` directory. A busy writer normally releases it as soon as its update finishes. If the busy error persists after a writer was killed, stop **all** gateways and owner commands using that home. With every writer stopped, run `rmdir ~/.cordon/mcp-pins/.writer-lock` (substitute your configured Cordon home), then restart the gateways. The JSON files contain the last atomically published state.
+Gateways and owner commands sharing a Cordon home serialize updates with the empty `mcp-pins/.writer-lock` directory. A busy writer normally releases it as soon as its update finishes. A command or gateway that finds the lock waits up to 400 ms for it; then it refuses with the busy reason, changes nothing, and never removes the lock itself. If the busy error persists after a writer was killed, stop **all** gateways and owner commands using that home. With every writer stopped, run `rmdir ~/.cordon/mcp-pins/.writer-lock` (substitute your configured Cordon home), then restart the gateways. The JSON files contain the last atomically published state.
 
 ### A tool that imitates another server's tool
 

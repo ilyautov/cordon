@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from 'node:crypto'
-import { mkdirSync, readdirSync, readFileSync, renameSync, rmdirSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readdirSync, readFileSync, renameSync, rmdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { makeDirectory } from '../core/mkdir.js'
 import { comparePins, fingerprint, pinnedDeclaration, shadows, type HeldTool, type ListedTool, type Pins } from '../gate/pins.js'
@@ -55,6 +55,22 @@ export class PinStore {
 
   load(command: readonly string[]): Pins | null {
     return this.read(serverId(command))?.tools ?? null
+  }
+
+  /**
+   * Whether a pin file exists for this command, whatever it holds. A file
+   * that cannot be read is not "no pins": resetting it is how an owner
+   * recovers it, and that reset is still an act the journal should hold.
+   * Only absence answers no; a directory that cannot be read is an error.
+   */
+  has(command: readonly string[]): boolean {
+    try {
+      statSync(join(this.dir, serverId(command) + '.json'))
+      return true
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false
+      throw error
+    }
   }
 
   /** Accept hash-only pins from earlier releases. Only a matching observation can fill in their old text. */

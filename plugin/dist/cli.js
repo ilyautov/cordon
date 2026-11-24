@@ -12737,7 +12737,7 @@ function checked(id) {
 
 // src/session/pins.ts
 import { createHash as createHash4, randomBytes as randomBytes3 } from "node:crypto";
-import { mkdirSync as mkdirSync2, readdirSync as readdirSync3, readFileSync as readFileSync4, renameSync as renameSync4, rmdirSync, rmSync as rmSync3, writeFileSync as writeFileSync3 } from "node:fs";
+import { mkdirSync as mkdirSync2, readdirSync as readdirSync3, readFileSync as readFileSync4, renameSync as renameSync4, rmdirSync, rmSync as rmSync3, statSync as statSync3, writeFileSync as writeFileSync3 } from "node:fs";
 import { join as join5 } from "node:path";
 function serverId(command) {
   return createHash4("sha256").update(JSON.stringify(command), "utf8").digest("hex").slice(0, 24);
@@ -12768,6 +12768,21 @@ var PinStore = class {
   }
   load(command) {
     return this.read(serverId(command))?.tools ?? null;
+  }
+  /**
+   * Whether a pin file exists for this command, whatever it holds. A file
+   * that cannot be read is not "no pins": resetting it is how an owner
+   * recovers it, and that reset is still an act the journal should hold.
+   * Only absence answers no; a directory that cannot be read is an error.
+   */
+  has(command) {
+    try {
+      statSync3(join5(this.dir, serverId(command) + ".json"));
+      return true;
+    } catch (error) {
+      if (error.code === "ENOENT") return false;
+      throw error;
+    }
   }
   /** Accept hash-only pins from earlier releases. Only a matching observation can fill in their old text. */
   save(command, pins) {
@@ -17115,7 +17130,7 @@ function socketPathForClient(path, ownerUid) {
 }
 
 // src/audit/audit.ts
-import { readdirSync as readdirSync7, readFileSync as readFileSync6, statSync as statSync3 } from "node:fs";
+import { readdirSync as readdirSync7, readFileSync as readFileSync6, statSync as statSync4 } from "node:fs";
 import { join as join14, relative as relative2 } from "node:path";
 var CODES = {
   CA101: { severity: "high", owasp: "LLM01 Prompt Injection", title: "invisible characters in a file the agent loads as instruction" },
@@ -17195,7 +17210,7 @@ function markdownUnder(dir, depth) {
     const path = join14(dir, name);
     let stat;
     try {
-      stat = statSync3(path);
+      stat = statSync4(path);
     } catch {
       continue;
     }
@@ -17469,7 +17484,7 @@ function readJson(path) {
 }
 function readSmall(path) {
   try {
-    if (statSync3(path).size > MAX_FILE_BYTES) return null;
+    if (statSync4(path).size > MAX_FILE_BYTES) return null;
     return readFileSync6(path, "utf8");
   } catch {
     return null;
@@ -17477,7 +17492,7 @@ function readSmall(path) {
 }
 function isFile(path) {
   try {
-    return statSync3(path).isFile();
+    return statSync4(path).isFile();
   } catch {
     return false;
   }
@@ -18460,6 +18475,20 @@ function sarif(findings) {
     }]
   };
 }
+function pinApprovalEvent(change2) {
+  return {
+    at: (/* @__PURE__ */ new Date()).toISOString(),
+    decision: "pin-approval-given",
+    tool: change2.after.name,
+    reason: `the owner approved the ${change2.beforeHash === null ? "new" : "changed"} declaration of ${JSON.stringify(change2.after.name)} on server ${JSON.stringify(change2.command)}`,
+    source: null,
+    // The id names the whole transition; the binding is the declaration it
+    // releases, to compare with the pin file.
+    id: change2.id,
+    binding: fingerprint(change2.after),
+    ...labelled("pin")
+  };
+}
 function pinReview(args) {
   const [action, id] = args;
   const list = action === "changes";
@@ -18475,9 +18504,30 @@ function pinReview(args) {
       if (!changes.length) process.stdout.write("No pending MCP tool changes.\n");
       return 0;
     }
-    const approved = store.approveChange(id);
-    if (approved === null) {
+    const proposed = store.changes().find((change2) => change2.id === id) ?? null;
+    if (proposed === null) {
       process.stderr.write("No matching approvable change. Run cordon mcp changes for the current declarations.\n");
+      return 1;
+    }
+    const event = pinApprovalEvent(proposed);
+    const recorded = ownerRecord(event);
+    if (recorded !== null) {
+      process.stderr.write(`cordon mcp approve-change: the journal could not record the approval, so it is not given: ${visible(recorded)}
+`);
+      return 1;
+    }
+    let approved;
+    let failure3 = "the change was replaced, withdrawn or held again while it was being approved";
+    try {
+      approved = store.approveChange(id);
+    } catch (error) {
+      approved = null;
+      failure3 = `the pin could not be written (${error.message})`;
+    }
+    if (approved === null) {
+      const corrected = ownerRecord({ ...event, at: (/* @__PURE__ */ new Date()).toISOString(), decision: "pin-approval-lapsed", reason: `${failure3}; nothing was approved` });
+      process.stderr.write(`cordon mcp approve-change: ${visible(failure3)}; nothing was approved${corrected === null ? "" : `, and the journal could not say so: ${visible(corrected)}`}
+`);
       return 1;
     }
     process.stdout.write(`Approved ${visible(JSON.stringify(approved.after.name))} (${approved.id}). Refresh the tool list.
@@ -18498,8 +18548,44 @@ ${USAGE}
     return 2;
   }
   const server2 = command.join(" ");
-  if (!Cordon.approveServer(cordonHome(), command)) {
+  const store = new PinStore(cordonHome());
+  let pinned2;
+  try {
+    pinned2 = store.has(command);
+  } catch (error) {
+    process.stderr.write(`cordon mcp approve: ${visible(error.message)}
+`);
+    return 1;
+  }
+  if (!pinned2) {
     process.stdout.write(`no pins for ${server2}; spell the command exactly as the host starts it
+`);
+    return 1;
+  }
+  const event = {
+    at: (/* @__PURE__ */ new Date()).toISOString(),
+    decision: "pins-reset",
+    tool: "(mcp pins)",
+    reason: `the owner discarded every pin and pending change of the MCP server ${JSON.stringify(command)}; its next listing pins its tools afresh`,
+    source: null,
+    ...labelled("pin")
+  };
+  const recorded = ownerRecord(event);
+  if (recorded !== null) {
+    process.stderr.write(`cordon mcp approve: the journal could not record the reset, so it is not made: ${visible(recorded)}
+`);
+    return 1;
+  }
+  let reset = false;
+  let failure3 = "another writer removed the pins while they were being reset";
+  try {
+    reset = store.forget(command);
+  } catch (error) {
+    failure3 = `the pins could not be removed (${error.message})`;
+  }
+  if (!reset) {
+    const corrected = ownerRecord({ ...event, at: (/* @__PURE__ */ new Date()).toISOString(), decision: "pins-reset-failed", reason: `${failure3}; the pins were not reset` });
+    process.stderr.write(`cordon mcp approve: ${visible(failure3)}; the pins were not reset${corrected === null ? "" : `, and the journal could not say so: ${visible(corrected)}`}
 `);
     return 1;
   }
