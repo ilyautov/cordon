@@ -8291,9 +8291,9 @@ function readLookup(tool, lookup, args, text, turn) {
   if (parsed === "unreadable") return parsed;
   const records = Array.isArray(parsed) ? parsed : [parsed];
   const out = [];
-  for (const record2 of records) {
-    if (typeof record2 !== "object" || record2 === null || Array.isArray(record2)) continue;
-    const fields2 = record2;
+  for (const record3 of records) {
+    if (typeof record3 !== "object" || record3 === null || Array.isArray(record3)) continue;
+    const fields2 = record3;
     if (!Object.hasOwn(fields2, lookup.key)) continue;
     const name = plain(fields2[lookup.key]);
     if (name === null) return "unreadable";
@@ -8318,10 +8318,10 @@ function parseRecords(text) {
     if (tagged) return "unreadable";
     const top = document.contents;
     const records = (0, import_yaml2.isSeq)(top) ? top.items : [top];
-    for (const record2 of records) {
-      if (!(0, import_yaml2.isMap)(record2)) continue;
+    for (const record3 of records) {
+      if (!(0, import_yaml2.isMap)(record3)) continue;
       const seen = /* @__PURE__ */ new Set();
-      for (const pair of record2.items) {
+      for (const pair of record3.items) {
         if (!(0, import_yaml2.isScalar)(pair.key) || pair.key.value === null || pair.key.value === void 0) return "unreadable";
         const key = String(pair.key.value);
         if (seen.has(key)) return "unreadable";
@@ -15001,6 +15001,7 @@ var LABEL_KEYS = /* @__PURE__ */ new Set([
   "activeform",
   "code"
 ]);
+var LINK_KEYS = /* @__PURE__ */ new Set(["uri", "url", "urls", "contenturl", "href", "link", "links"]);
 var OPAQUE_KEYS = /* @__PURE__ */ new Set([
   "type",
   "subtype",
@@ -15009,12 +15010,7 @@ var OPAQUE_KEYS = /* @__PURE__ */ new Set([
   "mode",
   "status",
   "state",
-  "uri",
-  "url",
-  "urls",
-  "href",
-  "link",
-  "links",
+  ...LINK_KEYS,
   "host",
   "hostname",
   "filepath",
@@ -15058,7 +15054,6 @@ var MAX_DEPTH3 = 12;
 var MAX_NODES = 2e4;
 var MAX_TEXT = 8e6;
 var TOKEN_LIMIT = 64;
-var LINK_KEYS = /* @__PURE__ */ new Set(["uri", "url", "urls", "href", "link", "links"]);
 var STRUCTURAL_VALUES = /* @__PURE__ */ new Set([
   "text",
   "image",
@@ -15928,13 +15923,6 @@ function runHook5(stdin, home = cordonHome()) {
   return runHook(stdin, home, DEEPSEEK);
 }
 
-// src/adapters/mcp/gateway.ts
-import { spawn } from "node:child_process";
-import { createHash as createHash7, randomBytes as randomBytes6 } from "node:crypto";
-import { accessSync as accessSync3, constants as constants4 } from "node:fs";
-import { join as join12 } from "node:path";
-import { createInterface } from "node:readline";
-
 // src/adapters/mcp/jsonrpc.ts
 function parseLine(line) {
   const parsed = JSON.parse(line);
@@ -15972,7 +15960,234 @@ function parseError(message) {
   return { jsonrpc: "2.0", id: null, error: { code: -32700, message } };
 }
 
+// src/adapters/mcp/http.ts
+function httpIdentity(endpoint) {
+  return ["", "streamable-http", endpoint.href];
+}
+function httpEndpoint(raw) {
+  let url;
+  try {
+    url = new URL(raw);
+  } catch {
+    throw new Error("expected an absolute MCP endpoint URL");
+  }
+  const local = url.protocol === "http:" && ["127.0.0.1", "[::1]"].includes(url.hostname);
+  if (!local && url.protocol !== "https:" || url.username || url.password || url.href.includes("?") || url.href.includes("#")) {
+    throw new Error("use an HTTPS endpoint without user information, query or fragment (HTTP is supported on literal loopback)");
+  }
+  return url;
+}
+var LIMIT = 4 * 1024 * 1024;
+var VERSIONS = /* @__PURE__ */ new Set(["2025-03-26", "2025-06-18", "2025-11-25"]);
+function record2(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+async function jsonBody(body) {
+  const parts = [];
+  let bytes = 0;
+  for await (const chunk of body) {
+    bytes += chunk.byteLength;
+    if (bytes > LIMIT) throw new Error("MCP JSON response exceeds the size limit");
+    parts.push(chunk);
+  }
+  return new TextDecoder("utf-8", { fatal: true }).decode(Buffer.concat(parts));
+}
+async function* events(body) {
+  let data = [];
+  let size = 0;
+  let field3 = "";
+  let afterCR = false;
+  let event = "";
+  const decoder = new TextDecoder("utf-8", { fatal: true });
+  for await (const chunk of body) {
+    const text = decoder.decode(chunk, { stream: true });
+    for (const part of text.split(/([\r\n])/u)) {
+      if (!part) continue;
+      if (afterCR && part === "\n") {
+        afterCR = false;
+        continue;
+      }
+      afterCR = part === "\r";
+      if (!afterCR && part !== "\n") {
+        field3 += part;
+        size += Buffer.byteLength(part);
+        if (size > LIMIT) throw new Error("MCP SSE event exceeds the size limit");
+        continue;
+      }
+      if (field3 === "") {
+        const payload = data.join("\n");
+        if (payload && (!event || event === "message")) yield payload;
+        data = [];
+        size = 0;
+        event = "";
+      } else {
+        const colon = field3.indexOf(":");
+        const name = colon < 0 ? field3 : field3.slice(0, colon);
+        const value = colon < 0 ? "" : field3.slice(colon + 1).replace(/^ /u, "");
+        if (name === "data") data.push(value);
+        if (name === "event") event = value;
+        if (++size > LIMIT) throw new Error("MCP SSE event exceeds the size limit");
+      }
+      field3 = "";
+    }
+  }
+  decoder.decode();
+}
+function openHttp(endpoint, receive, fail) {
+  const controller = new AbortController();
+  let started = false;
+  let version;
+  let session = null;
+  let wantsEvents = false;
+  let ready;
+  const headers = () => ({
+    accept: "application/json, text/event-stream",
+    ...version ? { "mcp-protocol-version": version } : {},
+    ...session ? { "mcp-session-id": session } : {}
+  });
+  function failed(error) {
+    if (!controller.signal.aborted) fail(error instanceof Error ? error.message : "MCP HTTP transport failed");
+  }
+  async function readNotifications(body) {
+    for await (const line of events(body)) {
+      if (parseRpc(line).type === "response") throw new Error("unexpected response on MCP notification stream");
+      receive(line);
+    }
+    throw new Error("MCP HTTP notification stream closed; reconnect to rediscover tools");
+  }
+  async function listen() {
+    const timeout = new AbortController();
+    const timer = setTimeout(() => timeout.abort(), 6e4);
+    try {
+      const res = await fetch(endpoint, {
+        method: "GET",
+        headers: { ...headers(), accept: "text/event-stream" },
+        redirect: "error",
+        signal: AbortSignal.any([controller.signal, timeout.signal])
+      });
+      if (res.status === 405) {
+        await res.body?.cancel();
+        return;
+      }
+      if (!res.ok || !res.body || mediaType(res) !== "text/event-stream") throw new Error("MCP HTTP notification stream failed");
+      void readNotifications(res.body).catch(failed);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  async function post(rpc) {
+    const init2 = rpc.method === "initialize";
+    const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(6e4)]);
+    const res = await fetch(endpoint, {
+      method: "POST",
+      headers: { ...headers(), "content-type": "application/json" },
+      body: JSON.stringify(rpc),
+      signal,
+      redirect: "error"
+    });
+    if (!res.ok) throw new Error("MCP endpoint returned HTTP " + res.status + "; reconnect before retrying");
+    if (typeof rpc.method !== "string" || !Object.hasOwn(rpc, "id")) {
+      if (res.status !== 202) throw new Error("MCP HTTP expected 202 for a notification or response");
+      await res.body?.cancel();
+      return;
+    }
+    if (!res.body) throw new Error("MCP endpoint returned an empty request response");
+    if (init2) {
+      session = res.headers.get("mcp-session-id");
+      if (session !== null && !/^[\x21-\x7e]+$/u.test(session)) throw new Error("invalid MCP HTTP session identifier");
+    }
+    const accept = (line, streamed) => {
+      const message = parseRpc(line);
+      if (message.type !== "response") {
+        if (!streamed) throw new Error("MCP HTTP expected a response to its request");
+        receive(line);
+        return false;
+      }
+      if (message.id !== rpc.id) throw new Error("MCP HTTP response does not match its request");
+      const result = message.value.result;
+      if (init2 && record2(result)) {
+        const negotiated = result.protocolVersion;
+        if (typeof negotiated !== "string" || !VERSIONS.has(negotiated)) throw new Error("unsupported MCP HTTP handshake version");
+        if (receive(line)) {
+          version = negotiated;
+          const caps = result.capabilities;
+          wantsEvents = record2(caps) && ["tools", "resources", "prompts"].some((key) => {
+            const capability = caps[key];
+            return record2(capability) && capability.listChanged === true;
+          });
+        }
+      } else {
+        receive(line);
+      }
+      return true;
+    };
+    switch (mediaType(res)) {
+      case "application/json":
+        accept(await jsonBody(res.body), false);
+        return;
+      case "text/event-stream":
+        for await (const line of events(res.body)) if (accept(line, true)) return;
+        throw new Error("MCP HTTP event stream ended before the request was answered");
+      default:
+        throw new Error("unsupported MCP HTTP response content type");
+    }
+  }
+  async function send(rpc) {
+    if (rpc.method === "initialize") {
+      if (started) throw new Error("duplicate MCP HTTP initialization");
+      started = true;
+    } else if (rpc.method === "notifications/initialized") {
+      if (!version || ready) throw new Error("unexpected MCP HTTP initialized notification");
+      ready = post(rpc).then(() => wantsEvents ? listen() : void 0);
+      await ready;
+      return;
+    } else if (!started || typeof rpc.method === "string" && rpc.method !== "ping") {
+      if (!ready) throw new Error("MCP HTTP requires an initialized session");
+      await ready;
+    }
+    await post(rpc);
+  }
+  return {
+    send(rpc) {
+      void send(rpc).catch(failed);
+    },
+    async close() {
+      controller.abort();
+      if (session) {
+        try {
+          const res = await fetch(endpoint, { method: "DELETE", headers: headers(), redirect: "error", signal: AbortSignal.timeout(1500) });
+          await res.body?.cancel();
+        } catch {
+        }
+      }
+    }
+  };
+}
+function parseRpc(text) {
+  let message;
+  try {
+    message = parseLine(text);
+  } catch {
+    throw new Error("invalid JSON-RPC envelope from the MCP HTTP endpoint");
+  }
+  const value = message.value;
+  const hasId = Object.hasOwn(value, "id");
+  const result = Object.hasOwn(value, "result");
+  const error = Object.hasOwn(value, "error");
+  const invalid = message.type === "response" ? Object.hasOwn(value, "method") || result === error : result || error || message.type === "notification" && hasId;
+  if (value.jsonrpc !== "2.0" || invalid) throw new Error("invalid JSON-RPC envelope from the MCP HTTP endpoint");
+  return message;
+}
+function mediaType(res) {
+  return res.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase() ?? "";
+}
+
 // src/adapters/mcp/gateway.ts
+import { spawn } from "node:child_process";
+import { createHash as createHash7, randomBytes as randomBytes6 } from "node:crypto";
+import { accessSync as accessSync3, constants as constants4 } from "node:fs";
+import { join as join12 } from "node:path";
+import { createInterface } from "node:readline";
 var HOST_REQUEST_METHODS = /* @__PURE__ */ new Set([
   "initialize",
   "server/discover",
@@ -16006,6 +16221,8 @@ function forwardableHostNotification(message) {
 function runGateway(options) {
   const log = options.log ?? ((line) => process.stderr.write(`cordon mcp: ${line}
 `));
+  const endpoint = options.endpoint && httpEndpoint(options.endpoint.href);
+  const identity = options.command ?? httpIdentity(endpoint);
   const hostIn = options.hostIn ?? process.stdin;
   const hostOut = options.hostOut ?? process.stdout;
   return new Promise((resolve4) => {
@@ -16017,9 +16234,10 @@ function runGateway(options) {
       catalogGeneration++;
       nextCatalogCursor = void 0;
       catalogNames.clear();
-      cordon.invalidateToolList(options.command);
+      cordon.invalidateToolList(identity);
     };
-    let upstream = null;
+    let closeUpstream;
+    let sendUpstream;
     let closeReaders;
     const reviewTimers = /* @__PURE__ */ new Map();
     let cancelWaiting = null;
@@ -16041,8 +16259,10 @@ function runGateway(options) {
       reviewTimers.clear();
       closeReaders?.();
       if (reason !== void 0) log(reason);
-      if (upstream !== null && upstream.exitCode === null && !upstream.killed) upstream.kill();
-      resolve4(code);
+      void Promise.resolve(closeUpstream?.()).then(() => resolve4(code), () => {
+        log("upstream cleanup failed");
+        resolve4(1);
+      });
     };
     try {
       const problem = homeProblem(options.cordonHome, projectDir());
@@ -16059,7 +16279,7 @@ function runGateway(options) {
     }
     let cordon;
     try {
-      const sessionId = `mcp-${createHash7("sha256").update(options.command.join(" "), "utf8").digest("hex").slice(0, 12)}-${randomBytes6(16).toString("hex")}`;
+      const sessionId = `mcp-${createHash7("sha256").update(identity.join(" "), "utf8").digest("hex").slice(0, 12)}-${randomBytes6(16).toString("hex")}`;
       cordon = new Cordon({
         policy: options.policy,
         cordonHome: options.cordonHome,
@@ -16070,29 +16290,13 @@ function runGateway(options) {
       finish(1, `the session state is broken: ${error.message}`);
       return;
     }
+    if (endpoint) restartCatalog();
     cancelWaiting = (id, reason, instance) => cordon.cancelUnattendedApproval(id, reason, instance);
     if (typeof options.policy.task === "string" && options.policy.task !== "") {
       cordon.declareTask(options.policy.task);
     }
-    upstream = spawn(options.command[0], options.command.slice(1), {
-      stdio: ["pipe", "pipe", "inherit"],
-      env: { ...process.env, ...options.env }
-    });
-    const child = upstream;
-    child.on("error", (error) => {
-      finish(1, `could not start the upstream (${options.command.join(" ")}): ${error.message}`);
-    });
-    child.on("exit", (code, signal) => {
-      const how = code === null ? `signal ${String(signal)}` : `code ${code}`;
-      finish(code === null || code === 0 ? 1 : code, `the upstream process exited (${how}); the gateway stops with it`);
-    });
-    child.stdin.on("error", () => {
-    });
     const sendToHost = (message) => {
       hostOut.write(JSON.stringify(message) + "\n");
-    };
-    const sendUpstream = (message) => {
-      child.stdin.write(JSON.stringify(message) + "\n");
     };
     const pending = /* @__PURE__ */ new Map();
     const activeProgress = /* @__PURE__ */ new Map();
@@ -16158,7 +16362,7 @@ function runGateway(options) {
         gateCall(
           message,
           cordon,
-          options.command,
+          identity,
           options.policy,
           forwardRequest,
           sendToHost,
@@ -16302,15 +16506,16 @@ function runGateway(options) {
           sendToHost({ jsonrpc: "2.0", id: message.id, error: { code: -32e3, message: "The tool list changed during discovery. Refresh tools/list." } });
           return;
         }
-        const response = observeToolList(message.value, cordon, options.policy, options.command, catalogNames);
+        const response = observeToolList(message.value, cordon, options.policy, identity, catalogNames);
         if (Object.hasOwn(response, "error")) restartCatalog();
         else nextCatalogCursor = asRecord(response["result"])?.["nextCursor"];
         sendToHost(response);
         return;
       }
       if (entry.method === "initialize") {
-        sendToHost(observeInitialize(message.value, cordon, options.policy));
-        return;
+        const observed = observeInitialize(message.value, cordon, options.policy);
+        sendToHost(observed);
+        return Object.hasOwn(observed, "result");
       }
       if (entry.method === "server/discover") {
         sendToHost(observeDiscover(message.value, cordon, options.policy));
@@ -16339,6 +16544,43 @@ function runGateway(options) {
       }
       sendToHost(observeOtherResponse(message.value, entry.method, cordon, options.policy));
     };
+    const receive = (line) => {
+      if (line.trim() === "") return;
+      try {
+        return onUpstreamLine(line);
+      } catch (error) {
+        finish(1, `a failure while handling the upstream's message: ${error.message}`);
+      }
+    };
+    if (!options.command) {
+      const http = openHttp(endpoint.href, receive, (reason) => finish(1, reason));
+      sendUpstream = http.send;
+      closeUpstream = http.close;
+    } else {
+      const child = spawn(options.command[0], options.command.slice(1), {
+        stdio: ["pipe", "pipe", "inherit"],
+        env: { ...process.env, ...options.env }
+      });
+      child.on("error", (error) => {
+        finish(1, `could not start the upstream (${options.command.join(" ")}): ${error.message}`);
+      });
+      child.on("exit", (code, signal) => {
+        const how = code === null ? `signal ${String(signal)}` : `code ${code}`;
+        finish(code === null || code === 0 ? 1 : code, `the upstream process exited (${how}); the gateway stops with it`);
+      });
+      child.stdin.on("error", () => {
+      });
+      const lines = createInterface({ input: child.stdout, terminal: false });
+      lines.on("error", (error) => finish(1, `upstream output failed: ${error.message}`));
+      lines.on("line", receive);
+      sendUpstream = (message) => {
+        child.stdin.write(JSON.stringify(message) + "\n");
+      };
+      closeUpstream = () => {
+        lines.close();
+        if (child.exitCode === null && !child.killed) child.kill();
+      };
+    }
     const inputClosed = () => {
       if (!hostIn.readableEnded) finish(1, "host input closed unexpectedly");
     };
@@ -16360,21 +16602,10 @@ function runGateway(options) {
         finish(0);
       }
     });
-    const upstreamLines = createInterface({ input: child.stdout, terminal: false });
-    upstreamLines.on("error", (error) => finish(1, `upstream output failed: ${error.message}`));
     closeReaders = () => {
       hostIn.off("close", inputClosed);
       hostLines.close();
-      upstreamLines.close();
     };
-    upstreamLines.on("line", (line) => {
-      if (line.trim() === "") return;
-      try {
-        onUpstreamLine(line);
-      } catch (error) {
-        finish(1, `a failure while handling the upstream's message: ${error.message}`);
-      }
-    });
     if (hostIn.destroyed) inputClosed();
   });
 }
@@ -16524,7 +16755,7 @@ function observeToolList(value, cordon, policy, command, catalogNames) {
 }
 var MAX_SCHEMA_DEPTH = 16;
 var MAX_SCHEMA_NODES = 2e4;
-var SCHEMA_VALUE_KEYS = /* @__PURE__ */ new Set(["default", "const", "enum", "examples"]);
+var SCHEMA_VALUE_KEYS = /* @__PURE__ */ new Set(["default", "const", "enum", "examples", "dependentRequired"]);
 function readableListedTool(value) {
   const entry = asRecord(value);
   if (entry === null || typeof entry["name"] !== "string" || entry["name"] === "" || Object.keys(entry).some((key) => !TOOL_ENTRY_KEYS.has(key)) || entry["description"] !== void 0 && typeof entry["description"] !== "string" || entry["title"] !== void 0 && typeof entry["title"] !== "string" || entry["icons"] !== void 0 && !readableIcons(entry["icons"]) || entry["_meta"] !== void 0 && asRecord(entry["_meta"]) === null) return false;
@@ -16552,23 +16783,29 @@ function readableIcons(value) {
     return entry !== null && typeof entry["src"] === "string" && entry["src"] !== "" && Object.keys(entry).every((key) => ["src", "mimeType", "sizes", "theme"].includes(key)) && sanitize(entry["src"]).clean === entry["src"] && (entry["mimeType"] === void 0 || typeof entry["mimeType"] === "string" && sanitize(entry["mimeType"]).clean === entry["mimeType"]) && (entry["theme"] === void 0 || entry["theme"] === "light" || entry["theme"] === "dark") && (entry["sizes"] === void 0 || Array.isArray(entry["sizes"]) && entry["sizes"].every((size) => typeof size === "string" && sanitize(size).clean === size));
   });
 }
-function readableSchemaText(node, depth) {
+var SCHEMA_MAP_KEYS = /* @__PURE__ */ new Set(["properties", "patternProperties", "$defs", "definitions", "dependentSchemas"]);
+function readableSchemaText(node, depth, namedSchemas = false) {
   if (depth > MAX_SCHEMA_DEPTH) return true;
   if (Array.isArray(node)) return node.every((item) => readableSchemaText(item, depth + 1));
-  const record2 = asRecord(node);
-  if (record2 === null) return true;
-  return Object.entries(record2).every(([key, value]) => {
+  const record3 = asRecord(node);
+  if (record3 === null) return true;
+  return Object.entries(record3).every(([key, value]) => {
+    if (namedSchemas) return (typeof value === "boolean" || asRecord(value) !== null) && readableSchemaText(value, depth + 1);
+    if (SCHEMA_VALUE_KEYS.has(key)) return true;
     if ((key === "description" || key === "title") && typeof value !== "string") return false;
-    return readableSchemaText(value, depth + 1);
+    return readableSchemaText(value, depth + 1, SCHEMA_MAP_KEYS.has(key));
   });
 }
-function observeSchema(node, tool, source, cordon, depth, budget = { nodes: 0 }) {
+function observeSchema(node, tool, source, cordon, depth, budget = { nodes: 0 }, namedSchemas = false) {
   if (depth > MAX_SCHEMA_DEPTH) return false;
   if (++budget.nodes > MAX_SCHEMA_NODES) return false;
   for (const key of Object.keys(node)) {
     if (sanitize(key).clean !== key) return false;
     const value = node[key];
-    if ((key === "description" || key === "title") && typeof value === "string") {
+    if (namedSchemas) {
+      const child = asRecord(value);
+      if (child !== null && !observeSchema(child, tool, source, cordon, depth + 1, budget)) return false;
+    } else if ((key === "description" || key === "title") && typeof value === "string") {
       observeDescription(node, key, tool, source, cordon);
     } else if (SCHEMA_VALUE_KEYS.has(key)) {
       if (!observeSchemaValue(value, depth + 1, budget)) return false;
@@ -16583,7 +16820,7 @@ function observeSchema(node, tool, source, cordon, depth, budget = { nodes: 0 })
       }
     } else {
       const child = asRecord(value);
-      if (child !== null && !observeSchema(child, tool, source, cordon, depth + 1, budget)) return false;
+      if (child !== null && !observeSchema(child, tool, source, cordon, depth + 1, budget, SCHEMA_MAP_KEYS.has(key))) return false;
     }
   }
   return true;
@@ -16592,8 +16829,8 @@ function observeSchemaValue(value, depth, budget) {
   if (depth > MAX_SCHEMA_DEPTH || ++budget.nodes > MAX_SCHEMA_NODES) return false;
   if (typeof value === "string") return sanitize(value).clean === value;
   if (Array.isArray(value)) return value.every((item) => observeSchemaValue(item, depth + 1, budget));
-  const record2 = asRecord(value);
-  if (record2 !== null) return Object.entries(record2).every(([key, item]) => sanitize(key).clean === key && observeSchemaValue(item, depth + 1, budget));
+  const record3 = asRecord(value);
+  if (record3 !== null) return Object.entries(record3).every(([key, item]) => sanitize(key).clean === key && observeSchemaValue(item, depth + 1, budget));
   return true;
 }
 function observeDescription(entry, key, tool, source, cordon) {
@@ -16628,8 +16865,8 @@ function observeServerNotification(value, method, cordon, policy, activeProgress
   if (SERVER_LIST_NOTIFICATIONS.has(method)) {
     const params2 = value["params"];
     if (params2 !== void 0) {
-      const record2 = asRecord(params2);
-      if (record2 === null || Object.keys(record2).length > 0) return null;
+      const record3 = asRecord(params2);
+      if (record3 === null || Object.keys(record3).length > 0) return null;
     }
     return { jsonrpc: "2.0", method, ...params2 === void 0 ? {} : { params: params2 } };
   }
@@ -17131,7 +17368,7 @@ function socketPathForClient(path, ownerUid) {
 
 // src/audit/audit.ts
 import { readdirSync as readdirSync7, readFileSync as readFileSync6, statSync as statSync4 } from "node:fs";
-import { join as join14, relative as relative2 } from "node:path";
+import { basename as basename4, join as join14, relative as relative2 } from "node:path";
 var CODES = {
   CA101: { severity: "high", owasp: "LLM01 Prompt Injection", title: "invisible characters in a file the agent loads as instruction" },
   CA102: { severity: "medium", owasp: "LLM01 Prompt Injection", title: "an encoded block in a file the agent loads as instruction" },
@@ -17142,7 +17379,7 @@ var CODES = {
   CA202: { severity: "medium", owasp: "LLM03 Supply Chain", title: "an MCP server package started without a pinned version" },
   CA203: { severity: "high", owasp: "LLM02 Sensitive Information Disclosure", title: "a literal secret in an MCP server configuration" },
   CA205: { severity: "high", owasp: "LLM03 Supply Chain", title: "an MCP package pinned to a version with a known vulnerability" },
-  CA204: { severity: "low", owasp: "LLM01 Prompt Injection", title: "a remote MCP server the stdio gateway cannot cover" },
+  CA204: { severity: "low", owasp: "LLM01 Prompt Injection", title: "a remote MCP server connected directly to the host" },
   CA301: { severity: "medium", owasp: "LLM03 Supply Chain", title: "a hook defined in the project's own settings" },
   CA303: { severity: "high", owasp: "LLM03 Supply Chain", title: "the project sets environment that steers Cordon or the hook process" },
   CA304: { severity: "high", owasp: "LLM03 Supply Chain", title: "the project switches hooks or the Cordon plugin off" },
@@ -17275,13 +17512,13 @@ function serverFindings(name, entry, file, add) {
   const args = Array.isArray(entry.args) ? entry.args.filter((arg) => typeof arg === "string") : [];
   if (command === null) {
     if (typeof entry.url === "string" || entry.type === "http" || entry.type === "sse") {
-      add("CA204", file, "a remote server is reached over HTTP; `cordon mcp` gates stdio servers only", name);
+      add("CA204", file, "remote MCP traffic goes directly to the host; compatible Streamable HTTP endpoints can use `cordon mcp --url URL`", name);
     }
   } else {
     const words2 = [command, ...args];
     const gated = isGateway(words2);
     if (!gated) add("CA201", file, `started as \`${words2.join(" ")}\`; wrap it as \`cordon mcp -- ${words2.join(" ")}\``, name);
-    const upstream = gated ? words2.slice(words2.indexOf("--") + 1) : words2;
+    const upstream = gated && words2.includes("--") ? words2.slice(words2.indexOf("--") + 1) : words2;
     const unpinned = unpinnedPackage(upstream);
     if (unpinned !== null) add("CA202", file, `\`${unpinned}\` resolves to whatever the registry serves at start; pin a version`, name);
     for (const word of upstream) {
@@ -17318,7 +17555,16 @@ function switchedOff(settings, file, add) {
 }
 function isGateway(words2) {
   const at = words2.indexOf("--");
-  if (at === -1) return false;
+  if (at === -1) {
+    const entry = basename4(words2[0] ?? "");
+    const first = entry === "cordon" || entry === "cordon.js" ? 1 : entry === "npx" ? words2[1] === "-y" ? 2 : 1 : -1;
+    if (first < 0) return false;
+    const mcp2 = entry === "npx" ? first + 1 : first;
+    if (entry === "npx" && !/^@ilyautov\/cordon(?:@[^/]+)?$/u.test(words2[first] ?? "")) return false;
+    if (words2[mcp2] !== "mcp") return false;
+    const flags = words2.slice(mcp2 + 1, -2);
+    return words2.at(-2) === "--url" && Boolean(words2.at(-1)) && (flags.length === 0 || flags.length === 2 && flags[0] === "--wait-for-approval-ms" && /^[1-9][0-9]*$/u.test(flags[1]));
+  }
   const before = words2.slice(0, at);
   return before.includes("mcp") && before.some((word) => /(^|[/@])cordon(\.js)?$|@ilyautov\/cordon(@[^/]*)?$/u.test(word));
 }
@@ -17805,7 +18051,7 @@ function renderPinChange(change2, visible2) {
   const kind = change2.beforeHash === null ? "new" : "changed";
   const lines = [
     `${change2.id} ${kind} ${quoted(change2.after.name)}`,
-    `    server argv: ${quoted(change2.command)}`
+    change2.command[0] === "" && change2.command[1] === "streamable-http" ? `    server URL: ${quoted(change2.command[2])}` : `    server argv: ${quoted(change2.command)}`
   ];
   if (!change2.before && change2.beforeHash !== null) {
     lines.push(`    previous declaration unavailable (SHA-256 ${visible2(change2.beforeHash)})`);
@@ -17829,8 +18075,8 @@ function renderPinChange(change2, visible2) {
 // src/diagnostics/probe.ts
 import { closeSync as closeSync2, constants as constants5, fstatSync as fstatSync2, lstatSync as lstatSync3, openSync as openSync2, readSync } from "node:fs";
 import { join as join16 } from "node:path";
-function recordedRefusal(events, tool, path, policy) {
-  return events.some(
+function recordedRefusal(events2, tool, path, policy) {
+  return events2.some(
     (event) => event.tool === tool && event.decision === "deny" && event.rule === "self-protection" && (policy === void 0 || event.policy === policy) && event.reason === `self-protection: ${path} belongs to Cordon or to the harness`
   );
 }
@@ -17849,7 +18095,7 @@ function allowedMarker(path, id) {
     closeSync2(fd);
   }
 }
-function pairedProbe(harness, id, start, events, policyAtCheck, reportedHostVersion) {
+function pairedProbe(harness, id, start, events2, policyAtCheck, reportedHostVersion) {
   const tool = harness === "codex" ? "apply_patch" : "Write";
   const allowed = `cordon-probe-${id}.txt`;
   const denied = join16(`cordon-probe-${id}`, ".codex", "marker.txt");
@@ -17868,7 +18114,7 @@ function pairedProbe(harness, id, start, events, policyAtCheck, reportedHostVers
     }, null, 2) + "\n");
     return 0;
   }
-  const refusalRecorded = recordedRefusal(events, tool, deniedPath, policyAtCheck);
+  const refusalRecorded = recordedRefusal(events2, tool, deniedPath, policyAtCheck);
   try {
     const allowedState = allowedMarker(allowedPath, id);
     const deniedState = lstatSync3(deniedPath, { throwIfNoEntry: false }) ? "present" : "absent";
@@ -17895,7 +18141,7 @@ function pairedProbe(harness, id, start, events, policyAtCheck, reportedHostVers
 }
 
 // src/cli.ts
-var USAGE = "usage: cordon scan <file|-> [--json] | cordon hook [--harness claude-code|gemini|codex|kimi|deepseek] | cordon mcp [--wait-for-approval-ms N] -- <server command...> | cordon mcp serve --socket PATH [--wait-for-approval-ms N] -- <server command...> | cordon mcp connect --socket PATH --owner-uid UID | cordon mcp changes | cordon mcp approve-change <id> | cordon mcp approve -- <server command...> | cordon doctor [--json] | cordon probe codex [--check ID] | cordon probe codex|claude-code --pair [--check ID [--host-version VERSION]] | cordon init [--profile locked|research|documents|coding|service] [--force] | cordon log [--last N] [--json] | cordon approve [id [--show|--read] [--as name]] | cordon policy check|explain [file] | cordon policy apply <file> [--accept-warnings] [--as name] | cordon audit [dir] [--json|--sarif] [--fail-on high|medium|low]";
+var USAGE = "usage: cordon scan <file|-> [--json] | cordon hook [--harness claude-code|gemini|codex|kimi|deepseek] | cordon mcp [--wait-for-approval-ms N] -- <server command...> | cordon mcp [--wait-for-approval-ms N] --url URL | cordon mcp serve --socket PATH [--wait-for-approval-ms N] -- <server command...> | cordon mcp connect --socket PATH --owner-uid UID | cordon mcp changes | cordon mcp approve-change <id> | cordon mcp approve -- <server command...> | cordon mcp approve --url URL | cordon doctor [--json] | cordon probe codex [--check ID] | cordon probe codex|claude-code --pair [--check ID [--host-version VERSION]] | cordon init [--profile locked|research|documents|coding|service] [--force] | cordon log [--last N] [--json] | cordon approve [id [--show|--read] [--as name]] | cordon policy check|explain [file] | cordon policy apply <file> [--accept-warnings] [--as name] | cordon audit [dir] [--json|--sarif] [--fail-on high|medium|low]";
 var HARNESSES = /* @__PURE__ */ new Map([
   ["claude-code", runHook],
   ["gemini", runHook2],
@@ -18279,19 +18525,20 @@ function mcp(args) {
   if (args[0] === "approve") return approve(args.slice(1));
   if (args[0] === "serve") return mcpServe(args.slice(1));
   if (args[0] === "connect") return mcpConnect(args.slice(1));
-  const at = args.indexOf("--");
-  const command = at === -1 ? [] : args.slice(at + 1);
-  if (command.length === 0 || command[0] === "") {
-    process.stderr.write(`mcp needs the upstream server command after --
+  const separator = args.findIndex((arg) => arg === "--" || arg === "--url");
+  const remote = args[separator] === "--url";
+  const command = separator < 0 ? [] : args.slice(separator + 1);
+  if (!command[0] || remote && command.length !== 1) {
+    process.stderr.write(`mcp needs the upstream server command after -- or one endpoint after --url
 ${USAGE}
 `);
     return 2;
   }
-  const flags = args.slice(0, at);
+  const flags = args.slice(0, separator);
   let approvalWaitMs = 0;
   if (flags.length > 0) {
     if (flags.length !== 2 || flags[0] !== "--wait-for-approval-ms" || !/^[1-9][0-9]*$/u.test(flags[1] ?? "")) {
-      process.stderr.write(`mcp accepts only --wait-for-approval-ms N before --
+      process.stderr.write(`mcp accepts only --wait-for-approval-ms N before the upstream target
 ${USAGE}
 `);
       return 2;
@@ -18304,6 +18551,14 @@ ${USAGE}
       return 2;
     }
   }
+  let endpoint;
+  try {
+    if (remote) endpoint = httpEndpoint(command[0]);
+  } catch (error) {
+    process.stderr.write(`mcp: ${error.message}
+`);
+    return 2;
+  }
   const home = cordonHome();
   let policy;
   try {
@@ -18313,7 +18568,7 @@ ${USAGE}
 `);
     return 1;
   }
-  return runGateway({ command, policy, cordonHome: home, policyFile: join17(home, "policy.yaml"), approvalWaitMs });
+  return runGateway({ ...endpoint ? { endpoint } : { command }, policy, cordonHome: home, policyFile: join17(home, "policy.yaml"), approvalWaitMs });
 }
 function mcpServe(args) {
   const at = args.indexOf("--");
@@ -18540,14 +18795,23 @@ function pinReview(args) {
   }
 }
 function approve(args) {
-  const command = args[0] === "--" ? args.slice(1) : [];
-  if (command.length === 0 || command[0] === "") {
-    process.stderr.write(`mcp approve needs the server command after --
+  let command = args[0] === "--" ? args.slice(1) : [];
+  if (args[0] === "--url" && args.length === 2) {
+    try {
+      command = httpIdentity(httpEndpoint(args[1]));
+    } catch (error) {
+      process.stderr.write(`mcp approve: ${error.message}
+`);
+      return 2;
+    }
+  }
+  if (command.length === 0 || args[0] === "--" && command[0] === "") {
+    process.stderr.write(`mcp approve needs the server command after -- or one endpoint after --url
 ${USAGE}
 `);
     return 2;
   }
-  const server2 = command.join(" ");
+  const server2 = args[0] === "--url" ? command[2] : command.join(" ");
   const store = new PinStore(cordonHome());
   let pinned2;
   try {
@@ -18929,19 +19193,19 @@ function readJournal(command) {
       return null;
     }
   }
-  const events = [];
+  const events2 = [];
   let unreadable = 0;
   for (const line of text.split("\n")) {
     if (line.trim() === "") continue;
     try {
       const event = JSON.parse(line);
       if (event === null || typeof event !== "object" || Array.isArray(event)) throw new Error("not an event");
-      events.push(event);
+      events2.push(event);
     } catch {
       unreadable++;
     }
   }
-  return { policy, file, events, unreadable };
+  return { policy, file, events: events2, unreadable };
 }
 function probe(args) {
   const [harness, ...rest] = args;
@@ -19004,8 +19268,8 @@ function showLog(args) {
   }
   const journal = readJournal("cordon log");
   if (journal === null) return 1;
-  const { events, unreadable, file } = journal;
-  const shown2 = events.slice(Math.max(0, events.length - last));
+  const { events: events2, unreadable, file } = journal;
+  const shown2 = events2.slice(Math.max(0, events2.length - last));
   if (asJson) {
     process.stdout.write(JSON.stringify(shown2, null, 2) + "\n");
     return 0;

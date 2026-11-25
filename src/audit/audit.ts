@@ -1,5 +1,5 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs'
-import { join, relative } from 'node:path'
+import { basename, join, relative } from 'node:path'
 import { sanitize } from '../sanitize/index.js'
 
 /**
@@ -46,7 +46,7 @@ export const CODES = {
   CA202: { severity: 'medium', owasp: 'LLM03 Supply Chain', title: 'an MCP server package started without a pinned version' },
   CA203: { severity: 'high', owasp: 'LLM02 Sensitive Information Disclosure', title: 'a literal secret in an MCP server configuration' },
   CA205: { severity: 'high', owasp: 'LLM03 Supply Chain', title: 'an MCP package pinned to a version with a known vulnerability' },
-  CA204: { severity: 'low', owasp: 'LLM01 Prompt Injection', title: 'a remote MCP server the stdio gateway cannot cover' },
+  CA204: { severity: 'low', owasp: 'LLM01 Prompt Injection', title: 'a remote MCP server connected directly to the host' },
   CA301: { severity: 'medium', owasp: 'LLM03 Supply Chain', title: 'a hook defined in the project\'s own settings' },
   CA303: { severity: 'high', owasp: 'LLM03 Supply Chain', title: 'the project sets environment that steers Cordon or the hook process' },
   CA304: { severity: 'high', owasp: 'LLM03 Supply Chain', title: 'the project switches hooks or the Cordon plugin off' },
@@ -219,13 +219,13 @@ function serverFindings(name: string, entry: ServerEntry, file: string, add: Add
 
   if (command === null) {
     if (typeof entry.url === 'string' || entry.type === 'http' || entry.type === 'sse') {
-      add('CA204', file, 'a remote server is reached over HTTP; `cordon mcp` gates stdio servers only', name)
+      add('CA204', file, 'remote MCP traffic goes directly to the host; compatible Streamable HTTP endpoints can use `cordon mcp --url URL`', name)
     }
   } else {
     const words = [command, ...args]
     const gated = isGateway(words)
     if (!gated) add('CA201', file, `started as \`${words.join(' ')}\`; wrap it as \`cordon mcp -- ${words.join(' ')}\``, name)
-    const upstream = gated ? words.slice(words.indexOf('--') + 1) : words
+    const upstream = gated && words.includes('--') ? words.slice(words.indexOf('--') + 1) : words
     const unpinned = unpinnedPackage(upstream)
     if (unpinned !== null) add('CA202', file, `\`${unpinned}\` resolves to whatever the registry serves at start; pin a version`, name)
     for (const word of upstream) {
@@ -282,7 +282,18 @@ function switchedOff(settings: unknown, file: string, add: Add): void {
 
 function isGateway(words: string[]): boolean {
   const at = words.indexOf('--')
-  if (at === -1) return false
+  if (at === -1) {
+    const entry = basename(words[0] ?? '')
+    const first = entry === 'cordon' || entry === 'cordon.js' ? 1
+      : entry === 'npx' ? (words[1] === '-y' ? 2 : 1) : -1
+    if (first < 0) return false
+    const mcp = entry === 'npx' ? first + 1 : first
+    if (entry === 'npx' && !/^@ilyautov\/cordon(?:@[^/]+)?$/u.test(words[first] ?? '')) return false
+    if (words[mcp] !== 'mcp') return false
+    const flags = words.slice(mcp + 1, -2)
+    return words.at(-2) === '--url' && Boolean(words.at(-1)) && (flags.length === 0 ||
+      (flags.length === 2 && flags[0] === '--wait-for-approval-ms' && /^[1-9][0-9]*$/u.test(flags[1]!)))
+  }
   const before = words.slice(0, at)
   return before.includes('mcp') && before.some((word) => /(^|[/@])cordon(\.js)?$|@ilyautov\/cordon(@[^/]*)?$/u.test(word))
 }

@@ -2,7 +2,7 @@
 
 Five minutes from nothing to an agent that cannot be told what to do by a web page. If you want the reasoning instead of the commands, read the [README](README.md); if you want every knob, read [docs/install.md](docs/install.md).
 
-You need Node 22 or newer. You need no key, no account and no network access: Cordon makes no network calls and no model calls.
+You need Node 22 or newer. You need no key, no account and no network access: the local checks in this quickstart run offline.
 
 ## 1. See what it does before you install it
 

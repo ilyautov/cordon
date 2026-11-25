@@ -1,4 +1,4 @@
-import { spawn, type ChildProcess } from 'node:child_process'
+import { spawn } from 'node:child_process'
 import { createHash, randomBytes } from 'node:crypto'
 import { accessSync, constants } from 'node:fs'
 import { join } from 'node:path'
@@ -17,10 +17,10 @@ import { APPROVAL_TTL_MS, ApprovalStore } from '../../session/approvals.js'
 import { extractText, replaceText } from '../../output/tool-text.js'
 import { sanitize } from '../../sanitize/index.js'
 import { parseError, parseLine, pendingKey, toolError, type JsonRpcId, type Message } from './jsonrpc.js'
+import { httpEndpoint, httpIdentity, openHttp } from './http.js'
 
-export interface GatewayOptions {
-  /** The upstream server command: `cordon mcp -- npx server-x` gives ['npx', 'server-x']. */
-  command: string[]
+type UpstreamTarget = { command: string[]; endpoint?: never } | { command?: never; endpoint: URL }
+export type GatewayOptions = UpstreamTarget & {
   policy: Policy
   cordonHome: string
   /** Where the policy came from: a change there stops the gateway acting (see CordonOptions). */
@@ -106,6 +106,8 @@ function forwardableHostNotification(message: Extract<Message, { type: 'notifica
  */
 export function runGateway(options: GatewayOptions): Promise<number> {
   const log = options.log ?? ((line: string) => process.stderr.write(`cordon mcp: ${line}\n`))
+  const endpoint = options.endpoint && httpEndpoint(options.endpoint.href)
+  const identity = options.command ?? httpIdentity(endpoint!)
   const hostIn = options.hostIn ?? process.stdin
   const hostOut = options.hostOut ?? process.stdout
 
@@ -118,9 +120,10 @@ export function runGateway(options: GatewayOptions): Promise<number> {
       catalogGeneration++
       nextCatalogCursor = undefined
       catalogNames.clear()
-      cordon.invalidateToolList(options.command)
+      cordon.invalidateToolList(identity)
     }
-    let upstream: ChildProcess | null = null
+    let closeUpstream: (() => void | Promise<void>) | undefined
+    let sendUpstream: (message: Record<string, unknown>) => void
     let closeReaders: (() => void) | undefined
     const reviewTimers = new Map<string, {
       timer: NodeJS.Timeout; approvalId: string; instance: string; requestId: string | number
@@ -152,8 +155,10 @@ export function runGateway(options: GatewayOptions): Promise<number> {
       reviewTimers.clear()
       closeReaders?.()
       if (reason !== undefined) log(reason)
-      if (upstream !== null && upstream.exitCode === null && !upstream.killed) upstream.kill()
-      resolve(code)
+      void Promise.resolve(closeUpstream?.()).then(() => resolve(code), () => {
+        log('upstream cleanup failed')
+        resolve(1)
+      })
     }
 
     // Session state is the journal and the memory. A gateway that cannot
@@ -184,7 +189,7 @@ export function runGateway(options: GatewayOptions): Promise<number> {
       // needs a fresh identity so a later process cannot load its provenance
       // and spend an old exact-call approval under the same question.
       const sessionId =
-        `mcp-${createHash('sha256').update(options.command.join(' '), 'utf8').digest('hex').slice(0, 12)}-${randomBytes(16).toString('hex')}`
+        `mcp-${createHash('sha256').update(identity.join(' '), 'utf8').digest('hex').slice(0, 12)}-${randomBytes(16).toString('hex')}`
       cordon = new Cordon({
         policy: options.policy,
         cordonHome: options.cordonHome,
@@ -195,6 +200,7 @@ export function runGateway(options: GatewayOptions): Promise<number> {
       finish(1, `the session state is broken: ${(error as Error).message}`)
       return
     }
+    if (endpoint) restartCatalog()
     cancelWaiting = (id, reason, instance) => cordon.cancelUnattendedApproval(id, reason, instance)
 
     // The certificate is the profile for the whole run — there is no user
@@ -206,32 +212,9 @@ export function runGateway(options: GatewayOptions): Promise<number> {
       cordon.declareTask(options.policy.task)
     }
 
-    upstream = spawn(options.command[0]!, options.command.slice(1), {
-      stdio: ['pipe', 'pipe', 'inherit'],
-      env: { ...process.env, ...options.env },
-    })
-    const child = upstream
-
-    child.on('error', (error) => {
-      finish(1, `could not start the upstream (${options.command.join(' ')}): ${error.message}`)
-    })
-    child.on('exit', (code, signal) => {
-      // A dead upstream while the host is still talking is a loud failure,
-      // not an end of stream: staying alive would mean answering as if the
-      // checks still ran.
-      const how = code === null ? `signal ${String(signal)}` : `code ${code}`
-      finish(code === null || code === 0 ? 1 : code, `the upstream process exited (${how}); the gateway stops with it`)
-    })
-    // An EPIPE here is the upstream's death already reported by 'exit'.
-    child.stdin!.on('error', () => {})
-
     const sendToHost = (message: Record<string, unknown>): void => {
       hostOut.write(JSON.stringify(message) + '\n')
     }
-    const sendUpstream = (message: Record<string, unknown>): void => {
-      child.stdin!.write(JSON.stringify(message) + '\n')
-    }
-
     const pending = new Map<string, Pending>()
     const activeProgress = new Map<string | number, ProgressState>()
     const forwardRequest: ForwardRequest = (id, entry, request) => {
@@ -308,7 +291,7 @@ export function runGateway(options: GatewayOptions): Promise<number> {
       }
 
       if (message.method === 'tools/call') {
-        gateCall(message, cordon, options.command, options.policy, forwardRequest, sendToHost,
+        gateCall(message, cordon, identity, options.policy, forwardRequest, sendToHost,
           approvalWaitMs === 0 ? undefined : (approvalId, reason) => {
             const approvals = new ApprovalStore(options.cordonHome)
             const question = approvals.waiting(approvalId)
@@ -389,7 +372,7 @@ export function runGateway(options: GatewayOptions): Promise<number> {
       forwardRequest(message.id, entry, forwarded)
     }
 
-    const onUpstreamLine = (line: string): void => {
+    const onUpstreamLine = (line: string): boolean | void => {
       // readline can emit later lines from a chunk after finish() kills the
       // upstream. A buffered notification must not escape the stopped gate.
       if (settled) return
@@ -492,15 +475,16 @@ export function runGateway(options: GatewayOptions): Promise<number> {
           sendToHost({ jsonrpc: '2.0', id: message.id, error: { code: -32000, message: 'The tool list changed during discovery. Refresh tools/list.' } })
           return
         }
-        const response = observeToolList(message.value, cordon, options.policy, options.command, catalogNames)
+        const response = observeToolList(message.value, cordon, options.policy, identity, catalogNames)
         if (Object.hasOwn(response, 'error')) restartCatalog()
         else nextCatalogCursor = asRecord(response['result'])?.['nextCursor'] as string | undefined
         sendToHost(response)
         return
       }
       if (entry.method === 'initialize') {
-        sendToHost(observeInitialize(message.value, cordon, options.policy))
-        return
+        const observed = observeInitialize(message.value, cordon, options.policy)
+        sendToHost(observed)
+        return Object.hasOwn(observed, 'result')
       }
       if (entry.method === 'server/discover') {
         sendToHost(observeDiscover(message.value, cordon, options.policy))
@@ -530,6 +514,47 @@ export function runGateway(options: GatewayOptions): Promise<number> {
       sendToHost(observeOtherResponse(message.value, entry.method, cordon, options.policy))
     }
 
+    const receive = (line: string): boolean | void => {
+      if (line.trim() === '') return
+      try {
+        return onUpstreamLine(line)
+      } catch (error) {
+        finish(1, `a failure while handling the upstream's message: ${(error as Error).message}`)
+      }
+    }
+    if (!options.command) {
+      const http = openHttp(endpoint!.href, receive, reason => finish(1, reason))
+      sendUpstream = http.send
+      closeUpstream = http.close
+    } else {
+      const child = spawn(options.command[0]!, options.command.slice(1), {
+        stdio: ['pipe', 'pipe', 'inherit'],
+        env: { ...process.env, ...options.env },
+      })
+
+      child.on('error', (error) => {
+        finish(1, `could not start the upstream (${options.command.join(' ')}): ${error.message}`)
+      })
+      child.on('exit', (code, signal) => {
+        // A dead upstream while the host is still talking is a loud failure,
+        // not an end of stream: staying alive would mean answering as if the
+        // checks still ran.
+        const how = code === null ? `signal ${String(signal)}` : `code ${code}`
+        finish(code === null || code === 0 ? 1 : code, `the upstream process exited (${how}); the gateway stops with it`)
+      })
+      // An EPIPE here is the upstream's death already reported by 'exit'.
+      child.stdin!.on('error', () => {})
+
+      const lines = createInterface({ input: child.stdout!, terminal: false })
+      lines.on('error', (error: Error) => finish(1, `upstream output failed: ${error.message}`))
+      lines.on('line', receive)
+      sendUpstream = message => { child.stdin!.write(JSON.stringify(message) + '\n') }
+      closeUpstream = () => {
+        lines.close()
+        if (child.exitCode === null && !child.killed) child.kill()
+      }
+    }
+
     const inputClosed = (): void => {
       if (!hostIn.readableEnded) finish(1, 'host input closed unexpectedly')
     }
@@ -557,21 +582,10 @@ export function runGateway(options: GatewayOptions): Promise<number> {
       }
     })
 
-    const upstreamLines = createInterface({ input: child.stdout!, terminal: false })
-    upstreamLines.on('error', (error: Error) => finish(1, `upstream output failed: ${error.message}`))
     closeReaders = () => {
       hostIn.off('close', inputClosed)
       hostLines.close()
-      upstreamLines.close()
     }
-    upstreamLines.on('line', (line) => {
-      if (line.trim() === '') return
-      try {
-        onUpstreamLine(line)
-      } catch (error) {
-        finish(1, `a failure while handling the upstream's message: ${(error as Error).message}`)
-      }
-    })
     if (hostIn.destroyed) inputClosed()
   })
 }
@@ -809,7 +823,7 @@ function observeToolList(
 /** How deep a schema is walked. Deeper than any real schema, bounded against a hostile one. */
 const MAX_SCHEMA_DEPTH = 16
 const MAX_SCHEMA_NODES = 20_000
-const SCHEMA_VALUE_KEYS = new Set(['default', 'const', 'enum', 'examples'])
+const SCHEMA_VALUE_KEYS = new Set(['default', 'const', 'enum', 'examples', 'dependentRequired'])
 
 function readableListedTool(value: unknown): boolean {
   const entry = asRecord(value)
@@ -853,14 +867,19 @@ function readableIcons(value: unknown): boolean {
   })
 }
 
-function readableSchemaText(node: unknown, depth: number): boolean {
+const SCHEMA_MAP_KEYS = new Set(['properties', 'patternProperties', '$defs', 'definitions', 'dependentSchemas'])
+
+function readableSchemaText(node: unknown, depth: number, namedSchemas = false): boolean {
   if (depth > MAX_SCHEMA_DEPTH) return true
   if (Array.isArray(node)) return node.every((item) => readableSchemaText(item, depth + 1))
   const record = asRecord(node)
   if (record === null) return true
   return Object.entries(record).every(([key, value]) => {
+    // Members of a property or definition map are field names, including "title".
+    if (namedSchemas) return (typeof value === 'boolean' || asRecord(value) !== null) && readableSchemaText(value, depth + 1)
+    if (SCHEMA_VALUE_KEYS.has(key)) return true
     if ((key === 'description' || key === 'title') && typeof value !== 'string') return false
-    return readableSchemaText(value, depth + 1)
+    return readableSchemaText(value, depth + 1, SCHEMA_MAP_KEYS.has(key))
   })
 }
 
@@ -876,13 +895,17 @@ function observeSchema(
   cordon: Cordon,
   depth: number,
   budget = { nodes: 0 },
+  namedSchemas = false,
 ): boolean {
   if (depth > MAX_SCHEMA_DEPTH) return false
   if (++budget.nodes > MAX_SCHEMA_NODES) return false
   for (const key of Object.keys(node)) {
     if (sanitize(key).clean !== key) return false
     const value = node[key]
-    if ((key === 'description' || key === 'title') && typeof value === 'string') {
+    if (namedSchemas) {
+      const child = asRecord(value)
+      if (child !== null && !observeSchema(child, tool, source, cordon, depth + 1, budget)) return false
+    } else if ((key === 'description' || key === 'title') && typeof value === 'string') {
       observeDescription(node, key, tool, source, cordon)
     } else if (SCHEMA_VALUE_KEYS.has(key)) {
       // Rewriting a default or an enum can make the advertised schema disagree
@@ -899,7 +922,7 @@ function observeSchema(
       }
     } else {
       const child = asRecord(value)
-      if (child !== null && !observeSchema(child, tool, source, cordon, depth + 1, budget)) return false
+      if (child !== null && !observeSchema(child, tool, source, cordon, depth + 1, budget, SCHEMA_MAP_KEYS.has(key))) return false
     }
   }
   return true

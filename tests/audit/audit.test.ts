@@ -136,9 +136,21 @@ describe('audit: MCP server configuration', () => {
     expect(codes(findings)).not.toContain('CA203')
   })
 
-  it('a remote server the stdio gateway cannot cover', () => {
+  it('a remote URL configured directly on the host', () => {
     const findings = run({ '.mcp.json': mcp({ remote: { type: 'http', url: 'https://mcp.example/api' } }) })
     expect(codes(findings)).toContain('CA204')
+  })
+
+  it('distinguishes a Cordon HTTP gateway from another command with the same URL flag', () => {
+    const url = 'https://docs.example/mcp'
+    const findings = run({ '.mcp.json': mcp({
+      wrapped: { command: 'cordon', args: ['mcp', '--url', url] },
+      unrelated: { command: 'other', args: ['cordon', 'mcp', '--url', url] },
+      unpinned: { command: 'npx', args: ['-y', '@ilyautov/cordon', 'mcp', '--url', url] },
+      pinned: { command: 'npx', args: ['-y', '@ilyautov/cordon@1.2.3', 'mcp', '--url', url] },
+    }) })
+    expect(findings.filter(row => row.code === 'CA201').map(row => row.subject)).toEqual(['unrelated'])
+    expect(findings.filter(row => row.code === 'CA202').map(row => row.subject)).toEqual(['unpinned'])
   })
 
   it('Cursor, Gemini CLI and the user-level Claude Code config are read', () => {

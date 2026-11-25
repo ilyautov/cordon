@@ -1,6 +1,6 @@
 # Privacy
 
-Cordon runs on your machine, inside the hooks of the agent harness you use. It has no server, no account and no telemetry. It makes no network requests and no model calls: nothing it reads or decides leaves your machine through Cordon.
+Cordon scans content and makes policy decisions on your machine without a model call. Cordon has no telemetry or account. The optional HTTP gateway connects to the MCP endpoint in your host configuration.
 
 ## What it reads
 
@@ -17,13 +17,14 @@ Everything is written under Cordon's home directory, `~/.cordon` (or `CORDON_HOM
 | Session state: hashes and fragments of what was read and where it came from, and the links, names and words of your own messages that exempt a call | `~/.cordon/sessions/` | a day after the session's last event |
 | Text of the answer being displayed | `~/.cordon/drafts/` | an hour after the last delta |
 | One-time approvals: the tool and the refusal's reason | `~/.cordon/approvals/` | void after an hour, swept after that |
+| MCP pins and pending declaration changes, including the server command or endpoint URL | `~/.cordon/mcp-pins/` | until reset or superseded |
 | Memory files written after untrusted content was read: path, source label, time | `~/.cordon/memory/` | thirty days, or until you trust it |
 
 Expired files are deleted automatically on your next message, at most once an hour. Deleting `~/.cordon` removes everything Cordon has kept.
 
 ## What it shares
 
-Nothing. Cordon sends no data to its author, to Anthropic or to anyone else. What it prints goes back to the harness on your machine, as the harness's hook protocol requires.
+Hooks return their decisions to the local harness. When you configure `cordon mcp --url URL`, the selected endpoint receives MCP handshake and discovery messages, permitted tool names and arguments, and session traffic. The endpoint operator controls retention of what it receives. [HTTP configuration](docs/install-mcp.md#remote-streamable-http-endpoints)
 
 ## Contact
 
