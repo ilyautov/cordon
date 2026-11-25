@@ -11,7 +11,9 @@ export function renderPinChange(change: PinChange, visible: (text: string) => st
   const kind = change.beforeHash === null ? 'new' : 'changed'
   const lines = [
     `${change.id} ${kind} ${quoted(change.after.name)}`,
-    `    server argv: ${quoted(change.command)}`,
+    change.command[0] === '' && change.command[1] === 'streamable-http'
+      ? `    server URL: ${quoted(change.command[2])}`
+      : `    server argv: ${quoted(change.command)}`,
   ]
   if (!change.before && change.beforeHash !== null) {
     lines.push(`    previous declaration unavailable (SHA-256 ${visible(change.beforeHash)})`)

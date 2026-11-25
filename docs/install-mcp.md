@@ -1,12 +1,12 @@
 # Cordon as an MCP gateway
 
-`cordon mcp` puts Cordon between an MCP host (Claude Desktop, Cursor, VS Code, a hand-written agent) and an MCP server, as a stdio proxy. The client's config points at Cordon instead of the server, and Cordon starts the server itself:
+`cordon mcp` puts Cordon between an MCP host (Claude Desktop, Cursor, VS Code, a hand-written agent) and an MCP server, as a stdio proxy. The client's config points at Cordon instead of the server, and Cordon either starts a local server or connects to an HTTP endpoint. For a local server:
 
 ```
 cordon mcp -- npx server-x
 ```
 
-The transport is JSON-RPC 2.0 over newline-delimited JSON, implemented by hand: no new dependencies, one upstream server per gateway process. Several servers means several config lines, each with its own `cordon mcp`.
+The host speaks newline-delimited JSON-RPC 2.0 over stdio. Each gateway process connects to one upstream. Several servers means several config lines, each with its own `cordon mcp`.
 
 ## Configuration
 
@@ -30,7 +30,34 @@ you now write:
 }
 ```
 
-The `--` separator is mandatory: without it the server's flags would be read as Cordon's own.
+Use `--` before a local command and its flags.
+
+### Remote Streamable HTTP endpoints
+
+For a public endpoint, configure the host to launch Cordon over stdio. For example, this routes Microsoft Learn through the gateway:
+
+```json
+{
+  "mcpServers": {
+    "learn": {
+      "command": "cordon",
+      "args": ["mcp", "--url", "https://learn.microsoft.com/api/mcp"]
+    }
+  }
+}
+```
+
+A live Codex CLI 0.172.0 check on 26 November 2026 discovered the Microsoft Learn catalog and completed a `microsoft_docs_search` request about Azure Blob Storage through this gateway. In a second run, a local server changed two tool descriptions. After the owner approved one, Codex invoked it once and the other stayed held. [Live results](evidence/mcp-streamable-http-2026-11-26.json)
+
+Grant the intended tool its effects in the owner policy. For example, a read-enabled profile can declare `microsoft_docs_search: [read]` under `tools`. On first discovery Cordon pins declarations under the canonical endpoint URL, including its path. Subsequent changes use the [same per-tool review](#review-a-tool-change) as local servers. To discard **every** pin for one endpoint, the owner can run `cordon mcp approve --url URL`.
+
+Use HTTPS. Plain HTTP is supported on literal loopback for local testing. The gateway accepts endpoints without credentials, query strings or fragments. It follows no redirects and sends no authorization header or cookies.
+
+The upstream uses the [Streamable HTTP handshake](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports) with one JSON-RPC message per POST. It negotiates the 2025-03-26, 2025-06-18 or 2025-11-25 protocol version and accepts JSON or SSE responses. After initialization it sends the negotiated version and any assigned session ID. For servers advertising list changes it also opens a GET event stream before discovery. An HTTP 405 selects POST-only operation. A delivered tool-list change invalidates cached declarations until the host refreshes them.
+
+A POST has a 60-second deadline. A JSON reply or SSE event is limited to 4 MiB. When a request stream ends before its reply, the gateway stops and reports the failure. Reconnect and check the outcome before retrying a call that may already have run. OAuth, legacy HTTP+SSE, JSON-RPC batches, event-ID resumption and stateless `server/discover` initialization are outside this transport's supported subset.
+
+### Tool policy
 
 Model-selected MCP requests outside `tools/call` also need declared effects. For a server whose resource and prompt methods only read data, add the exact method names to the active Cordon policy's `tools` map and grant `read` in the profile:
 
@@ -72,7 +99,7 @@ The first listing pins each tool's name, raw description, input schema and suppl
 
 ### Review a tool change
 
-Run `cordon mcp changes` in the owner's terminal. Each entry shows a change ID, tool name, server command as a JSON array, and the changed fields. For example, an optional invoice memo adds one line to the review.
+Run `cordon mcp changes` in the owner's terminal. Each entry shows a change ID, tool name, server command as a JSON array or the endpoint URL, and the changed fields. For example, an optional invoice memo adds one line to the review.
 
 ```text
     + "/inputSchema/properties/memo" {"type":"string"}

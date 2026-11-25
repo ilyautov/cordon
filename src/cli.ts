@@ -10,6 +10,7 @@ import { runHook as runGeminiHook } from './adapters/gemini-cli/main.js'
 import { runHook as runCodexHook } from './adapters/codex/main.js'
 import { runHook as runKimiHook } from './adapters/kimi/main.js'
 import { runHook as runDeepseekHook } from './adapters/deepseek/main.js'
+import { httpEndpoint, httpIdentity } from './adapters/mcp/http.js'
 import { runGateway } from './adapters/mcp/gateway.js'
 import { connectSocketGateway, serveSocketGateway } from './adapters/mcp/socket.js'
 import { humanSeesRendered, type SourceView } from './core/types.js'
@@ -33,7 +34,7 @@ import { CLAUDE_CODE, CODEX, policyForDialect } from './adapters/claude-code/dia
 import { pairedProbe, recordedRefusal } from './diagnostics/probe.js'
 
 const USAGE =
-  'usage: cordon scan <file|-> [--json] | cordon hook [--harness claude-code|gemini|codex|kimi|deepseek] | cordon mcp [--wait-for-approval-ms N] -- <server command...> | cordon mcp serve --socket PATH [--wait-for-approval-ms N] -- <server command...> | cordon mcp connect --socket PATH --owner-uid UID | cordon mcp changes | cordon mcp approve-change <id> | cordon mcp approve -- <server command...> | cordon doctor [--json] | cordon probe codex [--check ID] | cordon probe codex|claude-code --pair [--check ID [--host-version VERSION]] | cordon init [--profile locked|research|documents|coding|service] [--force] | cordon log [--last N] [--json] | cordon approve [id [--show|--read] [--as name]] | cordon policy check|explain [file] | cordon policy apply <file> [--accept-warnings] [--as name] | cordon audit [dir] [--json|--sarif] [--fail-on high|medium|low]'
+  'usage: cordon scan <file|-> [--json] | cordon hook [--harness claude-code|gemini|codex|kimi|deepseek] | cordon mcp [--wait-for-approval-ms N] -- <server command...> | cordon mcp [--wait-for-approval-ms N] --url URL | cordon mcp serve --socket PATH [--wait-for-approval-ms N] -- <server command...> | cordon mcp connect --socket PATH --owner-uid UID | cordon mcp changes | cordon mcp approve-change <id> | cordon mcp approve -- <server command...> | cordon mcp approve --url URL | cordon doctor [--json] | cordon probe codex [--check ID] | cordon probe codex|claude-code --pair [--check ID [--host-version VERSION]] | cordon init [--profile locked|research|documents|coding|service] [--force] | cordon log [--last N] [--json] | cordon approve [id [--show|--read] [--as name]] | cordon policy check|explain [file] | cordon policy apply <file> [--accept-warnings] [--as name] | cordon audit [dir] [--json|--sarif] [--fail-on high|medium|low]'
 
 /**
  * Event parsing depends on the harness, so the harness is named explicitly.
@@ -636,17 +637,18 @@ function mcp(args: string[]): Promise<number> | number {
   if (args[0] === 'approve') return approve(args.slice(1))
   if (args[0] === 'serve') return mcpServe(args.slice(1))
   if (args[0] === 'connect') return mcpConnect(args.slice(1))
-  const at = args.indexOf('--')
-  const command = at === -1 ? [] : args.slice(at + 1)
-  if (command.length === 0 || command[0] === '') {
-    process.stderr.write(`mcp needs the upstream server command after --\n${USAGE}\n`)
+  const separator = args.findIndex(arg => arg === '--' || arg === '--url')
+  const remote = args[separator] === '--url'
+  const command = separator < 0 ? [] : args.slice(separator + 1)
+  if (!command[0] || (remote && command.length !== 1)) {
+    process.stderr.write(`mcp needs the upstream server command after -- or one endpoint after --url\n${USAGE}\n`)
     return 2
   }
-  const flags = args.slice(0, at)
+  const flags = args.slice(0, separator)
   let approvalWaitMs = 0
   if (flags.length > 0) {
     if (flags.length !== 2 || flags[0] !== '--wait-for-approval-ms' || !/^[1-9][0-9]*$/u.test(flags[1] ?? '')) {
-      process.stderr.write(`mcp accepts only --wait-for-approval-ms N before --\n${USAGE}\n`)
+      process.stderr.write(`mcp accepts only --wait-for-approval-ms N before the upstream target\n${USAGE}\n`)
       return 2
     }
     approvalWaitMs = Number(flags[1])
@@ -656,6 +658,13 @@ function mcp(args: string[]): Promise<number> | number {
     }
   }
 
+  let endpoint: URL | undefined
+  try {
+    if (remote) endpoint = httpEndpoint(command[0]!)
+  } catch (error) {
+    process.stderr.write(`mcp: ${(error as Error).message}\n`)
+    return 2
+  }
   const home = cordonHome()
   let policy
   try {
@@ -665,7 +674,7 @@ function mcp(args: string[]): Promise<number> | number {
     return 1
   }
 
-  return runGateway({ command, policy, cordonHome: home, policyFile: join(home, 'policy.yaml'), approvalWaitMs })
+  return runGateway({ ...(endpoint ? { endpoint } : { command }), policy, cordonHome: home, policyFile: join(home, 'policy.yaml'), approvalWaitMs })
 }
 
 function mcpServe(args: string[]): Promise<number> | number {
@@ -907,12 +916,20 @@ function pinReview(args: string[]): number {
  * reset is not made.
  */
 function approve(args: string[]): number {
-  const command = args[0] === '--' ? args.slice(1) : []
-  if (command.length === 0 || command[0] === '') {
-    process.stderr.write(`mcp approve needs the server command after --\n${USAGE}\n`)
+  let command = args[0] === '--' ? args.slice(1) : []
+  if (args[0] === '--url' && args.length === 2) {
+    try {
+      command = httpIdentity(httpEndpoint(args[1]!))
+    } catch (error) {
+      process.stderr.write(`mcp approve: ${(error as Error).message}\n`)
+      return 2
+    }
+  }
+  if (command.length === 0 || (args[0] === '--' && command[0] === '')) {
+    process.stderr.write(`mcp approve needs the server command after -- or one endpoint after --url\n${USAGE}\n`)
     return 2
   }
-  const server = command.join(' ')
+  const server = args[0] === '--url' ? command[2]! : command.join(' ')
   const store = new PinStore(cordonHome())
   // A server that was never pinned is no owner's act, so nothing is written.
   // A pin store that cannot be read is reported: it is not called empty.

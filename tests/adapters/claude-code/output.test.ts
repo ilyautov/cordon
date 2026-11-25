@@ -7,6 +7,15 @@ describe('extractText', () => {
       .toEqual({ known: true, parts: [{ text: 'the file contents', content: true }], unseen: false, links: [], opaque: false })
   })
 
+  it('records a documentation search result contentUrl as a source-provided link', () => {
+    const url = 'https://learn.example/en-us/documentation/storage/blobs/introduction'
+    const row = { title: 'Storage', content: 'Blob storage overview.', contentUrl: url }
+    const result = extractText('', { results: [row] })
+    expect(result.known).toBe(true)
+    expect(result.links).toEqual([url])
+    expect(result.parts).toContainEqual({ text: row.content, content: true })
+  })
+
   it('a Bash output is two streams', () => {
     const result = extractText('Bash', { stdout: 'output', stderr: 'an error', interrupted: false, isImage: false })
     expect(result.known).toBe(true)

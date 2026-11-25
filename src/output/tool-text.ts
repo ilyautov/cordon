@@ -73,6 +73,9 @@ const LABEL_KEYS: ReadonlySet<string> = new Set([
   'title', 'label', 'name', 'query', 'command', 'activeform', 'code',
 ])
 
+/** Identifier fields that hold a link rather than a path or an id. */
+const LINK_KEYS: ReadonlySet<string> = new Set(['uri', 'url', 'urls', 'contenturl', 'href', 'link', 'links'])
+
 /**
  * Fields whose value identifies rather than says: a link, a path, an
  * identifier, a hash, a media type. They are neither cleaned nor recorded.
@@ -83,7 +86,7 @@ const LABEL_KEYS: ReadonlySet<string> = new Set([
  */
 const OPAQUE_KEYS: ReadonlySet<string> = new Set([
   'type', 'subtype', 'kind', 'role', 'mode', 'status', 'state',
-  'uri', 'url', 'urls', 'href', 'link', 'links', 'host', 'hostname',
+  ...LINK_KEYS, 'host', 'hostname',
   'filepath', 'filepaths', 'path', 'paths', 'file', 'files', 'filename', 'filenames',
   'toolname', 'tool', 'id', 'uuid', 'sessionid', 'requestid',
   'mimetype', 'mediatype', 'encoding', 'language', 'lang', 'format', 'extension', 'ext',
@@ -126,9 +129,6 @@ interface Scan {
   links: string[]
   opaque: boolean
 }
-
-/** Identifier fields that hold a link rather than a path or an id. */
-const LINK_KEYS: ReadonlySet<string> = new Set(['uri', 'url', 'urls', 'href', 'link', 'links'])
 
 /** Protocol literals and machine metadata do not give a source a new instruction. */
 const STRUCTURAL_VALUES: ReadonlySet<string> = new Set([

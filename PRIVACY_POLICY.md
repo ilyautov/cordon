@@ -2,17 +2,11 @@
 
 Cordon stands between untrusted text and your agent's actions. To do that it has to remember what it read. This page says exactly what it remembers, where it lies, how long it stays and who else can see it. Every claim here is checkable by reading the source, and the paths are given so you can check.
 
-## Nothing leaves the machine
+## Network traffic
 
-Cordon makes no network calls. Not for telemetry, not for update checks, not for crash reports, not for analytics. There is no account, no key, no identifier of you or your installation anywhere in it.
+Policy checks, content scanning and provenance tracking run locally. Cordon has no telemetry, crash reporting or account.
 
-This is not a promise, it is a property you can verify in about ten seconds:
-
-```bash
-grep -rn "node:http\|node:https\|node:net\|node:dgram\|fetch(" src
-```
-
-The command prints nothing. The two runtime dependencies are `htmlparser2` (an HTML parser) and `yaml` (a config parser); neither opens a socket, and `yaml` has no dependencies of its own at all.
+With `cordon mcp --url URL`, the gateway sends MCP traffic to the configured endpoint. This includes client information, discovery and lifecycle messages, allowed tool names and arguments, and any session ID the endpoint assigns. The endpoint operator sees the connection and determines how long it retains the requests. The gateway returns observed results to the local host. [HTTP configuration and supported transports](docs/install-mcp.md#remote-streamable-http-endpoints)
 
 ## What is written to disk
 
@@ -23,6 +17,7 @@ Everything lives under `~/.cordon`, or under `$CORDON_HOME` if you set it. Nothi
 | `policy.yaml` | Your configuration. Cordon reads it and never writes it, except `cordon doctor --self-check`, which writes a throwaway policy into a temporary directory of its own. | Until you delete it |
 | `sessions/<id>.json` | The turn counter, the provenance store, the "the hidden layer could not be stripped" mark, and the scope narrowing you asked for with a `cordon: scope` directive. | Removed after 24 hours without use |
 | `drafts/<id>.json` | The text of the answer the model is currently composing, accumulated from display deltas, up to 200 000 characters. | Removed after 1 hour without use |
+| `mcp-pins/` | Server identity (command or canonical endpoint URL), pinned tool declarations and pending changes. | Until reset or superseded |
 | `last-sweep` | An empty file. Only its modification time matters: it keeps the cleanup from running on every event. | Permanent, zero bytes |
 | the journal, at the path in `notify.file` | One JSON line per decision. | Until you delete it. Cordon never rotates or trims it |
 
@@ -51,7 +46,7 @@ A session file is named from the session identifier the harness gives Cordon, st
 
 ## What Cordon reads
 
-Only what the harness hands it on standard input: the hook event, that is, the tool name, the arguments, the tool result, your prompt, the fragment of the answer being displayed. Cordon opens no files of yours on its own initiative. The one exception is `cordon scan <file>`, where you name the file yourself.
+Hooks read the event from the harness, including tool names, arguments, results, prompts and answer fragments. The MCP gateway also reads declarations and responses from the configured upstream server. Cordon opens no files of yours on its own initiative. The one exception is `cordon scan <file>`, where you name the file yourself.
 
 ## Deleting everything
 
@@ -59,7 +54,7 @@ Only what the harness hands it on standard input: the hook event, that is, the t
 rm -rf ~/.cordon
 ```
 
-There is nowhere else to look. If you set a journal path outside `~/.cordon`, delete that file too. Nothing else remains anywhere, because nothing else was ever sent anywhere.
+If you set a journal path outside `~/.cordon`, delete that file too. An HTTP endpoint may retain requests it received according to its own policy.
 
 ## What this page does not cover
 
