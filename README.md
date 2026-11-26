@@ -14,7 +14,7 @@ Web pages, emails, issues, documents, tool results and MCP tool descriptions can
 
 **Model-origin limit:** A modified model can request a harmful call before reading any outside content. Cordon can refuse that call under a restrictive policy, but it cannot verify model weights or contain what an allowed shell command does next. The [measured boundary](docs/model-origin-benchmark.md) and [restricted coding runbook](docs/restricted-coding.md) keep the gate and operating-system isolation separate.
 
-**Measured:** 2289 tests · 26 pinned attack vectors · 10 legitimate documents · 2 runtime dependencies.
+**Measured:** 2312 tests · 26 pinned attack vectors · 10 legitimate documents · 2 runtime dependencies.
 
 [Measured host versions and installation checks](docs/compatibility.md)
 
@@ -81,7 +81,7 @@ gemini extensions install https://github.com/ilyautov/cordon
 
 **Memory across sessions.** A page read on Monday leaves a note in `CLAUDE.md`, and on Thursday a clean session obeys it. When a session that read untrusted content writes into memory, Cordon records the write: a path, a source and a time, never the content. Every later session then starts under the exposure mark until the user writes `cordon: trust memory`.
 
-**Credentials going out.** A GitHub, OpenAI, AWS or similar credential in a call that is more than a local write escalates. The reason names the kind, never the value.
+**Credentials going out.** Set `credentials.outbound` to `deny` to block a tool call carrying a recognized key, even one the user pasted. This includes remote search queries and custom write tools. Recognized native file writes keep their ordinary policy checks. The default is `review`. [Configuration and limits](docs/install.md#a-credential-leaving-the-machine).
 
 **The source-influence footer.** A few lines under the answer when it matches an untrusted page verbatim:
 

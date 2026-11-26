@@ -19,6 +19,7 @@ import { makeDirectory } from './core/mkdir.js'
 import { loadPolicy, loadPolicyFile, parsePolicy } from './policy/load.js'
 import { SOURCE_TOOLS, explain, lint } from './policy/explain.js'
 import type { Policy } from './policy/defaults.js'
+import { outboundCredentialMode, type OutboundCredentialMode } from './policy/credentials.js'
 import { policyHash } from './policy/hash.js'
 import { labelled, type NotifyEvent } from './notify/notifier.js'
 import { RULES, type Rule } from './gate/rules.js'
@@ -212,6 +213,7 @@ export interface DoctorReport {
    * nothing escalates.
    */
   exposure: boolean
+  credentialsOutbound: OutboundCredentialMode | 'unknown'
   /**
    * Whether the MCP gateway pins servers' tools, and how many servers are
    * pinned. Named for the same reason as exposure: off is silent otherwise.
@@ -437,6 +439,7 @@ export function doctor(home: string = cordonHome()): DoctorReport {
       warnings,
       footer: false,
       exposure: false,
+      credentialsOutbound: 'unknown',
       mcpPin: { on: false, servers: 0 },
       mcpView: MCP_VIEW,
       declaredViews: [],
@@ -523,6 +526,7 @@ export function doctor(home: string = cordonHome()): DoctorReport {
     warnings,
     footer: policy.output.footer,
     exposure: policy.exposure,
+    credentialsOutbound: outboundCredentialMode(policy),
     mcpPin: { on: policy.mcp.pin, servers: pinnedServers(home) },
     mcpView: MCP_VIEW,
     declaredViews: declaredViews(policy.toolsReturn),
@@ -565,6 +569,7 @@ function printDoctorText(home: string, report: DoctorReport): void {
   process.stdout.write(`home directory: ${home}\n`)
   process.stdout.write(`policy: ${report.policySource}\n`)
   process.stdout.write(`presence mode: ${report.mode}\n`)
+  process.stdout.write(`outbound credentials: ${report.credentialsOutbound}\n`)
   process.stdout.write(`effect classes: ${report.effects.join(', ') || 'none at all'}\n`)
   process.stdout.write(
     `source-influence footer: ${report.footer ? 'on' : 'off in the policy'}\n`,

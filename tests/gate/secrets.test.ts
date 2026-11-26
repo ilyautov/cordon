@@ -95,3 +95,40 @@ describe('gate: a credential leaving the machine', () => {
     expect(decision.kind).toBe('allow')
   })
 })
+
+describe('strict outgoing credentials', () => {
+  const policy = { credentials: { outbound: 'deny' }, mode: 'interactive' } as const
+
+  it('refuses a user-pasted key before scope, exposure or resource review can grant the call', () => {
+    const ctx = { ...setup(policy), userAtoms: [GITHUB.toLowerCase()] }
+    for (const extra of [{}, { unredacted: true }]) {
+      for (const tool of ['http_post', 'search_docs', 'undeclared']) {
+        const decision = gate({ tool, args: { data: [{ [GITHUB]: 'value' }] } }, { ...ctx, ...extra })
+        expect(decision).toMatchObject({ kind: 'deny', rule: 'credential' })
+        expect(JSON.stringify(decision)).not.toContain(GITHUB)
+      }
+    }
+  })
+
+  it('checks private paths before their values can be quoted in a refusal', () => {
+    const decision = gate({ tool: 'http_post', args: { path: '/home/u/.cordon/' + GITHUB } }, setup(policy))
+    expect(decision).toMatchObject({ kind: 'deny', rule: 'credential' })
+    expect(JSON.stringify(decision)).not.toContain(GITHUB)
+  })
+
+  it('keeps a native file write subject to normal policy and treats an external namesake as outbound', () => {
+    const ctx = setup({ ...policy, tools: { Write: ['create'] } })
+    const call = { tool: 'Write', args: { file_path: 'local.env', content: GITHUB } }
+    expect(gate(call, { ...ctx, nativeHost: 'claude-code' })).toEqual({ kind: 'allow' })
+    expect(gate(call, ctx)).toMatchObject({ kind: 'deny', rule: 'credential' })
+  })
+
+  it('checks raw SDK policies and keeps the default review behavior for older callers', () => {
+    const call = { tool: 'search_docs', args: { query: AWS } }
+    const ctx = setup({ mode: 'interactive' })
+    delete ctx.policy.credentials
+    expect(gate(call, ctx).kind).toBe('ask')
+    ctx.policy.credentials = { outbound: 'typo' } as unknown as NonNullable<Policy['credentials']>
+    expect(gate(call, ctx)).toMatchObject({ kind: 'deny', rule: 'failure' })
+  })
+})

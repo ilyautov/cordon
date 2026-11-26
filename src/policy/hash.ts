@@ -9,5 +9,9 @@ import type { Policy } from './defaults.js'
  * versions is a different one.
  */
 export function policyHash(policy: Policy): string {
-  return createHash('sha256').update(canonical(policy), 'utf8').digest('hex')
+  // Review predates this setting. Preserve the fingerprints recorded by those installations.
+  const effective = canonical(policy.credentials) === '{"outbound":"review"}'
+    ? { ...policy, credentials: undefined }
+    : policy
+  return createHash('sha256').update(canonical(effective), 'utf8').digest('hex')
 }

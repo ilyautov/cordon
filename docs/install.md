@@ -281,7 +281,20 @@ The `wb_update_price` tool is declared even though it is not meant to be used. T
 
 ### A credential leaving the machine
 
-A call that carries a credential escalates, read or no read, unless all it does is write locally (`create`, `update`, `delete`): a refusal in autonomous mode, a question in interactive mode. A tool declared as a `read` counts, since an MCP search tool sends its query to the server. Property names are checked along with values. A credential is recognized by shape: GitHub, Anthropic, OpenAI, AWS, Slack, Google, GitLab and Stripe credentials, and private keys, by the header together with the first line of the key, so a grep for the header is not one. The reason names the kind and never the value, so the key goes neither into the journal nor back to the model. Writing it to a local file is not this rule. A credential you paste into your own message is exempt, since you named it; that key and no other. The key AWS prints in its documentation, ending in `EXAMPLE`, is not a credential. This covers the careless case, an agent putting a token into a curl command on its own; the injected case is the exposure rule's.
+`credentials.outbound` controls how the gate handles a literal credential in tool arguments. It checks property names and string values, including nested ones. It recognizes GitHub, Anthropic, OpenAI, AWS, Slack, Google, GitLab and Stripe credentials by shape, and private keys by their header and first body line. AWS documentation keys ending in `EXAMPLE` pass this check.
+
+The default, `review`, asks in interactive mode and refuses in autonomous mode. It exempts credentials the user supplied and calls classified solely as `create`, `update` or `delete`. A remote search classified as `read` is checked because the server receives the query.
+
+To forbid sending a recognized credential even when the user supplied it, add this section to the owner's policy:
+
+```yaml
+credentials:
+  outbound: deny
+```
+
+In `deny` mode, a match refuses the call before it can be approved, in either presence mode. The journal records the credential kind. The gate checks MCP, LangChain and custom tool arguments even for a tool declared only as a write. A recognized native file write, such as Claude Code's `Write` or Codex's `apply_patch`, keeps its usual checks when its effects are limited to local writes. Only the native hook supplies its host identity. SDK integrations should omit the optional native host argument for application tools.
+
+Run `cordon doctor` to see the effective setting. The check covers the arguments supplied to the gate. Model-provider requests, ordinary chat answers, transport metadata and file contents read inside a tool are outside that boundary.
 
 What the shape check does not see: a credential passed by reference (`$GITHUB_TOKEN` in a command), a credential written to a file and sent in a later call, and credentials without a fixed prefix, such as JWTs and passwords inside connection strings. After an untrusted read, the exposure rule escalates both calls in the first two cases. Without one, only the literal is caught.
 

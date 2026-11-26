@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest'
 import { loadPolicy, parsePolicy } from '../../src/policy/load.js'
 import { DEFAULT_POLICY } from '../../src/policy/defaults.js'
 import { renderPolicy } from '../../src/policy/templates.js'
+import { policyHash } from '../../src/policy/hash.js'
 
 function scratch(): string {
   return mkdtempSync(join(tmpdir(), 'cordon-policy-'))
@@ -82,6 +83,31 @@ describe('allowed tools', () => {
       .toEqual(['Read', 'mcp__sandbox__run', 'run'])
     expect(() => parsePolicy('allowedTools: run\n', 'policy.yaml')).toThrow(/allowedTools/u)
     expect(() => parsePolicy('allowedTools: [""]\n', 'policy.yaml')).toThrow(/allowedTools/u)
+  })
+})
+
+describe('outbound credential policy', () => {
+  it('uses review when the policy predates the setting', () => {
+    expect(loadPolicy(scratch()).credentials).toEqual({ outbound: 'review' })
+    expect(parsePolicy('mode: interactive', 'policy.yaml').credentials).toEqual({ outbound: 'review' })
+  })
+
+  it.each(['review', 'deny'])('loads an explicit %s policy', (mode) => {
+    const policy = parsePolicy(`credentials: { outbound: ${mode} }`, 'policy.yaml')
+    expect(policy.credentials).toEqual({ outbound: mode })
+  })
+
+  it.each(['null', '[]', 'deny', '{}', '{ outbound: null }', '{ outbound: allow }',
+    '{ outbond: deny }', '{ outbound: deny, extra: true }'])('rejects a malformed declaration %s', (declaration) => {
+    expect(() => parsePolicy(`credentials: ${declaration}`, 'policy.yaml')).toThrow(/policy\.yaml: credentials/u)
+  })
+
+  it('keeps the existing policy fingerprint in review mode and changes it in deny mode', () => {
+    const { credentials: _credentials, ...legacy } = structuredClone(DEFAULT_POLICY)
+    const review = parsePolicy('credentials: { outbound: review }', 'policy.yaml')
+    const deny = parsePolicy('credentials: { outbound: deny }', 'policy.yaml')
+    expect(policyHash(review)).toBe(policyHash(legacy))
+    expect(policyHash(deny)).not.toBe(policyHash(legacy))
   })
 })
 

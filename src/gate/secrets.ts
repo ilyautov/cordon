@@ -35,6 +35,14 @@ const SHAPES: ReadonlyArray<{ kind: string; pattern: RegExp }> = [
  */
 const DOCUMENTED = /^AKIA[0-9A-Z]{9}EXAMPLE$/u
 
+// Tool names are identifiers. An underscore or letter beside the key removes
+// its word boundary, so use the same shapes without boundaries for log labels.
+const LABEL_SHAPES = SHAPES.map(({ pattern }) => new RegExp(pattern.source.replaceAll('\\b', ''), 'iu'))
+
+export function credentialJournalTool(tool: string): string {
+  return LABEL_SHAPES.some((shape) => shape.test(tool)) ? '[redacted tool name]' : tool
+}
+
 function* found(text: string): Generator<{ kind: string; value: string }> {
   for (const { kind, pattern } of SHAPES) {
     const global = new RegExp(pattern.source, 'gu')

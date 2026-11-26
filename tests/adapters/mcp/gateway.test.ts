@@ -1400,6 +1400,51 @@ describe('the MCP gateway', () => {
     expect(await gateway.stop()).toBe(0)
   })
 
+  it.each([
+    { tool: 'send_mail', field: 'body', control: 'The release notes are ready.' },
+    { tool: 'search_docs', field: 'query', control: 'release notes' },
+  ])('refuses a credential before $tool reaches the upstream under strict policy', async ({ tool, field, control }) => {
+    const home = mkdtempSync(join(tmpdir(), 'cordon-mcp-credential-'))
+    const journal = join(home, 'events.jsonl')
+    const env = withCallLog()
+    const policy = basePolicy()
+    policy.mode = 'interactive'
+    policy.credentials = { outbound: 'deny' }
+    policy.profile.effects.push('network-egress')
+    policy.tools.send_mail = ['network-egress']
+    policy.tools.search_docs = ['read']
+    policy.notify.file = journal
+    const sentinel = ['ghp', 'A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8'].join('_')
+    policy.task = `Prepare the release note using ${sentinel}`
+    const gateway = start(policy, env, home)
+    try {
+      gateway.send({ jsonrpc: '2.0', id: 1, method: 'tools/call',
+        params: { name: tool, arguments: { [field]: sentinel } } })
+      const refusal = await gateway.next()
+      expect(refusal).toMatchObject({ id: 1, result: { isError: true } })
+      expect(callLog(env)).toEqual([])
+      expect(new ApprovalStore(home).pending()).toHaveLength(0)
+      const wire = JSON.stringify(refusal)
+      expect(wire).not.toContain(sentinel)
+      expect(wire).not.toContain('cordon approve')
+
+      const events = readFileSync(journal, 'utf8')
+      expect(events).not.toContain(sentinel)
+      expect(events.trim().split('\n').map((line) => JSON.parse(line))).toContainEqual(
+        expect.objectContaining({ tool, rule: 'credential', decision: 'deny' }),
+      )
+
+      gateway.send({ jsonrpc: '2.0', id: 2, method: 'tools/call',
+        params: { name: tool, arguments: { [field]: control } } })
+      expect(await gateway.next()).toMatchObject({ id: 2, result: {
+        content: [{ type: 'text', text: expect.stringContaining(control) }],
+      } })
+      expect(callLog(env)).toEqual([tool])
+    } finally {
+      await gateway.stop()
+    }
+  })
+
   it('in interactive mode, a question becomes a one-time approval the owner can give', async () => {
     const policy = basePolicy()
     policy.mode = 'interactive'

@@ -90,7 +90,7 @@ function dispatch(event: HookEvent, given: AdapterEnv, dialect: Dialect): HookOu
   // A harness that puts no question to anyone gets the unattended gate: the
   // question becomes a refusal naming a one-time approval. Printed as `ask`
   // there, it would run the call unasked — measured on Codex.
-  const decision = dialect.asks ? cordon.gate(event.call) : cordon.gateUnattended(event.call)
+  const decision = dialect.asks ? cordon.gate(event.call, dialect.name) : cordon.gateUnattended(event.call, dialect.name)
   // The presence mode comes from the policy: it decides whether quarantine is
   // shown to the human. There is no heuristic here and there cannot be one,
   // this is an explicit setting.

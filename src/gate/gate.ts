@@ -1,10 +1,11 @@
 import { isAbsolute, resolve, sep } from 'node:path'
-import type { ArgumentRole, Certificate, Decision, EffectClass, ExposureMark, Source, ToolCall } from '../core/types.js'
+import type { ArgumentRole, Certificate, Decision, EffectClass, ExposureMark, NativeHost, Source, ToolCall } from '../core/types.js'
 import { fields, type Field } from './fields.js'
 import { secretKinds } from './secrets.js'
 import { memoryTarget } from './memory.js'
 import type { Rule } from './rules.js'
 import type { Policy } from '../policy/defaults.js'
+import { outboundCredentialMode } from '../policy/credentials.js'
 import { destinationPattern } from '../policy/destinations.js'
 import { canonicalForms, fold as foldSegment, touchesCordonItself } from '../policy/selfprotect.js'
 import { vouchKey } from '../provenance/bindings.js'
@@ -18,6 +19,7 @@ import { safeLabel } from '../output/footer.js'
 
 export interface GateContext {
   policy: Policy
+  nativeHost?: NativeHost
   /** Calls refused to the agent since the user's last message. */
   refusals?: number
   cert: Certificate
@@ -190,11 +192,19 @@ function decide(call: ToolCall, ctx: GateContext): Decision {
   }
 
   const parts = fields(own)
+  const verdict = classify(call, ctx.policy.tools)
+  const credentialMode = outboundCredentialMode(ctx.policy)
+  const writeEffectsOnly = verdict.effects.every((effect) => LOCAL_WRITES.has(effect))
+
+  // A review under any later rule could authorize the whole call. Check the
+  // strict policy before a rule can offer review or quote an argument in its reason.
+  if (credentialMode === 'deny' && !(verdict.effects.length > 0 && writeEffectsOnly && nativeFileWrite(ctx.nativeHost, call.tool))) {
+    const credential = credentialIn(parts)
+    if (credential) return { kind: 'deny', rule: 'credential', reason: credential }
+  }
 
   const selfHit = selfProtection(parts, ctx)
   if (selfHit) return selfHit
-
-  const verdict = classify(call, ctx.policy.tools)
 
   // The hidden layer was not fully stripped, which means the model read
   // poisoned text. Reading further is not dangerous; acting on what was read
@@ -243,9 +253,9 @@ function decide(call: ToolCall, ctx: GateContext): Decision {
   // A credential leaving the machine answers before provenance: it needs no
   // page to be dangerous. The reason names the kind and never the value, so
   // the key does not travel on into the journal or the model's context.
-  const leaving = credentialLeaving(verdict.effects, parts, ctx.userAtoms ?? [])
-  if (leaving) {
-    return escalate(ctx, 'credential', leaving)
+  if (credentialMode === 'review' && !writeEffectsOnly) {
+    const credential = credentialIn(parts, ctx.userAtoms)
+    if (credential) return escalate(ctx, 'credential', `${credential}, and the call hands it to something outside the machine`)
   }
 
   // Before provenance, so that no exit below can carry the call past it: a
@@ -848,17 +858,19 @@ function unnamedResource(
  */
 const LOCAL_WRITES: ReadonlySet<EffectClass> = new Set(['create', 'update', 'delete'])
 
-/**
- * A credential in a call that is more than a local write. A credential the
- * user pasted into their own message is theirs to send, so it is exempt,
- * compared in lower case as userAtoms hold it.
- */
-function credentialLeaving(
-  effects: readonly EffectClass[],
-  parts: readonly Field[],
-  userAtoms: readonly string[],
-): string | null {
-  if (effects.every((effect) => LOCAL_WRITES.has(effect))) return null
+/** Only the hook knows that a file tool belongs to the host. MCP and SDK names prove nothing. */
+function nativeFileWrite(host: NativeHost | undefined, tool: string): boolean {
+  switch (host) {
+    case 'claude-code': return tool === 'Write' || tool === 'Edit' || tool === 'NotebookEdit'
+    case 'kimi': return tool === 'Write' || tool === 'Edit'
+    case 'codex': return tool === 'apply_patch'
+    case 'gemini-cli': return tool === 'write_file' || tool === 'replace'
+    case 'deepseek': return tool === 'write' || tool === 'edit'
+    default: return false
+  }
+}
+
+function credentialIn(parts: readonly Field[], userAtoms?: readonly string[]): string | null {
   const exempt = new Set(userAtoms)
   const kinds: string[] = []
   // Property names too: a JSON body is sent whole, keys included.
@@ -868,7 +880,7 @@ function credentialLeaving(
     }
   }
   if (kinds.length === 0) return null
-  return `an argument carries what looks like a credential (${kinds.join(', ')}), and the call hands it to something outside the machine`
+  return `an argument carries what looks like a credential (${kinds.join(', ')})`
 }
 
 /**

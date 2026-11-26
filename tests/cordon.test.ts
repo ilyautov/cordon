@@ -464,6 +464,27 @@ describe('Cordon: the journal names the source behind the decision', () => {
     cordon.gate({ tool: 'wb_update_price', args: { nmId: '1937461028', price: 1 } })
     expect(journal(log).at(-1)?.source).toBeNull()
   })
+
+  it.each([false, true])('keeps a strict credential refusal and its threshold alert private (credential in tool name: %s)', (repeatInTool) => {
+    const token = 'ghp_' + 'a'.repeat(36)
+    const tool = repeatInTool ? `send_${token}` : 'send_mail'
+    const { cordon, log } = make({
+      credentials: { outbound: 'deny' },
+      profile: { effects: ['network-egress'], resources: { paths: [], hosts: [] } },
+      tools: { [tool]: ['network-egress'] },
+      refusals: 1,
+    })
+    cordon.observe('a brief delivery note', { id: 'w1', kind: 'web', label: `https://example.test/?key=${token}`, trust: 'untrusted' })
+    cordon.gate({ tool, args: { body: token } })
+
+    const events = journal(log)
+    expect(events).toHaveLength(2)
+    expect(events[0]).toMatchObject({ decision: 'deny', rule: 'credential', class: 'credential-egress', source: null })
+    expect(events[0].reason).toContain('GitHub token')
+    if (!repeatInTool) expect(events[0].tool).toBe(tool)
+    expect(events[1]).toMatchObject({ decision: 'refusals-hold', source: null })
+    expect(readFileSync(log, 'utf8')).not.toContain(token)
+  })
 })
 
 describe('Cordon: a credential the user pasted', () => {

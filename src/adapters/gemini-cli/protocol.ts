@@ -1,9 +1,15 @@
 import type { Decision, PresenceMode, ToolCall } from '../../core/types.js'
 
+interface ToolOrigin {
+  mcpServer?: string
+  /** An MCP context without a server name cannot establish a native tool. */
+  unknownMcpServer?: true
+}
+
 export type HookEvent =
   | { kind: 'BeforeAgent'; sessionId: string; prompt: string }
-  | { kind: 'BeforeTool'; sessionId: string; call: ToolCall; mcpServer?: string }
-  | {
+  | ({ kind: 'BeforeTool'; sessionId: string; call: ToolCall } & ToolOrigin)
+  | ({
       kind: 'AfterTool'
       sessionId: string
       call: ToolCall
@@ -18,8 +24,7 @@ export type HookEvent =
        * otherwise the adapter's blindness looks like a clean result.
        */
       unreadable: boolean
-      mcpServer?: string
-    }
+    } & ToolOrigin)
   | { kind: 'AfterAgent'; sessionId: string; response: string }
   | { kind: 'ignored'; sessionId: string }
   | { kind: 'unparsable'; sessionId: string; reason: string }
@@ -184,11 +189,11 @@ export function renderDecision(decision: Decision, mode: PresenceMode): HookOutp
  * turn into a field whose value is undefined: the event is compared whole in
  * tests.
  */
-function server(raw: Record<string, unknown>): { mcpServer?: string } {
+function server(raw: Record<string, unknown>): ToolOrigin {
   const context = field(raw, 'mcp_context')
-  if (!isRecord(context)) return {}
-  const name = field(context, 'server_name')
-  return typeof name === 'string' && name !== '' ? { mcpServer: name } : {}
+  if (context === undefined) return {}
+  const name = isRecord(context) ? field(context, 'server_name') : undefined
+  return typeof name === 'string' && name !== '' ? { mcpServer: name } : { unknownMcpServer: true }
 }
 
 interface Content {

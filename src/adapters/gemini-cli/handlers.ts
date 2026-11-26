@@ -102,7 +102,8 @@ function dispatch(event: HookEvent, env: AdapterEnv): HookOutput {
     // The presence mode comes from the policy: it decides whether to ask the
     // human. There is no heuristic here and there cannot be one, this is an
     // explicit setting.
-    return renderDecision(cordon.gate(event.call), env.policy.mode)
+    const nativeHost = event.mcpServer === undefined && !event.unknownMcpServer ? 'gemini-cli' : undefined
+    return renderDecision(cordon.gate(event.call, nativeHost), env.policy.mode)
   }
 
   const warnings = cordon.onUserPrompt(event.prompt)

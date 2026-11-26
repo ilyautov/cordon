@@ -7436,6 +7436,22 @@ function destinationPattern(entry) {
   return entry.trim().normalize("NFKC").toLowerCase();
 }
 
+// src/policy/credentials.ts
+function outboundCredentialMode(policy, path = "policy") {
+  if (!Object.hasOwn(policy, "credentials")) return "review";
+  const section = policy.credentials;
+  if (typeof section !== "object" || section === null || Array.isArray(section)) {
+    throw new Error(`${path}: credentials must be an object with an outbound mode`);
+  }
+  const keys = Reflect.ownKeys(section);
+  if (keys.length !== 1 || keys[0] !== "outbound") {
+    throw new Error(`${path}: credentials must contain only credentials.outbound`);
+  }
+  const mode = section.outbound;
+  if (mode !== "review" && mode !== "deny") throw new Error(`${path}: credentials.outbound must be review or deny`);
+  return mode;
+}
+
 // src/policy/defaults.ts
 var DEFAULT_POLICY = {
   mode: "autonomous",
@@ -7446,6 +7462,7 @@ var DEFAULT_POLICY = {
   tools: {},
   blockedTools: [],
   allowedTools: null,
+  credentials: { outbound: "review" },
   trustedSources: [],
   toolsReturn: {},
   arguments: {},
@@ -7538,6 +7555,9 @@ function validate(parsed, path) {
   }
   if (Object.hasOwn(input, "allowedTools")) {
     policy.allowedTools = asNames(input["allowedTools"], `${path}: allowedTools`);
+  }
+  if (Object.hasOwn(input, "credentials")) {
+    policy.credentials = { outbound: outboundCredentialMode(input, path) };
   }
   if ("trustedSources" in input) {
     policy.trustedSources = asStrings(input.trustedSources, `${path}: trustedSources`);
@@ -7648,7 +7668,8 @@ var TOP_LEVEL = [
   "task",
   "memory",
   "mcp",
-  "output"
+  "output",
+  "credentials"
 ];
 function onlyKnown(object2, known, path, prefix) {
   for (const key of Object.keys(object2)) {
@@ -7824,6 +7845,10 @@ var SHAPES = [
   { kind: "private key", pattern: /-----BEGIN (?:[A-Z]+ )?PRIVATE KEY-----\r?\n[A-Za-z0-9+/=]{40,}/u }
 ];
 var DOCUMENTED = /^AKIA[0-9A-Z]{9}EXAMPLE$/u;
+var LABEL_SHAPES = SHAPES.map(({ pattern }) => new RegExp(pattern.source.replaceAll("\\b", ""), "iu"));
+function credentialJournalTool(tool) {
+  return LABEL_SHAPES.some((shape) => shape.test(tool)) ? "[redacted tool name]" : tool;
+}
 function* found(text) {
   for (const { kind, pattern } of SHAPES) {
     const global = new RegExp(pattern.source, "gu");
@@ -8774,9 +8799,15 @@ function decide(call, ctx) {
     }
   }
   const parts = fields(own2);
+  const verdict = classify(call, ctx.policy.tools);
+  const credentialMode = outboundCredentialMode(ctx.policy);
+  const writeEffectsOnly = verdict.effects.every((effect) => LOCAL_WRITES.has(effect));
+  if (credentialMode === "deny" && !(verdict.effects.length > 0 && writeEffectsOnly && nativeFileWrite(ctx.nativeHost, call.tool))) {
+    const credential = credentialIn(parts);
+    if (credential) return { kind: "deny", rule: "credential", reason: credential };
+  }
   const selfHit = selfProtection(parts, ctx);
   if (selfHit) return selfHit;
-  const verdict = classify(call, ctx.policy.tools);
   if (ctx.unredacted === true || ctx.taint.saturated) {
     const harmless = verdict.classified && verdict.effects.every((effect) => effect === "read" || effect === "summarize");
     if (!harmless) {
@@ -8802,9 +8833,9 @@ function decide(call, ctx) {
   if (config) {
     return escalate(ctx, "agent-config", config, ctx.exposure?.source);
   }
-  const leaving = credentialLeaving(verdict.effects, parts, ctx.userAtoms ?? []);
-  if (leaving) {
-    return escalate(ctx, "credential", leaving);
+  if (credentialMode === "review" && !writeEffectsOnly) {
+    const credential = credentialIn(parts, ctx.userAtoms);
+    if (credential) return escalate(ctx, "credential", `${credential}, and the call hands it to something outside the machine`);
   }
   const bound = boundBy(call.tool, own2, ctx);
   const stray = strayResource(call.tool, parts, ctx, bound);
@@ -9106,8 +9137,23 @@ function unnamedResource(tool, parts, ctx, bound) {
   return null;
 }
 var LOCAL_WRITES = /* @__PURE__ */ new Set(["create", "update", "delete"]);
-function credentialLeaving(effects, parts, userAtoms) {
-  if (effects.every((effect) => LOCAL_WRITES.has(effect))) return null;
+function nativeFileWrite(host, tool) {
+  switch (host) {
+    case "claude-code":
+      return tool === "Write" || tool === "Edit" || tool === "NotebookEdit";
+    case "kimi":
+      return tool === "Write" || tool === "Edit";
+    case "codex":
+      return tool === "apply_patch";
+    case "gemini-cli":
+      return tool === "write_file" || tool === "replace";
+    case "deepseek":
+      return tool === "write" || tool === "edit";
+    default:
+      return false;
+  }
+}
+function credentialIn(parts, userAtoms) {
   const exempt = new Set(userAtoms);
   const kinds = [];
   for (const { key, value } of parts) {
@@ -9116,7 +9162,7 @@ function credentialLeaving(effects, parts, userAtoms) {
     }
   }
   if (kinds.length === 0) return null;
-  return `an argument carries what looks like a credential (${kinds.join(", ")}), and the call hands it to something outside the machine`;
+  return `an argument carries what looks like a credential (${kinds.join(", ")})`;
 }
 var IRREVERSIBLE = /* @__PURE__ */ new Set([
   "network-egress",
@@ -9518,7 +9564,8 @@ function sorted(value) {
 
 // src/policy/hash.ts
 function policyHash(policy) {
-  return createHash2("sha256").update(canonical(policy), "utf8").digest("hex");
+  const effective = canonical(policy.credentials) === '{"outbound":"review"}' ? { ...policy, credentials: void 0 } : policy;
+  return createHash2("sha256").update(canonical(effective), "utf8").digest("hex");
 }
 
 // src/output/egress.ts
@@ -14096,8 +14143,8 @@ var Cordon = class {
   static approveServer(cordonHome2, command) {
     return new PinStore(cordonHome2).forget(command);
   }
-  gate(call) {
-    return this.counted(this.judge(call, true));
+  gate(call, nativeHost) {
+    return this.counted(this.judge(call, true, nativeHost));
   }
   /**
    * Counts a refusal the agent meets. A question is not one: a human answers
@@ -14118,7 +14165,7 @@ var Cordon = class {
         decision: "refusals-hold",
         tool: "",
         reason: `${limit} calls were refused to the agent since your last message; every call that acts now waits for you until you write again`,
-        source: this.lastSource?.label ?? null,
+        source: this.isStrictCredentialDenial(decision) ? null : this.lastSource?.label ?? null,
         ...labelled("refusals")
       });
     }
@@ -14129,8 +14176,9 @@ var Cordon = class {
    * in the harness answers it; asked of nobody, it spends only when an
    * approval is taken (gateUnattended), or every retry would count twice.
    */
-  judge(call, askSpends) {
+  judge(call, askSpends, nativeHost) {
     let decision = gate(call, {
+      nativeHost,
       policy: this.policy,
       refusals: refusalsIn(this.refusalIds, this.turn),
       cert: this.cert,
@@ -14158,18 +14206,22 @@ var Cordon = class {
     this.recordMemory(call, decision);
     if (decision.kind === "allow" || decision.kind === "rewrite") this.persist();
     if (decision.kind === "deny" || decision.kind === "ask" || decision.kind === "rewrite") {
+      const strictCredential = this.isStrictCredentialDenial(decision);
       this.notifier.notify({
         at: (/* @__PURE__ */ new Date()).toISOString(),
         decision: decision.kind,
-        tool: call.tool,
+        tool: strictCredential ? credentialJournalTool(call.tool) : call.tool,
         reason: decision.reason,
         // What the gate knows beats what the core guesses: the source the
         // decision turned on, and only failing that, the last page read.
-        source: decision.source ?? this.lastSource?.label ?? null,
+        source: strictCredential ? null : decision.source ?? this.lastSource?.label ?? null,
         ...labelled(decision.rule)
       });
     }
     return decision;
+  }
+  isStrictCredentialDenial(decision) {
+    return decision.kind === "deny" && decision.rule === "credential" && this.policy.credentials?.outbound === "deny";
   }
   /**
    * The gate, for a transport with nobody to put a question to: the MCP
@@ -14186,17 +14238,17 @@ var Cordon = class {
    * (self-protection, a held tool, anything in autonomous mode) stays one:
    * there the policy is what should change, in the open.
    */
-  gateUnattended(call) {
-    return this.counted(this.unattended(call));
+  gateUnattended(call, nativeHost) {
+    return this.counted(this.unattended(call, nativeHost));
   }
-  unattended(call) {
+  unattended(call, nativeHost) {
     const moved = this.policyMoved();
     if (moved !== null) {
       this.notifier.notify({ at: (/* @__PURE__ */ new Date()).toISOString(), decision: "deny", tool: call.tool, reason: moved, source: null, ...labelled("failure") });
       return { kind: "deny", rule: "failure", reason: moved };
     }
     this.refresh();
-    const decision = this.judge(call, false);
+    const decision = this.judge(call, false, nativeHost);
     if (decision.kind !== "ask") return decision;
     const approvals = new ApprovalStore(this.cordonHome);
     const context = {
@@ -15445,7 +15497,7 @@ function dispatch(event, given, dialect) {
     return {};
   }
   if (event.kind === "PostToolUse") return observe(cordon, event, env, dialect);
-  const decision = dialect.asks ? cordon.gate(event.call) : cordon.gateUnattended(event.call);
+  const decision = dialect.asks ? cordon.gate(event.call, dialect.name) : cordon.gateUnattended(event.call, dialect.name);
   return renderDecision(decision, env.policy.mode);
 }
 function display(event, env) {
@@ -15716,9 +15768,9 @@ function renderDecision2(decision, mode) {
 }
 function server(raw) {
   const context = field2(raw, "mcp_context");
-  if (!isRecord2(context)) return {};
-  const name = field2(context, "server_name");
-  return typeof name === "string" && name !== "" ? { mcpServer: name } : {};
+  if (context === void 0) return {};
+  const name = isRecord2(context) ? field2(context, "server_name") : void 0;
+  return typeof name === "string" && name !== "" ? { mcpServer: name } : { unknownMcpServer: true };
 }
 function readContent(response) {
   if (response === void 0 || response === null) return { text: "", unreadable: false };
@@ -15788,7 +15840,8 @@ function dispatch2(event, env) {
   });
   if (event.kind === "AfterTool") return observe2(cordon, event, env);
   if (event.kind === "BeforeTool") {
-    return renderDecision2(cordon.gate(event.call), env.policy.mode);
+    const nativeHost = event.mcpServer === void 0 && !event.unknownMcpServer ? "gemini-cli" : void 0;
+    return renderDecision2(cordon.gate(event.call, nativeHost), env.policy.mode);
   }
   const warnings = cordon.onUserPrompt(event.prompt);
   sweep(env.cordonHome, event.sessionId);
@@ -17554,6 +17607,7 @@ function explain(policy) {
   const withheld = ALL_EFFECTS.filter((effect) => !granted.includes(effect));
   lines.push(`The agent may: ${granted.join(", ") || "nothing"}.`);
   if (withheld.length > 0) lines.push(`It may not: ${withheld.join(", ")}.`);
+  lines.push(outboundCredentialMode(policy) === "deny" ? "Outbound credentials: deny. A recognized credential, including a user-supplied one, blocks the tool call without approval. Remote searches and custom writes are checked. Recognized native file writes with only write effects are exempt." : "Outbound credentials: review. A recognized credential in a call with effects beyond create, update or delete triggers review in interactive mode or refusal in autonomous mode. User-supplied credentials are exempt from this check.");
   const { paths, hosts } = policy.profile.resources;
   lines.push(paths.length === 0 ? "Files: anywhere the effects above reach; no path bound is set." : `Files: only under ${paths.join(", ")}.`);
   lines.push(hosts.length === 0 ? "Hosts: any; no host bound is set." : `Hosts: only ${hosts.join(", ")}.`);
@@ -18132,6 +18186,7 @@ function doctor(home = cordonHome()) {
       warnings,
       footer: false,
       exposure: false,
+      credentialsOutbound: "unknown",
       mcpPin: { on: false, servers: 0 },
       mcpView: MCP_VIEW,
       declaredViews: [],
@@ -18193,6 +18248,7 @@ function doctor(home = cordonHome()) {
     warnings,
     footer: policy.output.footer,
     exposure: policy.exposure,
+    credentialsOutbound: outboundCredentialMode(policy),
     mcpPin: { on: policy.mcp.pin, servers: pinnedServers(home) },
     mcpView: MCP_VIEW,
     declaredViews: declaredViews(policy.toolsReturn),
@@ -18231,6 +18287,8 @@ function printDoctorText(home, report2) {
   process.stdout.write(`policy: ${report2.policySource}
 `);
   process.stdout.write(`presence mode: ${report2.mode}
+`);
+  process.stdout.write(`outbound credentials: ${report2.credentialsOutbound}
 `);
   process.stdout.write(`effect classes: ${report2.effects.join(", ") || "none at all"}
 `);

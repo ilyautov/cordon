@@ -3,6 +3,7 @@ import { homedir } from 'node:os'
 import { isAbsolute, join } from 'node:path'
 import { parse } from 'yaml'
 import { destinationPattern } from './destinations.js'
+import { outboundCredentialMode } from './credentials.js'
 import type { ArgumentRole, EffectClass, PresenceMode, SourceView } from '../core/types.js'
 import { DEFAULT_POLICY, type Budget, type Lookup, type Policy } from './defaults.js'
 
@@ -108,6 +109,10 @@ function validate(parsed: unknown, path: string): Policy {
 
   if (Object.hasOwn(input, 'allowedTools')) {
     policy.allowedTools = asNames(input['allowedTools'], `${path}: allowedTools`)
+  }
+
+  if (Object.hasOwn(input, 'credentials')) {
+    policy.credentials = { outbound: outboundCredentialMode(input, path) }
   }
 
   if ('trustedSources' in input) {
@@ -261,7 +266,7 @@ function journalPath(value: unknown, path: string): string | null {
 
 const TOP_LEVEL = [
   'mode', 'profile', 'tools', 'blockedTools', 'allowedTools', 'trustedSources', 'toolsReturn', 'arguments', 'destinations', 'lookups', 'budgets',
-  'refusals', 'notify', 'exposure', 'task', 'memory', 'mcp', 'output',
+  'refusals', 'notify', 'exposure', 'task', 'memory', 'mcp', 'output', 'credentials',
 ]
 
 /**

@@ -1,9 +1,9 @@
 import { createHash } from 'node:crypto'
-import { humanSeesRendered, type Certificate, type ExposureMark, type Decision, type EffectClass, type Source, type ToolCall } from './core/types.js'
+import { humanSeesRendered, type Certificate, type ExposureMark, type Decision, type EffectClass, type NativeHost, type Source, type ToolCall } from './core/types.js'
 import { gate as decide } from './gate/gate.js'
 import { memoryTarget } from './gate/memory.js'
 import { fingerprint, uniqueToolNames, type HeldTool, type ListedTool } from './gate/pins.js'
-import { pastedSecrets } from './gate/secrets.js'
+import { credentialJournalTool, pastedSecrets } from './gate/secrets.js'
 import { FileNotifier, SILENT, labelled, stamped, type Notifier } from './notify/notifier.js'
 import { policyHash } from './policy/hash.js'
 import { loadPolicyFile } from './policy/load.js'
@@ -427,8 +427,8 @@ export class Cordon {
     return new PinStore(cordonHome).forget(command)
   }
 
-  gate(call: ToolCall): Decision {
-    return this.counted(this.judge(call, true))
+  gate(call: ToolCall, nativeHost?: NativeHost): Decision {
+    return this.counted(this.judge(call, true, nativeHost))
   }
 
   /**
@@ -460,7 +460,7 @@ export class Cordon {
         decision: 'refusals-hold',
         tool: '',
         reason: `${limit} calls were refused to the agent since your last message; every call that acts now waits for you until you write again`,
-        source: this.lastSource?.label ?? null,
+        source: this.isStrictCredentialDenial(decision) ? null : this.lastSource?.label ?? null,
         ...labelled('refusals'),
       })
     }
@@ -472,8 +472,9 @@ export class Cordon {
    * in the harness answers it; asked of nobody, it spends only when an
    * approval is taken (gateUnattended), or every retry would count twice.
    */
-  private judge(call: ToolCall, askSpends: boolean): Decision {
+  private judge(call: ToolCall, askSpends: boolean, nativeHost?: NativeHost): Decision {
     let decision = decide(call, {
+      nativeHost,
       policy: this.policy,
       refusals: refusalsIn(this.refusalIds, this.turn),
       cert: this.cert,
@@ -520,19 +521,26 @@ export class Cordon {
     if (decision.kind === 'allow' || decision.kind === 'rewrite') this.persist()
 
     if (decision.kind === 'deny' || decision.kind === 'ask' || decision.kind === 'rewrite') {
+      const strictCredential = this.isStrictCredentialDenial(decision)
       this.notifier.notify({
         at: new Date().toISOString(),
         decision: decision.kind,
-        tool: call.tool,
+        tool: strictCredential ? credentialJournalTool(call.tool) : call.tool,
         reason: decision.reason,
         // What the gate knows beats what the core guesses: the source the
         // decision turned on, and only failing that, the last page read.
-        source: decision.source ?? this.lastSource?.label ?? null,
+        source: strictCredential ? null : decision.source ?? this.lastSource?.label ?? null,
         ...labelled(decision.rule),
       })
     }
 
     return decision
+  }
+
+  private isStrictCredentialDenial(decision: Decision): boolean {
+    // This rule needs no earlier read. Echoing the last URL could publish the
+    // very credential whose transfer the owner forbade.
+    return decision.kind === 'deny' && decision.rule === 'credential' && this.policy.credentials?.outbound === 'deny'
   }
 
   /**
@@ -550,18 +558,18 @@ export class Cordon {
    * (self-protection, a held tool, anything in autonomous mode) stays one:
    * there the policy is what should change, in the open.
    */
-  gateUnattended(call: ToolCall): Decision {
-    return this.counted(this.unattended(call))
+  gateUnattended(call: ToolCall, nativeHost?: NativeHost): Decision {
+    return this.counted(this.unattended(call, nativeHost))
   }
 
-  private unattended(call: ToolCall): Decision {
+  private unattended(call: ToolCall, nativeHost?: NativeHost): Decision {
     const moved = this.policyMoved()
     if (moved !== null) {
       this.notifier.notify({ at: new Date().toISOString(), decision: 'deny', tool: call.tool, reason: moved, source: null, ...labelled('failure') })
       return { kind: 'deny', rule: 'failure', reason: moved }
     }
     this.refresh()
-    const decision = this.judge(call, false)
+    const decision = this.judge(call, false, nativeHost)
     if (decision.kind !== 'ask') return decision
 
     const approvals = new ApprovalStore(this.cordonHome)
