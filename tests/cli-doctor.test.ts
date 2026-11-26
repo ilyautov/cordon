@@ -24,6 +24,13 @@ describe('cordon doctor', () => {
     expect(report.policySource).toBe('default')
     expect(report.mode).toBe('autonomous')
     expect(report.effects).toEqual(['read', 'summarize'])
+    expect(report.credentialsOutbound).toBe('review')
+  })
+
+  it('reports deny when recognized outbound credentials are always refused', () => {
+    const dir = home()
+    writeFileSync(join(dir, 'policy.yaml'), 'credentials: { outbound: deny }\n')
+    expect(doctor(dir).credentialsOutbound).toBe('deny')
   })
 
   it("sees the user's policy", () => {
@@ -101,6 +108,7 @@ describe('cordon doctor: a broken installation', () => {
     const report = doctor(dir)
     expect(report.selfCheck).toBe('broken')
     expect(report.warnings.join(' ')).toContain('policy.yaml')
+    expect(report.credentialsOutbound).toBe('unknown')
   })
 
   it('a policy with an unknown effect class is a breakage, not silence', () => {

@@ -24,6 +24,12 @@ describe('explain', () => {
     expect(text(policy({ mode: 'autonomous' }))).toMatch(/refuses/)
   })
 
+  it('names the outbound credential mode and the treatment of user-supplied credentials', () => {
+    const { credentials: _credentials, ...legacy } = policy()
+    expect(text(legacy)).toMatch(/Outbound credentials: review.*user.supplied/i)
+    expect(text(policy({ credentials: { outbound: 'deny' } }))).toMatch(/Outbound credentials: deny.*user.supplied/i)
+  })
+
   it('lists what the agent may and may not do', () => {
     const out = text(policy({ profile: { effects: ['read', 'network-egress'], resources: { paths: [], hosts: [] } } }))
     expect(out).toMatch(/may: read, network-egress/)

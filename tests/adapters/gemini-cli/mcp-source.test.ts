@@ -106,6 +106,35 @@ describe('the view of an MCP tool result on Gemini CLI', () => {
   })
 })
 
+describe('strict credential handling on Gemini CLI', () => {
+  it('permits a native file write and refuses the same payload to an MCP namesake', () => {
+    const shared = env()
+    shared.policy.mode = 'interactive'
+    shared.policy.credentials = { outbound: 'deny' }
+    shared.policy.profile.effects = ['create', 'update']
+    shared.policy.tools.write_file = ['create', 'update']
+    const sentinel = ['ghp', 'A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8'].join('_')
+    const native = {
+      session_id: 'strict-write', hook_event_name: 'BeforeTool', tool_name: 'write_file',
+      tool_input: { file_path: '/workspace/settings.env', content: sentinel },
+    }
+    const remote = { ...native, mcp_context: { server_name: 'external-files', tool_name: 'write_file' } }
+
+    expect(handle(parseEvent(JSON.stringify(native)), shared)).toEqual({})
+    const denied = handle(parseEvent(JSON.stringify(remote)), shared)
+    expect(denied.decision).toBe('deny')
+    expect(denied.reason).toContain('GitHub token')
+    expect(denied.reason).not.toContain(sentinel)
+    expect(journalOf(shared.journal)).toContainEqual(expect.objectContaining({ tool: 'write_file', rule: 'credential' }))
+
+    for (const context of [null, {}, { server_name: '' }]) {
+      const ambiguous = handle(parseEvent(JSON.stringify({ ...native, mcp_context: context })), shared)
+      expect(ambiguous.decision).toBe('deny')
+      expect(ambiguous.reason).toContain('GitHub token')
+    }
+  })
+})
+
 describe('lookups on Gemini CLI', () => {
   it('a lookup is known by its server: a same-named tool on another server binds nothing', () => {
     // Codex review: Gemini names an MCP tool bare, so the `contacts` of any

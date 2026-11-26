@@ -1,5 +1,6 @@
 import type { EffectClass } from '../core/types.js'
 import type { Policy } from './defaults.js'
+import { outboundCredentialMode } from './credentials.js'
 import { destinationPattern } from './destinations.js'
 import { builtinEffects } from '../scope/effects.js'
 
@@ -71,6 +72,10 @@ export function explain(policy: Policy): string[] {
   const withheld = ALL_EFFECTS.filter((effect) => !granted.includes(effect))
   lines.push(`The agent may: ${granted.join(', ') || 'nothing'}.`)
   if (withheld.length > 0) lines.push(`It may not: ${withheld.join(', ')}.`)
+
+  lines.push(outboundCredentialMode(policy) === 'deny'
+    ? 'Outbound credentials: deny. A recognized credential, including a user-supplied one, blocks the tool call without approval. Remote searches and custom writes are checked. Recognized native file writes with only write effects are exempt.'
+    : 'Outbound credentials: review. A recognized credential in a call with effects beyond create, update or delete triggers review in interactive mode or refusal in autonomous mode. User-supplied credentials are exempt from this check.')
 
   const { paths, hosts } = policy.profile.resources
   lines.push(paths.length === 0 ? 'Files: anywhere the effects above reach; no path bound is set.' : `Files: only under ${paths.join(', ')}.`)

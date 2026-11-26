@@ -1,4 +1,5 @@
 import type { ArgumentRole, EffectClass, PresenceMode, ResourceBounds, SourceView } from '../core/types.js'
+import type { OutboundCredentialMode } from './credentials.js'
 
 /** One lookup tool: how it is asked, and what its records bind. */
 export interface Lookup {
@@ -40,6 +41,8 @@ export interface Policy {
    * name restriction. An empty list refuses every call.
    */
   allowedTools?: string[] | null
+  /** Older SDK policies omit this section and retain review mode. */
+  credentials?: { outbound: OutboundCredentialMode }
   /** Sources declared trusted by an explicit decision of the user. */
   trustedSources: string[]
   /**
@@ -197,6 +200,7 @@ export const DEFAULT_POLICY: Policy = {
   tools: {},
   blockedTools: [],
   allowedTools: null,
+  credentials: { outbound: 'review' },
   trustedSources: [],
   toolsReturn: {},
   arguments: {},

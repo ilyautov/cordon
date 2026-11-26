@@ -26,6 +26,9 @@ export type ArgumentRole = 'destination' | 'resource' | 'content' | 'controlled'
 /** Presence mode. An explicit setting from the policy, never a heuristic. */
 export type PresenceMode = 'interactive' | 'autonomous'
 
+/** Identity supplied by a native hook, separate from the model's tool arguments. */
+export type NativeHost = 'claude-code' | 'codex' | 'kimi' | 'deepseek' | 'gemini-cli'
+
 export interface ToolCall {
   /** The tool name in the harness's terms. */
   tool: string
